@@ -1,0 +1,32 @@
+﻿
+05-03 11:54:43.909   363 15660 I perfmonitord:ProcessRssMonitor: ebview.chromium      15547 : 51952      6108       
+58060     
+05-03 12:39:30.031   528   551 I ActivityManager: Killing 18309:com.amazon.webview.chromium:webview_service/u0a195 
+(adj 903): empty #6
+05-03 12:39:30.031   528   551 I ActivityManager: Killing 
+18242:com.amazon.webview.chromium:AWVArcusServiceProcess/u0a195 (adj 903): empty #7
+05-03 12:39:30.032   528   551 I ActivityManager: Killing 18247:com.amazon.webview.chromium/u0a195 (adj 903): empty #8
+05-03 12:55:59.046   528   545 I ActivityManager: Killing 
+18802:com.amazon.webview.chromium:sandboxed_process0/u0a213i3 (adj 0): isolated not needed
+05-03 12:56:01.067   528   547 I ActivityManager: Start proc 20865:com.amazon.cloud9/u0a79 for broadcast 
+com.amazon.cloud9/org.chromium.chrome.browser.browserservices.InstalledWebappBroadcastReceiver
+05-03 12:56:55.820   528   547 I ActivityManager: Start proc 21153:com.amazon.webview.chromium:webview_service/u0a195 
+for service com.amazon.webview.chromium/org.chromium.android_webview.services.VariationsSeedServer
+05-03 12:56:55.841   528   547 I ActivityManager: Start proc 
+21164:com.amazon.webview.chromium:AWVArcusServiceProcess/u0a195 for service 
+com.amazon.webview.chromium/com.amazon.webview.awvdeploymentservice.service.AWVArcusService
+05-03 12:56:55.860   528   547 I ActivityManager: Start proc 21177:com.amazon.webview.chromium/u0a195 for content 
+provider com.amazon.webview.chromium/com.amazon.webview.awvdeploymentservice.service.AWVArcusContentProvider
+05-03 12:56:56.156   528   547 I ActivityManager: Start proc 21202:com.amazon.webview.chromium:sandboxed_process0/u0i4 
+for webview_service com.xandeflix.app/org.chromium.content.app.SandboxedProcessService0
+05-03 12:57:42.549   528  7129 I ActivityManager: Process com.amazon.webview.chromium:webview_service (pid 21153) has 
+died: cch+3CEM 
+05-03 12:57:42.568   528  7129 I ActivityManager: Process com.amazon.webview.chromium (pid 21177) has died: cch+3CEM 
+05-03 12:57:42.692   528  7129 I ActivityManager: Process com.amazon.webview.chromium:AWVArcusServiceProcess (pid 
+21164) has died: cch+1CEM 
+05-03 12:59:30.004   528   547 I ActivityManager: Start proc 21871:com.amazon.webview.chromium:webview_service/u0a195 
+for service com.amazon.webview.chromium/org.chromium.android_webview.services.AwVariationsSeedFetcher
+05-03 13:04:22.271   528   551 I ActivityManager: Killing 21871:com.amazon.webview.chromium:webview_service/u0a195 
+(adj 903): empty #3
+
+

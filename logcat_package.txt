@@ -1,0 +1,32 @@
+﻿
+05-03 12:55:59.027   528   545 I ActivityManager: Force stopping com.xandeflix.app appid=10213 user=0: deletePackageX
+05-03 12:55:59.033   528   545 I ActivityManager: Killing 18746:com.xandeflix.app/u0a213 (adj 700): stop 
+com.xandeflix.app
+05-03 12:55:59.048   528   545 I ActivityManager:   Force finishing activity ActivityRecord{5c313f1 u0 
+com.xandeflix.app/.MainActivity t106}
+05-03 12:55:59.105   528  2418 I WindowManager: WIN DEATH: Window{c65df71 u0 
+com.xandeflix.app/com.xandeflix.app.MainActivity}
+05-03 12:55:59.174   528   565 I PackageManager: Removing old permission tree: 
+com.xandeflix.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION from package com.xandeflix.app
+05-03 12:56:00.137   528   565 I ActivityManager: Force stopping com.xandeflix.app appid=10213 user=0: pkg removed
+05-03 12:56:00.402   528   528 I ConditionProviders: Disallowing condition provider com.xandeflix.app
+05-03 12:56:00.403   528   528 I AmazonInputSwitchService: Received package deletion event for com.xandeflix.app
+05-03 12:56:00.809   528   544 E EspressoShotCallback: android.content.pm.PackageManager$NameNotFoundException: 
+com.xandeflix.app
+05-03 12:56:50.083   528  1766 W ActivityManager: Invalid packageName: com.xandeflix.app
+05-03 12:56:52.677   528   565 I com.android.server.pm.ExternalInstallPackageManagerCallback: Installation succeeded 
+for app com.xandeflix.app on internal storage. Return code:1
+05-03 12:56:52.780   528   528 I AmazonInputSwitchService: Received package installation event for com.xandeflix.app
+05-03 12:56:52.794   528  3610 I ActivityManager: Force stopping com.xandeflix.app appid=10214 user=0: from pid 21090
+05-03 12:56:53.245   528  1766 I ActivityManager: START u0 {act=android.intent.action.MAIN 
+cat=[android.intent.category.LAUNCHER] flg=0x10000000 cmp=com.xandeflix.app/.MainActivity} from uid 2000
+05-03 12:56:53.533   528   547 I ActivityManager: Start proc 21108:com.xandeflix.app/u0a214 for activity 
+com.xandeflix.app/.MainActivity
+05-03 12:56:56.156   528   547 I ActivityManager: Start proc 21202:com.amazon.webview.chromium:sandboxed_process0/u0i4 
+for webview_service com.xandeflix.app/org.chromium.content.app.SandboxedProcessService0
+05-03 12:58:25.814   528 21636 I ActivityManager: START u0 {act=android.intent.action.MAIN 
+cat=[android.intent.category.LAUNCHER] flg=0x10000000 pkg=com.xandeflix.app cmp=com.xandeflix.app/.MainActivity (has 
+extras)} from uid 1000
+05-03 13:06:38.382   528 22583 W MouseModeService: Switched to same activity:com.xandeflix.app.MainActivity
+
+
