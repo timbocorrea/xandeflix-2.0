@@ -9,6 +9,8 @@ interface SpatialNavigationProviderProps {
   children: ReactNode;
 }
 
+const ENABLE_SPATIAL_DEBUG = import.meta.env.DEV;
+
 const SPATIAL_KEY_NAMES = new Set([
   'ArrowLeft',
   'ArrowUp',
@@ -18,17 +20,17 @@ const SPATIAL_KEY_NAMES = new Set([
 ]);
 
 const SPATIAL_KEY_CODES = new Set([
-  13, // Enter
-  19, // Android DPAD_UP
-  20, // Android DPAD_DOWN
-  21, // Android DPAD_LEFT
-  22, // Android DPAD_RIGHT
-  23, // Android DPAD_CENTER
-  37, // ArrowLeft
-  38, // ArrowUp
-  39, // ArrowRight
-  40, // ArrowDown
-  66, // Android Enter
+  13,
+  19,
+  20,
+  21,
+  22,
+  23,
+  37,
+  38,
+  39,
+  40,
+  66,
 ]);
 
 function isSpatialNavigationKey(event: KeyboardEvent): boolean {
@@ -68,7 +70,7 @@ export function SpatialNavigationProvider({
 }: SpatialNavigationProviderProps) {
   useEffect(() => {
     init({
-      debug: true,
+      debug: ENABLE_SPATIAL_DEBUG,
       visualDebug: false,
       nativeMode: false,
       throttle: 0,
@@ -83,7 +85,9 @@ export function SpatialNavigationProvider({
       enter: [13, 23, 66],
     });
 
-    console.log('[Xandeflix Spatial] Norigin initialized');
+    if (ENABLE_SPATIAL_DEBUG) {
+      console.log('[Xandeflix Spatial] Norigin initialized');
+    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!isSpatialNavigationKey(event)) {
@@ -98,17 +102,19 @@ export function SpatialNavigationProvider({
         blurNativeFocusedButtonIfNeeded();
       }
 
-      console.log('[Xandeflix KeyDown]', {
-        key: event.key,
-        keyCode: event.keyCode,
-        which: event.which,
-        currentFocusKey: currentFocusKey || 'NONE',
-        activeElement: activeElement?.tagName || 'NONE',
-        activeNavId:
-          activeElement instanceof HTMLElement
-            ? activeElement.dataset.navId || 'NONE'
-            : 'NONE',
-      });
+      if (ENABLE_SPATIAL_DEBUG) {
+        console.log('[Xandeflix KeyDown]', {
+          key: event.key,
+          keyCode: event.keyCode,
+          which: event.which,
+          currentFocusKey: currentFocusKey || 'NONE',
+          activeElement: activeElement?.tagName || 'NONE',
+          activeNavId:
+            activeElement instanceof HTMLElement
+              ? activeElement.dataset.navId || 'NONE'
+              : 'NONE',
+        });
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);

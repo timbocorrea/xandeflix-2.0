@@ -1,17 +1,21 @@
 import { Info, Play } from 'lucide-react';
-import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 import { FOCUS_KEYS } from '../../lib/spatial/focusKeys';
+import { HERO_SCROLL_OPTIONS } from '../../lib/spatial/focusNavigation';
 
-const HERO_SCROLL_OPTIONS: ScrollIntoViewOptions = {
-  behavior: 'smooth',
-  block: 'start',
-  inline: 'nearest',
-};
+interface CatalogHeroProps {
+  onSectionArrowPress?: (direction: string) => boolean;
+  onPlayArrowPress?: (direction: string) => boolean;
+  onInfoArrowPress?: (direction: string) => boolean;
+}
 
-export function CatalogHero() {
+export function CatalogHero({
+  onSectionArrowPress,
+  onPlayArrowPress,
+  onInfoArrowPress,
+}: CatalogHeroProps) {
   function handlePlay() {
     console.log('[D-Pad] Assistir agora');
   }
@@ -20,32 +24,11 @@ export function CatalogHero() {
     console.log('[D-Pad] Mais informações');
   }
 
-  function focusFirstMediaCard() {
-    setFocus(FOCUS_KEYS.FIRST_MEDIA_CARD);
-    return false;
-  }
-
-  function focusHeaderSearch() {
-    setFocus(FOCUS_KEYS.HEADER_SEARCH_BUTTON);
-    return false;
-  }
-
-  function focusHeaderProfile() {
-    setFocus(FOCUS_KEYS.HEADER_PROFILE_BUTTON);
-    return false;
-  }
-
   return (
     <FocusableSection
       focusKey={FOCUS_KEYS.CATALOG_HERO_SECTION}
       focusScrollOptions={HERO_SCROLL_OPTIONS}
-      onArrowPress={(direction) => {
-        if (direction === 'down') {
-          return focusFirstMediaCard();
-        }
-
-        return true;
-      }}
+      onArrowPress={onSectionArrowPress}
       className="hero-gradient relative mb-10 flex min-h-[520px] overflow-hidden rounded-3xl border border-white/5 bg-xf-surface p-6 md:p-10 lg:min-h-[620px]"
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(229,9,20,0.26),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.08),transparent_38%)]" />
@@ -72,17 +55,7 @@ export function CatalogHero() {
             focusScrollOptions={HERO_SCROLL_OPTIONS}
             className="inline-flex items-center justify-center gap-3 rounded-xl bg-xf-red px-7 py-4 text-lg font-black text-white"
             onEnterPress={handlePlay}
-            onArrowPress={(direction) => {
-              if (direction === 'up') {
-                return focusHeaderSearch();
-              }
-
-              if (direction === 'down') {
-                return focusFirstMediaCard();
-              }
-
-              return true;
-            }}
+            onArrowPress={onPlayArrowPress}
           >
             <Play size={24} fill="white" />
             Assistir agora
@@ -94,17 +67,7 @@ export function CatalogHero() {
             focusScrollOptions={HERO_SCROLL_OPTIONS}
             className="inline-flex items-center justify-center gap-3 rounded-xl bg-white/10 px-7 py-4 text-lg font-black text-white"
             onEnterPress={handleMoreInfo}
-            onArrowPress={(direction) => {
-              if (direction === 'up') {
-                return focusHeaderProfile();
-              }
-
-              if (direction === 'down') {
-                return focusFirstMediaCard();
-              }
-
-              return true;
-            }}
+            onArrowPress={onInfoArrowPress}
           >
             <Info size={24} />
             Mais informações

@@ -1,28 +1,28 @@
 import { Search, UserRound, LogOut } from 'lucide-react';
-import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 import { useDeviceType } from '../../hooks/useDeviceType';
 import { FOCUS_KEYS } from '../../lib/spatial/focusKeys';
 
+export interface HeaderNavigationHandlers {
+  onSearchArrowPress?: (direction: string) => boolean;
+  onProfileArrowPress?: (direction: string) => boolean;
+  onLogoutArrowPress?: (direction: string) => boolean;
+}
+
 interface AppHeaderProps {
   userEmail?: string;
   onSignOut: () => void;
+  navigation?: HeaderNavigationHandlers;
 }
 
-export function AppHeader({ userEmail, onSignOut }: AppHeaderProps) {
+export function AppHeader({
+  userEmail,
+  onSignOut,
+  navigation,
+}: AppHeaderProps) {
   const { isMobile } = useDeviceType();
-
-  function focusHeroPlayButton() {
-    setFocus(FOCUS_KEYS.HERO_PLAY_BUTTON);
-    return false;
-  }
-
-  function focusHeroInfoButton() {
-    setFocus(FOCUS_KEYS.HERO_INFO_BUTTON);
-    return false;
-  }
 
   return (
     <header className="sticky top-0 z-30 flex h-20 items-center justify-between bg-gradient-to-b from-black via-xf-bg to-transparent px-4 md:px-8 lg:px-10">
@@ -48,18 +48,7 @@ export function AppHeader({ userEmail, onSignOut }: AppHeaderProps) {
             onEnterPress={() => {
               console.log('[D-Pad] Pesquisar');
             }}
-            onArrowPress={(direction) => {
-              if (direction === 'left') {
-                setFocus(FOCUS_KEYS.SIDEBAR_SEARCH);
-                return false;
-              }
-
-              if (direction === 'down') {
-                return focusHeroPlayButton();
-              }
-
-              return true;
-            }}
+            onArrowPress={navigation?.onSearchArrowPress}
           >
             <Search size={22} />
           </FocusableButton>
@@ -73,13 +62,7 @@ export function AppHeader({ userEmail, onSignOut }: AppHeaderProps) {
             onEnterPress={() => {
               console.log('[D-Pad] Perfil');
             }}
-            onArrowPress={(direction) => {
-              if (direction === 'down') {
-                return focusHeroInfoButton();
-              }
-
-              return true;
-            }}
+            onArrowPress={navigation?.onProfileArrowPress}
           >
             <UserRound size={22} />
           </FocusableButton>
@@ -90,13 +73,7 @@ export function AppHeader({ userEmail, onSignOut }: AppHeaderProps) {
           className="inline-flex items-center gap-2 rounded-full bg-xf-red px-4 py-3 text-sm font-bold text-white"
           onEnterPress={onSignOut}
           onClick={onSignOut}
-          onArrowPress={(direction) => {
-            if (direction === 'down') {
-              return focusHeroInfoButton();
-            }
-
-            return true;
-          }}
+          onArrowPress={navigation?.onLogoutArrowPress}
         >
           <LogOut size={18} />
           <span className={isMobile ? 'hidden' : 'inline'}>Sair</span>
