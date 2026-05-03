@@ -1,6 +1,7 @@
-import { useDeviceType } from './useDeviceType'
+import { useDeviceType } from './useDeviceType';
 
-export const useIsTv = () => {
-  const deviceType = useDeviceType()
-  return deviceType === 'tv'
+export function useIsTv() {
+  const { isTv } = useDeviceType();
+
+  return isTv;
 }

@@ -20,6 +20,8 @@
   color: #ffffff;
   background: #050505;
   font-family: Inter, system-ui, sans-serif;
+  text-rendering: geometricPrecision;
+  font-synthesis: none;
 }
 
 html,
@@ -35,30 +37,46 @@ body {
   overflow-x: hidden;
 }
 
-/* Base geral da aplicação */
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
 .xf-app {
   min-height: 100vh;
-  background: #050505;
+  background:
+    radial-gradient(circle at top right, rgba(229, 9, 20, 0.12), transparent 32rem),
+    #050505;
   color: #ffffff;
 }
 
-/* Foco padrão para TV */
 .tv-focusable {
   outline: none;
   transition:
     transform 150ms ease,
     outline-color 150ms ease,
-    box-shadow 150ms ease;
+    box-shadow 150ms ease,
+    background-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.tv-focusable:hover {
+  opacity: 0.92;
 }
 
 .tv-focusable:focus-visible,
 .tv-focusable[data-focused="true"] {
   outline: 4px solid #E50914;
   outline-offset: 2px;
-  transform: scale(1.1);
+  transform: scale(1.08);
 }
 
-/* Card de mídia */
 .media-card {
   border-radius: 0.75rem;
   background: #111111;
@@ -72,10 +90,9 @@ body {
 .media-card[data-focused="true"] {
   outline: 4px solid #E50914;
   outline-offset: 2px;
-  transform: translateY(-10px) scale(1.1);
+  transform: translateY(-10px) scale(1.08);
 }
 
-/* Hero com gradiente Netflix-like */
 .hero-gradient {
   background:
     linear-gradient(
@@ -87,9 +104,32 @@ body {
     );
 }
 
-/* TVs: evitar efeitos pesados */
+.line-clamp-2 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 @media (min-width: 960px) {
   .tv-safe-shadow {
     box-shadow: none;
+  }
+
+  .tv-focusable:focus-visible,
+  .tv-focusable[data-focused="true"] {
+    transform: scale(1.1);
+  }
+
+  .media-card:focus-visible,
+  .media-card[data-focused="true"] {
+    transform: translateY(-12px) scale(1.1);
+  }
+}
+
+@media (max-width: 767px) {
+  .tv-focusable:focus-visible,
+  .tv-focusable[data-focused="true"] {
+    transform: scale(1.03);
   }
 }

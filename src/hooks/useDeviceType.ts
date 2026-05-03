@@ -1,30 +1,72 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react';
 
-export type DeviceType = 'mobile' | 'tablet' | 'desktop' | 'tv'
+type DeviceType = 'mobile' | 'tablet' | 'desktop' | 'tv';
 
-export const useDeviceType = (): DeviceType => {
-  const [deviceType, setDeviceType] = useState<DeviceType>('desktop')
+interface DeviceTypeResult {
+  deviceType: DeviceType;
+  isMobile: boolean;
+  isTablet: boolean;
+  isDesktop: boolean;
+  isTv: boolean;
+}
+
+function detectDeviceType(): DeviceType {
+  if (typeof window === 'undefined') {
+    return 'desktop';
+  }
+
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  const width = window.innerWidth;
+
+  const isTvUserAgent =
+    userAgent.includes('smart-tv') ||
+    userAgent.includes('smarttv') ||
+    userAgent.includes('tizen') ||
+    userAgent.includes('webos') ||
+    userAgent.includes('netcast') ||
+    userAgent.includes('appletv') ||
+    userAgent.includes('android tv') ||
+    userAgent.includes('aft');
+
+  if (isTvUserAgent || width >= 1280) {
+    return 'tv';
+  }
+
+  if (width < 768) {
+    return 'mobile';
+  }
+
+  if (width < 1024) {
+    return 'tablet';
+  }
+
+  return 'desktop';
+}
+
+export function useDeviceType(): DeviceTypeResult {
+  const [deviceType, setDeviceType] = useState<DeviceType>(() =>
+    detectDeviceType(),
+  );
 
   useEffect(() => {
-    const handleResize = () => {
-      const width = window.innerWidth
-      const userAgent = navigator.userAgent.toLowerCase()
-      
-      if (userAgent.includes('smart-tv') || userAgent.includes('androidtv') || userAgent.includes('firetv')) {
-        setDeviceType('tv')
-      } else if (width < 640) {
-        setDeviceType('mobile')
-      } else if (width < 1024) {
-        setDeviceType('tablet')
-      } else {
-        setDeviceType('desktop')
-      }
+    function handleResize() {
+      setDeviceType(detectDeviceType());
     }
 
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
 
-  return deviceType
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
+
+  return {
+    deviceType,
+    isMobile: deviceType === 'mobile',
+    isTablet: deviceType === 'tablet',
+    isDesktop: deviceType === 'desktop',
+    isTv: deviceType === 'tv',
+  };
 }
