@@ -3,32 +3,52 @@ import { Navigate } from 'react-router-dom';
 import { Play } from 'lucide-react';
 
 import { useAuth } from '../../../app/providers/AuthProvider';
+import { FocusableButton } from '../../../components/tv/FocusableButton';
+import { FocusableInput } from '../../../components/tv/FocusableInput';
+import { FocusableSection } from '../../../components/tv/FocusableSection';
+
+const TEST_EMAIL = 'teste@xandeflix.com';
+const TEST_PASSWORD = '12345678';
 
 export function LoginPage() {
   const { signIn, isAuthenticated, isLoading } = useAuth();
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState(TEST_EMAIL);
+  const [password, setPassword] = useState(TEST_PASSWORD);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   if (isAuthenticated) {
     return <Navigate to="/" replace />;
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleLogin(currentEmail = email, currentPassword = password) {
     setFeedback(null);
 
     try {
-      await signIn(email, password);
+      await signIn(currentEmail, currentPassword);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Erro ao entrar.');
     }
   }
 
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await handleLogin();
+  }
+
+  async function handleTestLogin() {
+    setEmail(TEST_EMAIL);
+    setPassword(TEST_PASSWORD);
+    await handleLogin(TEST_EMAIL, TEST_PASSWORD);
+  }
+
   return (
     <main className="xf-app flex min-h-screen items-center justify-center px-6">
-      <section className="w-full max-w-md rounded-2xl bg-xf-surface p-8">
+      <FocusableSection
+        focusKey="login-section"
+        autoFocus
+        className="w-full max-w-md rounded-2xl bg-xf-surface p-8"
+      >
         <div className="mb-8 flex items-center gap-3">
           <div className="flex size-12 items-center justify-center rounded-xl bg-xf-red">
             <Play size={24} fill="white" />
@@ -43,35 +63,25 @@ export function LoginPage() {
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-xf-muted">
-              E-mail
-            </span>
+          <FocusableInput
+            focusKey="login-email-input"
+            label="E-mail"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+          />
 
-            <input
-              className="tv-focusable w-full rounded-lg bg-black px-4 py-4 text-white"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-xf-muted">
-              Senha
-            </span>
-
-            <input
-              className="tv-focusable w-full rounded-lg bg-black px-4 py-4 text-white"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
+          <FocusableInput
+            focusKey="login-password-input"
+            label="Senha"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+          />
 
           {feedback && (
             <p className="rounded-lg bg-red-950 px-4 py-3 text-sm text-red-200">
@@ -79,16 +89,35 @@ export function LoginPage() {
             </p>
           )}
 
-          <button
-            className="tv-focusable w-full rounded-lg bg-xf-red px-6 py-4 text-lg font-bold text-white disabled:opacity-60"
-            type="submit"
+          <FocusableButton
+            focusKey="login-submit-button"
+            className="w-full rounded-lg bg-xf-red px-6 py-4 text-lg font-bold text-white disabled:opacity-60"
             disabled={isLoading}
-            data-nav-id="login-submit-button"
+            onEnterPress={() => {
+              void handleLogin();
+            }}
+            onClick={() => {
+              void handleLogin();
+            }}
           >
             {isLoading ? 'Entrando...' : 'Entrar'}
-          </button>
+          </FocusableButton>
+
+          <FocusableButton
+            focusKey="login-test-button"
+            className="w-full rounded-lg bg-white/10 px-6 py-4 text-base font-bold text-white disabled:opacity-60"
+            disabled={isLoading}
+            onEnterPress={() => {
+              void handleTestLogin();
+            }}
+            onClick={() => {
+              void handleTestLogin();
+            }}
+          >
+            Entrar como teste
+          </FocusableButton>
         </form>
-      </section>
+      </FocusableSection>
     </main>
   );
 }
