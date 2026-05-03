@@ -1,6 +1,8 @@
 import { AppShell } from '../../../components/layout/AppShell';
 import { CatalogHero } from '../../../components/media/CatalogHero';
 import { MediaCard } from '../../../components/media/MediaCard';
+import { FocusableButton } from '../../../components/tv/FocusableButton';
+import { FocusableSection } from '../../../components/tv/FocusableSection';
 import { useDeviceType } from '../../../hooks/useDeviceType';
 import { useAuth } from '../../../app/providers/AuthProvider';
 
@@ -40,7 +42,7 @@ export function CatalogPage() {
     <AppShell userEmail={user?.email} onSignOut={() => void signOut()}>
       <CatalogHero />
 
-      <section className="mb-12">
+      <FocusableSection focusKey="continue-watching-section" className="mb-12">
         <div className="mb-5 flex items-end justify-between">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.3em] text-xf-red">
@@ -52,13 +54,15 @@ export function CatalogPage() {
             </h2>
           </div>
 
-          <button
-            className="tv-focusable hidden rounded-full bg-xf-surface px-5 py-3 text-sm font-bold text-white md:inline-flex"
-            type="button"
-            data-nav-id="continue-see-all"
+          <FocusableButton
+            focusKey="continue-see-all"
+            className="hidden rounded-full bg-xf-surface px-5 py-3 text-sm font-bold text-white md:inline-flex"
+            onEnterPress={() => {
+              console.log('[D-Pad] Ver tudo: Continuar assistindo');
+            }}
           >
             Ver tudo
-          </button>
+          </FocusableButton>
         </div>
 
         <div className={`grid gap-4 md:gap-5 ${gridClassName}`}>
@@ -68,12 +72,15 @@ export function CatalogPage() {
               title={title}
               subtitle="Retomar reprodução"
               index={index}
+              onEnterPress={() => {
+                console.log(`[D-Pad] Abrir mídia: ${title}`);
+              }}
             />
           ))}
         </div>
-      </section>
+      </FocusableSection>
 
-      <section>
+      <FocusableSection focusKey="live-channels-section">
         <div className="mb-5 flex items-end justify-between">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.3em] text-xf-red">
@@ -93,10 +100,13 @@ export function CatalogPage() {
               title={title}
               subtitle="Canal disponível"
               index={index + continueWatchingItems.length}
+              onEnterPress={() => {
+                console.log(`[D-Pad] Abrir canal: ${title}`);
+              }}
             />
           ))}
         </div>
-      </section>
+      </FocusableSection>
     </AppShell>
   );
 }

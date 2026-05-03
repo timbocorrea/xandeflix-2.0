@@ -7,6 +7,9 @@ import {
   Tv,
 } from 'lucide-react';
 
+import { FocusableButton } from '../tv/FocusableButton';
+import { FocusableSection } from '../tv/FocusableSection';
+
 const menuItems = [
   {
     label: 'Início',
@@ -47,24 +50,29 @@ export function TvSidebar() {
         X
       </div>
 
-      <nav className="flex flex-1 flex-col items-center gap-4">
+      <FocusableSection
+        focusKey="sidebar-section"
+        className="flex flex-1 flex-col items-center gap-4"
+      >
         {menuItems.map((item) => {
           const Icon = item.icon;
 
           return (
-            <button
+            <FocusableButton
               key={item.navId}
-              className="tv-focusable group flex size-14 items-center justify-center rounded-2xl bg-transparent text-xf-muted hover:text-white"
-              type="button"
-              data-nav-id={item.navId}
+              focusKey={item.navId}
+              className="group flex size-14 items-center justify-center rounded-2xl bg-transparent text-xf-muted hover:text-white"
               aria-label={item.label}
               title={item.label}
+              onEnterPress={() => {
+                console.log(`[D-Pad] Menu: ${item.label}`);
+              }}
             >
               <Icon size={26} />
-            </button>
+            </FocusableButton>
           );
         })}
-      </nav>
+      </FocusableSection>
     </aside>
   );
 }

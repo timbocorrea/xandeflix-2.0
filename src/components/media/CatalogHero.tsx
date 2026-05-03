@@ -1,8 +1,23 @@
 import { Info, Play } from 'lucide-react';
 
+import { FocusableButton } from '../tv/FocusableButton';
+import { FocusableSection } from '../tv/FocusableSection';
+
 export function CatalogHero() {
+  function handlePlay() {
+    console.log('[D-Pad] Assistir agora');
+  }
+
+  function handleMoreInfo() {
+    console.log('[D-Pad] Mais informações');
+  }
+
   return (
-    <section className="hero-gradient relative mb-10 flex min-h-[520px] overflow-hidden rounded-3xl border border-white/5 bg-xf-surface p-6 md:p-10 lg:min-h-[620px]">
+    <FocusableSection
+      focusKey="catalog-hero-section"
+      autoFocus
+      className="hero-gradient relative mb-10 flex min-h-[520px] overflow-hidden rounded-3xl border border-white/5 bg-xf-surface p-6 md:p-10 lg:min-h-[620px]"
+    >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(229,9,20,0.26),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.08),transparent_38%)]" />
 
       <div className="relative z-10 flex max-w-3xl flex-col justify-center">
@@ -21,25 +36,25 @@ export function CatalogHero() {
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <button
-            className="tv-focusable inline-flex items-center justify-center gap-3 rounded-xl bg-xf-red px-7 py-4 text-lg font-black text-white"
-            type="button"
-            data-nav-id="hero-play-button"
+          <FocusableButton
+            focusKey="hero-play-button"
+            className="inline-flex items-center justify-center gap-3 rounded-xl bg-xf-red px-7 py-4 text-lg font-black text-white"
+            onEnterPress={handlePlay}
           >
             <Play size={24} fill="white" />
             Assistir agora
-          </button>
+          </FocusableButton>
 
-          <button
-            className="tv-focusable inline-flex items-center justify-center gap-3 rounded-xl bg-white/10 px-7 py-4 text-lg font-black text-white"
-            type="button"
-            data-nav-id="hero-info-button"
+          <FocusableButton
+            focusKey="hero-info-button"
+            className="inline-flex items-center justify-center gap-3 rounded-xl bg-white/10 px-7 py-4 text-lg font-black text-white"
+            onEnterPress={handleMoreInfo}
           >
             <Info size={24} />
             Mais informações
-          </button>
+          </FocusableButton>
         </div>
       </div>
-    </section>
+    </FocusableSection>
   );
 }

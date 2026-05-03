@@ -1,5 +1,8 @@
 import { LogOut, Search, UserRound } from 'lucide-react';
 
+import { FocusableButton } from '../tv/FocusableButton';
+import { FocusableSection } from '../tv/FocusableSection';
+
 interface AppHeaderProps {
   userEmail?: string;
   onSignOut: () => void;
@@ -18,35 +21,42 @@ export function AppHeader({ userEmail, onSignOut }: AppHeaderProps) {
         </p>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          className="tv-focusable hidden rounded-full bg-xf-surface-soft p-3 text-white md:inline-flex"
-          type="button"
-          data-nav-id="header-search-button"
+      <FocusableSection
+        focusKey="header-actions-section"
+        className="flex items-center gap-3"
+      >
+        <FocusableButton
+          focusKey="header-search-button"
+          className="hidden rounded-full bg-xf-surface-soft p-3 text-white md:inline-flex"
           aria-label="Pesquisar"
+          onEnterPress={() => {
+            console.log('[D-Pad] Pesquisar');
+          }}
         >
           <Search size={22} />
-        </button>
+        </FocusableButton>
 
-        <button
-          className="tv-focusable hidden rounded-full bg-xf-surface-soft p-3 text-white md:inline-flex"
-          type="button"
-          data-nav-id="header-profile-button"
+        <FocusableButton
+          focusKey="header-profile-button"
+          className="hidden rounded-full bg-xf-surface-soft p-3 text-white md:inline-flex"
           aria-label="Perfil"
+          onEnterPress={() => {
+            console.log('[D-Pad] Perfil');
+          }}
         >
           <UserRound size={22} />
-        </button>
+        </FocusableButton>
 
-        <button
-          className="tv-focusable inline-flex items-center gap-2 rounded-full bg-xf-red px-4 py-3 text-sm font-bold text-white"
-          type="button"
+        <FocusableButton
+          focusKey="header-logout-button"
+          className="inline-flex items-center gap-2 rounded-full bg-xf-red px-4 py-3 text-sm font-bold text-white"
+          onEnterPress={onSignOut}
           onClick={onSignOut}
-          data-nav-id="header-logout-button"
         >
           <LogOut size={18} />
           <span className="hidden sm:inline">Sair</span>
-        </button>
-      </div>
+        </FocusableButton>
+      </FocusableSection>
     </header>
   );
 }
