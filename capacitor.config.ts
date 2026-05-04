@@ -6,12 +6,6 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   backgroundColor: '#050505',
 
-  server: {
-    url: 'http://10.115.27.59:5173',
-    androidScheme: 'http',
-    cleartext: true,
-  },
-
   plugins: {
     StatusBar: {
       backgroundColor: '#050505',
