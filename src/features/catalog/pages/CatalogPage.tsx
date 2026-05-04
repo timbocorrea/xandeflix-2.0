@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
-const TV_REMAINING_SECTIONS_DELAY_MS = 900;
+const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 
 export function CatalogPage() {
   const { user, signOut } = useAuth();
