@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
+
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+
+let lastDeviceDetectionSignature: string | null = null;
+
 type DeviceType = 'mobile' | 'tablet' | 'desktop' | 'tv';
 
 interface DeviceTypeResult {
@@ -19,8 +23,18 @@ function detectDeviceType(): DeviceType {
   const width = window.innerWidth;
   const height = window.innerHeight;
 
-  // Debug log (will show in Logcat)
-  spatialDebug('unknown', 'DeviceDetection', { userAgent, width, height });
+  const deviceDetectionSignature = `${userAgent}|${width}x${height}`;
+
+  if (lastDeviceDetectionSignature !== deviceDetectionSignature) {
+    lastDeviceDetectionSignature = deviceDetectionSignature;
+
+    spatialDebug('unknown', 'DeviceDetection', {
+      userAgent,
+      width,
+      height,
+    });
+  }
+  
 
   const isTvUserAgent =
     userAgent.includes('smart-tv') ||
