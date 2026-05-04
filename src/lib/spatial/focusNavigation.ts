@@ -10,18 +10,18 @@ export const HERO_SCROLL_OPTIONS: ScrollIntoViewOptions = {
 };
 
 export const CARD_SCROLL_OPTIONS: ScrollIntoViewOptions = {
-  behavior: 'smooth',
-  block: 'center',
-  inline: 'nearest',
-};
-
-export const NEAREST_SCROLL_OPTIONS: ScrollIntoViewOptions = {
-  behavior: 'smooth',
+  behavior: 'auto',
   block: 'nearest',
   inline: 'nearest',
 };
 
-const FIRE_TV_FOCUS_RETRY_DELAYS = [0, 80, 180, 320] as const;
+export const NEAREST_SCROLL_OPTIONS: ScrollIntoViewOptions = {
+  behavior: 'auto',
+  block: 'nearest',
+  inline: 'nearest',
+};
+
+const FIRE_TV_FOCUS_RETRY_DELAYS = [120] as const;
 
 function canUseDom() {
   return typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -93,7 +93,7 @@ function setFocusWithFireTvRetry(focusKey: string) {
   }
 
   window.requestAnimationFrame(() => {
-    setFocus(focusKey);
+    scrollFocusKeyIntoView(focusKey, NEAREST_SCROLL_OPTIONS);
   });
 
   FIRE_TV_FOCUS_RETRY_DELAYS.forEach((delay) => {

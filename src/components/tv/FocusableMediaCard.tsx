@@ -37,7 +37,6 @@ export function FocusableMediaCard({
       data-nav-id={focusKey}
       onClick={onEnterPress}
     >
-      
       <div className="absolute inset-x-0 bottom-0 z-10 bg-black/75 p-4">
         <p className="line-clamp-2 text-base font-black text-white md:text-lg">
           {title}

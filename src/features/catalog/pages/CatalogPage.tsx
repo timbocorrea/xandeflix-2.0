@@ -14,10 +14,38 @@ import {
   getCategorySeeAllFocusKey,
 } from '../../../lib/spatial/categoryFocusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { useEffect, useMemo, useState } from 'react';
+
+
+const INITIAL_TV_VISIBLE_SECTIONS = 1;
+const TV_REMAINING_SECTIONS_DELAY_MS = 900;
+
 export function CatalogPage() {
   const { user, signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
+  const [visibleSectionCount, setVisibleSectionCount] = useState(
+  isTv ? INITIAL_TV_VISIBLE_SECTIONS : catalogSections.length,
+);
 
+useEffect(() => {
+  if (!isTv) {
+    setVisibleSectionCount(catalogSections.length);
+    return;
+  }
+
+  setVisibleSectionCount(INITIAL_TV_VISIBLE_SECTIONS);
+
+  const timer = window.setTimeout(() => {
+    setVisibleSectionCount(catalogSections.length);
+  }, TV_REMAINING_SECTIONS_DELAY_MS);
+
+  return () => window.clearTimeout(timer);
+}, [isTv]);
+
+const visibleCatalogSections = useMemo(
+  () => catalogSections.slice(0, visibleSectionCount),
+  [visibleSectionCount],
+);
   useRouteInitialFocus();
 
   const gridClassName = isTv
@@ -47,7 +75,7 @@ export function CatalogPage() {
         onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
       />
 
-      {catalogSections.map((section, categoryIndex) => {
+      {visibleCatalogSections.map((section, categoryIndex) => {
         const eyebrow =
           section.id === 'continue-watching'
             ? isMobile

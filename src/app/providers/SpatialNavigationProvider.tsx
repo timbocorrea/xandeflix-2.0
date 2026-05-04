@@ -1,5 +1,5 @@
+import { ENABLE_SPATIAL_DEBUG, spatialDebug } from '@/lib/spatial/spatialDebug';
 import { useEffect, type ReactNode } from 'react';
-import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import {
   getCurrentFocusKey,
   init,
@@ -10,7 +10,7 @@ interface SpatialNavigationProviderProps {
   children: ReactNode;
 }
 
-const ENABLE_SPATIAL_DEBUG = import.meta.env.DEV;
+
 
 const SPATIAL_KEY_NAMES = new Set([
   'ArrowLeft',
@@ -71,7 +71,7 @@ export function SpatialNavigationProvider({
 }: SpatialNavigationProviderProps) {
   useEffect(() => {
     init({
-      debug: ENABLE_SPATIAL_DEBUG,
+      debug: false,
       visualDebug: false,
       nativeMode: false,
       throttle: 0,
@@ -124,6 +124,7 @@ export function SpatialNavigationProvider({
       window.removeEventListener('keydown', handleKeyDown, true);
     };
   }, []);
+
 
   return children;
 }
