@@ -29,7 +29,7 @@ export function CatalogHero({
       focusKey={FOCUS_KEYS.CATALOG_HERO_SECTION}
       focusScrollOptions={HERO_SCROLL_OPTIONS}
       onArrowPress={onSectionArrowPress}
-      className="relative mt-16 mb-8 flex min-h-[420px] overflow-hidden rounded-2xl bg-xf-surface p-6 ring-0 ring-inset ring-transparent transition-[box-shadow] duration-150 data-[has-focused-child=true]:ring-2 data-[has-focused-child=true]:ring-inset data-[has-focused-child=true]:ring-xf-red md:p-8 lg:min-h-[480px]"
+      className="relative mb-8 flex min-h-[420px] overflow-hidden rounded-2xl bg-xf-surface p-6 ring-0 ring-inset ring-transparent transition-[box-shadow] duration-150 data-[has-focused-child=true]:ring-2 data-[has-focused-child=true]:ring-inset data-[has-focused-child=true]:ring-xf-red md:p-8 lg:min-h-[480px]"
     >
       <div className="absolute inset-0 bg-gradient-to-br from-xf-red/10 via-transparent to-transparent" />
 

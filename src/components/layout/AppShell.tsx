@@ -32,9 +32,14 @@ export function AppShell({
           navigation={headerNavigation}
         />
 
-        <main className="px-4 pb-28 pt-2 md:px-8 md:pb-10 lg:px-10">
-          {children}
-        </main>
+          <main
+            className={cn(
+              'px-4 pb-28 md:px-8 md:pb-10 lg:px-10',
+              isTv ? 'pt-6' : 'pt-2',
+            )}
+          >
+            {children}
+          </main>
       </div>
 
       {(isMobile || !isTv) && <MobileBottomNav />}

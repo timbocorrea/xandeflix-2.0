@@ -5,7 +5,7 @@ import { getCategoryItemFocusKey } from './categoryFocusKeys';
 
 export const HERO_SCROLL_OPTIONS: ScrollIntoViewOptions = {
   behavior: 'auto',
-  block: 'start',
+  block: 'end',
   inline: 'nearest',
 };
 
