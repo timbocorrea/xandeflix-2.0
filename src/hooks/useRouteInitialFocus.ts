@@ -51,7 +51,9 @@ function getRouteInitialFocusConfig(pathname: string): RouteInitialFocusConfig {
 }
 
 function getFocusableElement(focusKey: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-focus-key="${focusKey}"]`);
+  return document.querySelector<HTMLElement>(
+    `[data-nav-id="${focusKey}"], [data-focus-key="${focusKey}"]`,
+  );
 }
 
 function getFirstAvailableFocusKey(candidates: string[]): string | null {
