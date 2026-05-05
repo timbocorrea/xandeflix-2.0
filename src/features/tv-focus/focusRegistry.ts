@@ -21,6 +21,15 @@ function assignRef<T>(
   ref.current = value;
 }
 
+export function getFocusableElement(focusKey: FocusKey): HTMLElement | null {
+  if (!focusKey) return null;
+  if (typeof document === 'undefined') return null;
+
+  return document.querySelector<HTMLElement>(
+    `[data-nav-id="${focusKey}"], [data-focus-key="${focusKey}"], [data-xf-focus-key="${focusKey}"]`,
+  );
+}
+
 export function registerFocusTarget(focusKey: FocusKey, element: HTMLElement) {
   if (!focusKey || !element) return;
 
@@ -30,7 +39,10 @@ export function registerFocusTarget(focusKey: FocusKey, element: HTMLElement) {
   element.setAttribute('data-xf-focus-key', focusKey);
 }
 
-export function unregisterFocusTarget(focusKey: FocusKey, element?: HTMLElement | null) {
+export function unregisterFocusTarget(
+  focusKey: FocusKey,
+  element?: HTMLElement | null,
+) {
   if (!focusKey) return;
 
   const current = mountedTargets.get(focusKey);
@@ -41,15 +53,24 @@ export function unregisterFocusTarget(focusKey: FocusKey, element?: HTMLElement 
 }
 
 export function wasFocusTargetKnown(focusKey: FocusKey) {
-  return knownTargets.has(focusKey);
+  if (knownTargets.has(focusKey)) return true;
+
+  return Boolean(getFocusableElement(focusKey));
 }
 
-export function isFocusTargetMounted(focusKey: FocusKey) {
+export function isFocusTargetMounted(focusKey: FocusKey | null | undefined) {
+  if (!focusKey) return false;
   if (typeof document === 'undefined') return false;
 
-  const element = mountedTargets.get(focusKey);
+  const registeredElement = mountedTargets.get(focusKey);
 
-  return Boolean(element && document.contains(element));
+  if (registeredElement && document.contains(registeredElement)) {
+    return true;
+  }
+
+  const domElement = getFocusableElement(focusKey);
+
+  return Boolean(domElement && document.contains(domElement));
 }
 
 export function getFirstMountedFocusTarget(fallbacks: string[]) {

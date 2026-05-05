@@ -1,12 +1,14 @@
 // src/features/tv-focus/FocusSafetyGuard.tsx
 
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   getCurrentFocusKey,
   setFocus,
 } from '@noriginmedia/norigin-spatial-navigation';
 
-import { CATALOG_FOCUS_FALLBACKS } from './focusKeys';
+import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { getFocusFallbacksForPathname } from './focusKeys';
 import {
   getFirstMountedFocusTarget,
   isFocusTargetMounted,
@@ -19,32 +21,30 @@ type FocusSafetyGuardProps = {
   fallbacks?: string[];
 };
 
-const RESTORE_DELAY_MS = 80;
+const RESTORE_DELAY_MS = 90;
 const VERIFY_DELAY_MS = 90;
-const RESTORE_COOLDOWN_MS = 450;
+const RESTORE_COOLDOWN_MS = 500;
 const MAX_ATTEMPTS = 4;
 
-function isSpatialDebugEnabled() {
-  return import.meta.env.VITE_SPATIAL_DEBUG === 'true';
-}
+const KEYS_THAT_MAY_CHANGE_FOCUS = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Enter',
+  'Backspace',
+  'Escape',
+]);
 
-function spatialDebug(message: string, payload?: unknown) {
-  if (!isSpatialDebugEnabled()) return;
-
-  if (payload === undefined) {
-    console.log(`[XANDEFLIX:FOCUS_SAFETY] ${message}`);
-    return;
-  }
-
-  console.log(`[XANDEFLIX:FOCUS_SAFETY] ${message}`, payload);
-}
-
-function safeGetCurrentFocusKey() {
+function safeGetCurrentFocusKey(): string | null {
   try {
-    return getCurrentFocusKey();
+    return getCurrentFocusKey() ?? null;
   } catch (error) {
-    spatialDebug('Falha ao ler getCurrentFocusKey()', error);
-    return undefined;
+    spatialDebug('focus-recovery', 'getCurrentFocusKey failed', {
+      error,
+    });
+
+    return null;
   }
 }
 
@@ -69,9 +69,11 @@ export function FocusSafetyGuard({
   enabled = true,
   fallbacks,
 }: FocusSafetyGuardProps) {
+  const location = useLocation();
+
   const fallbackList = useMemo(
-    () => fallbacks?.filter(Boolean) ?? CATALOG_FOCUS_FALLBACKS,
-    [fallbacks],
+    () => fallbacks?.filter(Boolean) ?? getFocusFallbacksForPathname(location.pathname),
+    [fallbacks, location.pathname],
   );
 
   const pendingTimerRef = useRef<number | null>(null);
@@ -88,6 +90,7 @@ export function FocusSafetyGuard({
   const restoreFocus = useCallback(
     (reason: string) => {
       if (!enabled) return;
+      if (typeof window === 'undefined') return;
       if (restoringRef.current) return;
 
       const now = Date.now();
@@ -110,11 +113,17 @@ export function FocusSafetyGuard({
         ...fallbackList.filter((focusKey) => focusKey !== firstMountedFallback),
       ];
 
+      if (candidates.length === 0) {
+        restoringRef.current = false;
+        return;
+      }
+
       let attempt = 0;
 
-      spatialDebug('Iniciando recuperação de foco', {
+      spatialDebug('focus-recovery', 'starting recovery', {
         reason,
-        current: safeGetCurrentFocusKey(),
+        pathname: location.pathname,
+        currentFocusKey: safeGetCurrentFocusKey() ?? 'NONE',
         candidates,
       });
 
@@ -122,9 +131,10 @@ export function FocusSafetyGuard({
         if (attempt >= MAX_ATTEMPTS || attempt >= candidates.length) {
           restoringRef.current = false;
 
-          spatialDebug('Recuperação encerrada sem foco confirmado', {
+          spatialDebug('focus-recovery', 'recovery stopped without confirmation', {
             reason,
-            current: safeGetCurrentFocusKey(),
+            pathname: location.pathname,
+            currentFocusKey: safeGetCurrentFocusKey() ?? 'NONE',
           });
 
           return;
@@ -138,8 +148,9 @@ export function FocusSafetyGuard({
           return;
         }
 
-        spatialDebug('Tentando restaurar foco', {
+        spatialDebug('focus-recovery', 'trying recovery target', {
           reason,
+          pathname: location.pathname,
           targetFocusKey,
           attempt,
         });
@@ -147,7 +158,7 @@ export function FocusSafetyGuard({
         try {
           setFocus(targetFocusKey);
         } catch (error) {
-          spatialDebug('setFocus falhou', {
+          spatialDebug('focus-recovery', 'setFocus failed', {
             targetFocusKey,
             error,
           });
@@ -159,8 +170,9 @@ export function FocusSafetyGuard({
           if (currentFocusKey && !isPossiblyLostFocus()) {
             restoringRef.current = false;
 
-            spatialDebug('Foco restaurado com sucesso', {
+            spatialDebug('focus-recovery', 'focus recovered', {
               reason,
+              pathname: location.pathname,
               currentFocusKey,
             });
 
@@ -173,7 +185,7 @@ export function FocusSafetyGuard({
 
       tryNextCandidate();
     },
-    [enabled, fallbackList],
+    [enabled, fallbackList, location.pathname],
   );
 
   const scheduleRestore = useCallback(
@@ -195,18 +207,8 @@ export function FocusSafetyGuard({
     if (!enabled) return;
     if (typeof window === 'undefined') return;
 
-    const keysThatMayChangeFocus = new Set([
-      'ArrowUp',
-      'ArrowDown',
-      'ArrowLeft',
-      'ArrowRight',
-      'Enter',
-      'Backspace',
-      'Escape',
-    ]);
-
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!keysThatMayChangeFocus.has(event.key)) return;
+      if (!KEYS_THAT_MAY_CHANGE_FOCUS.has(event.key)) return;
 
       scheduleRestore(`keydown:${event.key}`);
     };
@@ -230,7 +232,7 @@ export function FocusSafetyGuard({
     window.addEventListener('pageshow', handlePageShow);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    scheduleRestore('mount');
+    scheduleRestore('mount-or-route-change');
 
     return () => {
       clearPendingTimer();
