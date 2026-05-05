@@ -23,6 +23,21 @@ export type LoadedPlaylist = {
   diagnostics: PlaylistDiagnostics;
 };
 
+export type PlaylistLoadProgressPhase =
+  | 'downloading'
+  | 'parsing'
+  | 'finalizing';
+
+export type PlaylistLoadProgress = {
+  phase: PlaylistLoadProgressPhase;
+  bytesTotal: number | null;
+  bytesReceived: number;
+  parsedLines: number;
+  channelsParsed: number;
+  extinfLines: number;
+  playableUrlLines: number;
+};
+
 export type PlaylistRuntimeStatus =
   | 'idle'
   | 'loading'

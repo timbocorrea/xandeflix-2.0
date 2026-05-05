@@ -52,6 +52,15 @@ export const PLAYER_FOCUS_FALLBACKS: string[] = [
   FOCUS_KEYS.SIDEBAR_HOME,
 ];
 
+export const DIRECT_SOURCE_FOCUS_FALLBACKS: string[] = [
+  'direct-source-url-input',
+  'direct-source-load-button',
+  'direct-source-clear-button',
+  'direct-source-player-button',
+  'direct-source-channel-0',
+  FOCUS_KEYS.SIDEBAR_HOME,
+];
+
 export function getFocusFallbacksForPathname(pathname: string): string[] {
   if (pathname === '/login') {
     return LOGIN_FOCUS_FALLBACKS;
@@ -59,6 +68,10 @@ export function getFocusFallbacksForPathname(pathname: string): string[] {
 
   if (pathname.startsWith('/player')) {
     return PLAYER_FOCUS_FALLBACKS;
+  }
+
+  if (pathname.startsWith('/playlists/direct-source')) {
+    return DIRECT_SOURCE_FOCUS_FALLBACKS;
   }
 
   return CATALOG_FOCUS_FALLBACKS;

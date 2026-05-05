@@ -1,4 +1,4 @@
-import { useRef, type InputHTMLAttributes } from 'react';
+import { useCallback, useRef, type InputHTMLAttributes } from 'react';
 import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 
 import { cn } from '../../utils/cn';
@@ -6,20 +6,42 @@ import { cn } from '../../utils/cn';
 interface FocusableInputProps extends InputHTMLAttributes<HTMLInputElement> {
   focusKey: string;
   label: string;
+  onEnterPress?: () => void;
+  onArrowPress?: (direction: string) => boolean;
+  selectTextOnEnter?: boolean;
 }
 
 export function FocusableInput({
   focusKey,
   label,
   className,
+  onEnterPress,
+  onArrowPress,
+  selectTextOnEnter = false,
   ...props
 }: FocusableInputProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const focusNativeInput = useCallback(() => {
+    const input = inputRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    input.focus({ preventScroll: true });
+
+    if (selectTextOnEnter) {
+      input.select();
+    }
+  }, [selectTextOnEnter]);
+
   const { ref, focused } = useFocusable({
     focusKey,
+    onArrowPress,
     onEnterPress: () => {
-      inputRef.current?.focus();
+      focusNativeInput();
+      onEnterPress?.();
     },
   });
 
@@ -31,17 +53,14 @@ export function FocusableInput({
 
       <div
         ref={ref}
-        className={cn(
-          'tv-focusable rounded-lg',
-          focused && 'outline outline-4 outline-offset-2 outline-xf-red',
-        )}
+        className={cn('tv-focusable rounded-lg')}
         data-focused={focused ? 'true' : undefined}
         data-nav-id={focusKey}
       >
         <input
           ref={inputRef}
           className={cn(
-            'w-full rounded-lg bg-black px-4 py-4 text-white outline-none',
+            'w-full rounded-lg border border-white/10 bg-black px-4 py-4 text-white outline-none focus:border-xf-red',
             className,
           )}
           {...props}

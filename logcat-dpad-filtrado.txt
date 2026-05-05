@@ -1,0 +1,22 @@
+05-05 16:43:55.622 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:43:56.422 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:43:57.021 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:43:59.124 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:43:59.761 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:00.220 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:03.322 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:44:03.861 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:04.260 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:05.404 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:44:06.608 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:09.779 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:44:10.483 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:11.862 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:44:12.382 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:13.562 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:27.505 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:44:27.821 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:44:28.361 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:35.017 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] no first channel to focus
+05-05 16:44:35.062 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus
+05-05 16:44:35.066 E/Capacitor/Console(14971): File: https://localhost/assets/index-B5eYDJ6J.js - Line 34 - Msg: XANDEFLIX_DPAD_TRACE [FocusableButton] forced url input focus

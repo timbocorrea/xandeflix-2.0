@@ -8,6 +8,7 @@ export type PlayerStatus =
   | 'playing'
   | 'paused'
   | 'buffering'
+  | 'ended'
   | 'error'
   | 'unsupported';
 
@@ -35,6 +36,19 @@ export type UniversalPlayerAdapter = {
   play: () => Promise<void>;
   pause: () => Promise<void>;
   destroy: () => void;
+};
+
+export type PlayerEventLevel = 'info' | 'warn' | 'error';
+
+export type PlayerEventSource = 'player' | 'hls' | 'native';
+
+export type PlayerTelemetryEvent = {
+  source: PlayerEventSource;
+  name: string;
+  message?: string;
+  level: PlayerEventLevel;
+  timestamp: number;
+  data?: Record<string, unknown>;
 };
 
 export type PlayerPreparationResult =

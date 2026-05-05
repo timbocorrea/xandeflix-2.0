@@ -3,7 +3,9 @@ import type {
   MouseEvent,
   ReactNode,
 } from 'react';
-import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
+import {
+  useFocusable,
+} from '@noriginmedia/norigin-spatial-navigation';
 
 import { cn } from '../../utils/cn';
 
@@ -24,6 +26,32 @@ const DEFAULT_SCROLL_OPTIONS: ScrollIntoViewOptions = {
   block: 'nearest',
   inline: 'nearest',
 };
+
+const DPAD_DEBUG_ENABLED =
+  (import.meta.env as Record<string, string | undefined>).VITE_SPATIAL_DEBUG ===
+  'true';
+
+function setCurrentSpatialFocusKey(focusKey: string) {
+  (
+    window as Window & {
+      __XANDEFLIX_CURRENT_FOCUS_KEY?: string;
+    }
+  ).__XANDEFLIX_CURRENT_FOCUS_KEY = focusKey;
+}
+
+function logFocusableButtonDebug(
+  eventName: string,
+  payload: Record<string, unknown>,
+) {
+  if (!DPAD_DEBUG_ENABLED) {
+    return;
+  }
+
+  console.error('XANDEFLIX_DPAD_TRACE [FocusableButton]', eventName, {
+    pathname: window.location.pathname,
+    ...payload,
+  });
+}
 
 function resolveScrollTarget(
   element: HTMLElement | null,
@@ -59,8 +87,28 @@ export function FocusableButton({
 }: FocusableButtonProps) {
   const { ref, focused } = useFocusable({
     focusKey,
-    onArrowPress,
+
+    onArrowPress: (direction) => {
+      logFocusableButtonDebug('arrow press', {
+        focusKey,
+        direction,
+        focused,
+      });
+
+      if (onArrowPress) {
+        return onArrowPress(direction);
+      }
+
+      return true;
+    },
+
     onFocus: () => {
+      setCurrentSpatialFocusKey(focusKey);
+      logFocusableButtonDebug('focus', {
+        focusKey,
+        text: ref.current?.textContent?.trim().slice(0, 80) ?? null,
+      });
+
       const scrollTarget = resolveScrollTarget(
         ref.current,
         focusScrollTarget,
@@ -68,7 +116,13 @@ export function FocusableButton({
 
       scrollTarget?.scrollIntoView(focusScrollOptions);
     },
+
     onEnterPress: () => {
+      logFocusableButtonDebug('enter press', {
+        focusKey,
+        text: ref.current?.textContent?.trim().slice(0, 80) ?? null,
+      });
+
       if (onEnterPress) {
         onEnterPress();
         return;

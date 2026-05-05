@@ -21,19 +21,63 @@ function isPlayableUrlLine(line: string) {
   );
 }
 
+function forEachNonEmptyLine(
+  content: string,
+  onLine: (line: string) => void,
+) {
+  let lineStart = 0;
+
+  for (let index = 0; index <= content.length; index += 1) {
+    const charCode = content.charCodeAt(index);
+    const reachedEnd = index === content.length;
+    const isLineBreak = charCode === 10 || charCode === 13;
+
+    if (!reachedEnd && !isLineBreak) {
+      continue;
+    }
+
+    const line = content.slice(lineStart, index).trim();
+
+    if (line) {
+      onLine(line);
+    }
+
+    if (charCode === 13 && content.charCodeAt(index + 1) === 10) {
+      index += 1;
+    }
+
+    lineStart = index + 1;
+  }
+}
+
 export function analyzeM3uPlaylist(content: string): PlaylistDiagnostics {
-  const lines = content.split(/\r?\n/);
-  const nonEmptyLines = lines
-    .map((line) => line.trim())
-    .filter(Boolean);
+  let totalLines = 0;
+  let extinfLines = 0;
+  let playableUrlLines = 0;
+  let firstNonEmptyLine = '';
+
+  forEachNonEmptyLine(content, (line) => {
+    totalLines += 1;
+
+    if (totalLines === 1) {
+      firstNonEmptyLine = sanitizeLine(line);
+    }
+
+    if (line.startsWith('#EXTINF')) {
+      extinfLines += 1;
+    }
+
+    if (isPlayableUrlLine(line)) {
+      playableUrlLines += 1;
+    }
+  });
 
   return {
     contentLength: content.length,
-    totalLines: nonEmptyLines.length,
-    startsWithExtM3u: nonEmptyLines[0]?.startsWith('#EXTM3U') ?? false,
-    extinfLines: nonEmptyLines.filter((line) => line.startsWith('#EXTINF'))
-      .length,
-    playableUrlLines: nonEmptyLines.filter(isPlayableUrlLine).length,
-    firstNonEmptyLine: sanitizeLine(nonEmptyLines[0] ?? ''),
+    totalLines,
+    startsWithExtM3u: firstNonEmptyLine.startsWith('#EXTM3U'),
+    extinfLines,
+    playableUrlLines,
+    firstNonEmptyLine,
   };
 }

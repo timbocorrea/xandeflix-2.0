@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Permite playlists HTTP de fontes do usuário (Direct Source). -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

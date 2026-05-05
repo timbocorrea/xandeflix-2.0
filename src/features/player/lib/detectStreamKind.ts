@@ -5,7 +5,7 @@ function normalizeInput(value: string) {
 }
 
 function removeQueryAndHash(value: string) {
-  return value.split('#')[0]?.split('?')[0] ?? value;
+  return value.split('#')[0]?.split('?')[0]?.split('|')[0] ?? value;
 }
 
 function getExtension(value: string) {
@@ -74,6 +74,58 @@ function detectByExtension(extension: string | null): StreamKind {
   return 'unknown';
 }
 
+function detectByUrlHints(url: string): StreamKind | null {
+  const normalizedUrl = url.trim();
+
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(normalizedUrl);
+    const output = (parsedUrl.searchParams.get('output') || '').toLowerCase();
+    const type = (parsedUrl.searchParams.get('type') || '').toLowerCase();
+    const pathLower = parsedUrl.pathname.toLowerCase();
+
+    if (pathLower.endsWith('.m3u8')) {
+      return 'hls';
+    }
+
+    if (pathLower.endsWith('.ts') || pathLower.endsWith('.m2ts')) {
+      return 'mpegts';
+    }
+
+    if (output === 'hls' || output === 'm3u8' || type === 'hls' || type === 'm3u8') {
+      return 'hls';
+    }
+
+    if (output === 'ts' || output === 'mpegts') {
+      return 'mpegts';
+    }
+
+    // Padrão Xtream para live costuma vir sem extensão final.
+    if (pathLower.includes('/live/')) {
+      return 'mpegts';
+    }
+  } catch {
+    const fallbackLower = normalizedUrl.toLowerCase();
+
+    if (fallbackLower.includes('output=hls') || fallbackLower.includes('output=m3u8')) {
+      return 'hls';
+    }
+
+    if (fallbackLower.includes('output=ts') || fallbackLower.includes('output=mpegts')) {
+      return 'mpegts';
+    }
+
+    if (fallbackLower.includes('/live/')) {
+      return 'mpegts';
+    }
+  }
+
+  return null;
+}
+
 export function detectStreamKind(
   url: string,
   mimeType?: string,
@@ -82,7 +134,10 @@ export function detectStreamKind(
   const extension = getExtension(normalizedUrl);
 
   return {
-    kind: detectByMimeType(mimeType) ?? detectByExtension(extension),
+    kind:
+      detectByMimeType(mimeType) ??
+      detectByUrlHints(normalizedUrl) ??
+      detectByExtension(extension),
     url: normalizedUrl,
     extension,
     mimeType,
