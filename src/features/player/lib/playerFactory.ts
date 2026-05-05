@@ -4,7 +4,7 @@ import type {
 } from '../types/player';
 import { detectStreamKind } from './detectStreamKind';
 
-const IMPLEMENTED_PLAYER_KINDS = new Set(['mp4']);
+const IMPLEMENTED_PLAYER_KINDS = new Set(['mp4', 'hls']);
 
 export function prepareUniversalPlayerSource(
   source: UniversalPlayerSource,

@@ -8,6 +8,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { FocusableButton } from '@/components/tv/FocusableButton';
+import { createHlsAdapter } from '../lib/hlsAdapter';
 import { createNativeVideoAdapter } from '../lib/nativeVideoAdapter';
 import { prepareUniversalPlayerSource } from '../lib/playerFactory';
 import type {
@@ -61,7 +62,20 @@ export default function UniversalPlayerPage() {
       return;
     }
 
-    const adapter = createNativeVideoAdapter(videoElement);
+    if (!stream) {
+      setStatus('error');
+      setPlaybackError({
+        code: 'PLAYBACK_ERROR',
+        message: 'Tipo de stream não detectado.',
+      });
+      return;
+    }
+
+    const adapter =
+      stream.kind === 'hls'
+        ? createHlsAdapter(videoElement)
+        : createNativeVideoAdapter(videoElement);
+
     adapterRef.current = adapter;
 
     let isCancelled = false;
@@ -83,7 +97,7 @@ export default function UniversalPlayerPage() {
         setStatus('error');
         setPlaybackError({
           code: 'PLAYBACK_ERROR',
-          message: 'Não foi possível carregar o vídeo nativo.',
+          message: 'Não foi possível carregar a fonte de vídeo.',
           details: error,
         });
       });
@@ -96,7 +110,7 @@ export default function UniversalPlayerPage() {
         adapterRef.current = null;
       }
     };
-  }, [preparation, streamUrl, title]);
+  }, [preparation, stream, streamUrl, title]);
 
   const handlePlay = useCallback(async () => {
     if (!adapterRef.current) return;
@@ -135,8 +149,8 @@ export default function UniversalPlayerPage() {
           </h1>
 
           <p className="mt-4 max-w-3xl text-lg text-xf-muted">
-            Adapter MP4 nativo ativo. HLS, DASH e MPEGTS continuam bloqueados
-            até receberem adapters com import dinâmico.
+            MP4 usa vídeo nativo. HLS usa import dinâmico do hls.js somente
+            quando uma fonte .m3u8 é aberta.
           </p>
 
           <div className="mt-8 overflow-hidden rounded-2xl border border-white/10 bg-black">
@@ -165,7 +179,7 @@ export default function UniversalPlayerPage() {
             {preparation.ok && status !== 'error' ? (
               <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
                 <p className="text-lg font-black text-emerald-200">
-                  Fonte MP4 preparada com vídeo nativo.
+                  Fonte preparada: {stream?.kind?.toUpperCase()}.
                 </p>
 
                 <p className="mt-2 text-sm text-emerald-100/80">
@@ -223,6 +237,7 @@ export default function UniversalPlayerPage() {
             focusKey="player-back-button"
             className="rounded-xl bg-white px-6 py-4 text-lg font-black text-black"
             onEnterPress={() => navigate('/')}
+            onClick={() => navigate('/')}
           >
             Voltar ao catálogo
           </FocusableButton>
@@ -232,6 +247,7 @@ export default function UniversalPlayerPage() {
             className="rounded-xl bg-xf-red px-6 py-4 text-lg font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!preparation.ok || status === 'loading'}
             onEnterPress={handlePlay}
+            onClick={handlePlay}
           >
             Reproduzir
           </FocusableButton>
@@ -241,6 +257,7 @@ export default function UniversalPlayerPage() {
             className="rounded-xl bg-white/10 px-6 py-4 text-lg font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!preparation.ok}
             onEnterPress={handlePause}
+            onClick={handlePause}
           >
             Pausar
           </FocusableButton>
