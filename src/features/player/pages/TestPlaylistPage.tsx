@@ -6,7 +6,10 @@ import {
   hasConfiguredTestPlaylistUrl,
   loadTestPlaylist,
 } from '../lib/loadTestPlaylist';
-import type { IptvChannel } from '../types/playlist';
+import type {
+  IptvChannel,
+  PlaylistDiagnostics,
+} from '../types/playlist';
 
 const MAX_VISIBLE_CHANNELS = 40;
 
@@ -17,6 +20,10 @@ export default function TestPlaylistPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadStatus, setLoadStatus] = useState('Aguardando clique.');
+  const [diagnostics, setDiagnostics] = useState<PlaylistDiagnostics | null>(
+    null,
+  );
 
   const isPlaylistConfigured = hasConfiguredTestPlaylistUrl();
 
@@ -37,19 +44,32 @@ export default function TestPlaylistPage() {
   }, [channels, searchTerm]);
 
   const handleLoadPlaylist = useCallback(async () => {
+    setLoadStatus('Clique recebido. Tentando carregar playlist...');
     setIsLoading(true);
     setLoadError(null);
+    setChannels([]);
+    setDiagnostics(null);
 
     try {
       const playlist = await loadTestPlaylist();
+
       setChannels(playlist.channels);
+      setDiagnostics(playlist.diagnostics);
+      setLoadStatus(`Playlist carregada. Canais encontrados: ${playlist.total}.`);
+
+      if (playlist.total === 0) {
+        setLoadError(
+          'A playlist foi carregada, mas nenhum canal válido foi encontrado. Verifique o diagnóstico abaixo.',
+        );
+      }
     } catch (error) {
-      setChannels([]);
-      setLoadError(
+      const message =
         error instanceof Error
           ? error.message
-          : 'Erro desconhecido ao carregar playlist.',
-      );
+          : 'Erro desconhecido ao carregar playlist.';
+
+      setLoadError(message);
+      setLoadStatus(`Falha ao carregar playlist: ${message}`);
     } finally {
       setIsLoading(false);
     }
@@ -105,14 +125,63 @@ export default function TestPlaylistPage() {
               <strong className="text-white">{channels.length}</strong>
             </p>
 
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-sm font-bold uppercase text-xf-muted">
+                Diagnóstico
+              </p>
+              <p className="mt-2 text-white">{loadStatus}</p>
+
+              {diagnostics ? (
+                <dl className="mt-4 grid gap-2 text-sm">
+                  <div>
+                    <dt className="text-xf-muted">Tamanho do conteúdo</dt>
+                    <dd className="font-bold text-white">
+                      {diagnostics.contentLength} caracteres
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-xf-muted">Linhas não vazias</dt>
+                    <dd className="font-bold text-white">
+                      {diagnostics.totalLines}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-xf-muted">Começa com #EXTM3U</dt>
+                    <dd className="font-bold text-white">
+                      {diagnostics.startsWithExtM3u ? 'sim' : 'não'}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-xf-muted">Linhas #EXTINF</dt>
+                    <dd className="font-bold text-white">
+                      {diagnostics.extinfLines}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-xf-muted">Linhas de URL reproduzível</dt>
+                    <dd className="font-bold text-white">
+                      {diagnostics.playableUrlLines}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-xf-muted">Primeira linha recebida</dt>
+                    <dd className="break-all font-mono text-xs text-white">
+                      {diagnostics.firstNonEmptyLine || 'vazia'}
+                    </dd>
+                  </div>
+                </dl>
+              ) : null}
+            </div>
+
             {loadError ? (
               <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-yellow-100">
                 <p className="font-black">Falha ao carregar playlist.</p>
                 <p className="mt-2">{loadError}</p>
-                <p className="mt-2 text-sm text-yellow-100/80">
-                  Se aparecer Failed to fetch, provavelmente é bloqueio de CORS
-                  do servidor da lista.
-                </p>
               </div>
             ) : null}
           </div>
@@ -122,8 +191,12 @@ export default function TestPlaylistPage() {
               focusKey="playlist-load-button"
               className="rounded-xl bg-xf-red px-6 py-4 text-lg font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!isPlaylistConfigured || isLoading}
-              onEnterPress={handleLoadPlaylist}
-              onClick={handleLoadPlaylist}
+              onEnterPress={() => {
+                void handleLoadPlaylist();
+              }}
+              onClick={() => {
+                void handleLoadPlaylist();
+              }}
             >
               {isLoading ? 'Carregando...' : 'Carregar lista'}
             </FocusableButton>

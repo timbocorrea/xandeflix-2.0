@@ -1,3 +1,4 @@
+import { analyzeM3uPlaylist } from './analyzeM3uPlaylist';
 import { parseM3uPlaylist } from './parseM3uPlaylist';
 import type { LoadedPlaylist } from '../types/playlist';
 
@@ -10,10 +11,7 @@ export function getTestPlaylistUrl() {
 export function hasConfiguredTestPlaylistUrl() {
   const playlistUrl = getTestPlaylistUrl();
 
-  return (
-    playlistUrl.length > 0 &&
-    playlistUrl !== PLACEHOLDER_PLAYLIST_URL
-  );
+  return playlistUrl.length > 0 && playlistUrl !== PLACEHOLDER_PLAYLIST_URL;
 }
 
 export async function loadTestPlaylist(): Promise<LoadedPlaylist> {
@@ -35,10 +33,12 @@ export async function loadTestPlaylist(): Promise<LoadedPlaylist> {
   }
 
   const content = await response.text();
+  const diagnostics = analyzeM3uPlaylist(content);
   const channels = parseM3uPlaylist(content);
 
   return {
     channels,
     total: channels.length,
+    diagnostics,
   };
 }
