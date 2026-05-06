@@ -1,10 +1,8 @@
 import { maskObjectStreamUrls } from '@/lib/security/maskStreamUrl';
-
 import type { PlayerTelemetryEvent } from '../types/player';
 
 const PLAYER_DEBUG_ENABLED =
-  (import.meta.env as Record<string, string | undefined>).VITE_PLAYER_DEBUG ===
-  'true';
+  import.meta.env.DEV || import.meta.env.VITE_PLAYER_DEBUG === 'true';
 
 function normalizeDebugPayload(payload: Record<string, unknown> | undefined) {
   if (!payload) {
@@ -38,4 +36,3 @@ export function logPlayerDebugEvent(event: PlayerTelemetryEvent) {
 
   console.log(scope, event.name, event.message ?? '', payload);
 }
-

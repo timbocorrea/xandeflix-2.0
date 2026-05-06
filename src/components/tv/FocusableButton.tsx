@@ -47,7 +47,7 @@ function logFocusableButtonDebug(
     return;
   }
 
-  console.error('XANDEFLIX_DPAD_TRACE [FocusableButton]', eventName, {
+  if (import.meta.env.VITE_SPATIAL_DEBUG === 'true') console.error('XANDEFLIX_DPAD_TRACE [FocusableButton]', eventName, {
     pathname: window.location.pathname,
     ...payload,
   });

@@ -37,7 +37,7 @@ function logDirectSourceDpadDebug(
     return;
   }
 
-  console.error('XANDEFLIX_DPAD_TRACE [DirectSource]', eventName, {
+  if (import.meta.env.VITE_SPATIAL_DEBUG === 'true') console.error('XANDEFLIX_DPAD_TRACE [DirectSource]', eventName, {
     pathname: window.location.pathname,
     ...payload,
   });

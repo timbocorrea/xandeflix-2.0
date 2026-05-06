@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "node scripts/patch-capacitor-java17.cjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
