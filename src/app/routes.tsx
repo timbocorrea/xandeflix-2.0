@@ -9,6 +9,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { useAuth } from './providers/AuthProvider';
 import { isCurrentUserAdmin } from '../features/admin/services';
+import { AdminClientsPage } from '../features/admin/pages/AdminClientsPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
@@ -142,6 +143,15 @@ export function AppRoutes() {
               element={
                 <AdminRoute>
                   <AdminDashboardPage />
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/clients"
+              element={
+                <AdminRoute>
+                  <AdminClientsPage />
                 </AdminRoute>
               }
             />
