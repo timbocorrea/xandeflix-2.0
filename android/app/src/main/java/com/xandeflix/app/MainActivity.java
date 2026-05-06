@@ -16,6 +16,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(NativeAndroidPlayerPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Aguarda o WebView carregar para aplicar configurações de foco

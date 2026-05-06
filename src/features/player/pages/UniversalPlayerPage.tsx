@@ -10,6 +10,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FocusableButton } from '@/components/tv/FocusableButton';
 import { createHlsAdapter } from '../lib/hlsAdapter';
 import { createMpegTsAdapter } from '../lib/mpegTsAdapter';
+import {
+  createNativeAndroidPlayerAdapter,
+  isNativeAndroidPlayerAvailable,
+} from '../lib/nativeAndroidPlayerAdapter';
 import { createNativeVideoAdapter } from '../lib/nativeVideoAdapter';
 import { maskStreamUrl } from '@/lib/security/maskStreamUrl';
 import { logPlayerDebugEvent } from '../lib/playerDebug';
@@ -226,11 +230,13 @@ export default function UniversalPlayerPage() {
         ? createHlsAdapter(videoElement, {
             onTelemetryEvent: pushTelemetryEvent,
           })
-        : stream.kind === 'mpegts'
-          ? createMpegTsAdapter(videoElement, {
-              onTelemetryEvent: pushTelemetryEvent,
-            })
-          : createNativeVideoAdapter(videoElement);
+        : isNativeAndroidPlayerAvailable(stream.kind)
+          ? createNativeAndroidPlayerAdapter()
+          : stream.kind === 'mpegts'
+            ? createMpegTsAdapter(videoElement, {
+                onTelemetryEvent: pushTelemetryEvent,
+              })
+            : createNativeVideoAdapter(videoElement);
 
     adapterRef.current = adapter;
 
