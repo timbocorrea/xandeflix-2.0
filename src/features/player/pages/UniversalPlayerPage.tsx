@@ -119,11 +119,18 @@ export default function UniversalPlayerPage() {
 
   const stream = preparation.ok ? preparation.stream : preparation.stream;
   const preparationError = preparation.ok ? null : preparation.error;
+  const usesNativeAndroidPlayer =
+    preparation.ok && isNativeAndroidPlayerAvailable(stream?.kind);
   const currentError = playbackError ?? preparationError;
   const isPlaybackReady = preparation.ok && status !== 'unsupported';
-  const isPlaying = status === 'playing';
-  const isBusy = status === 'loading' || status === 'buffering';
-  const playbackButtonLabel = isPlaying ? 'Pausar' : 'Reproduzir';
+  const isPlaying = !usesNativeAndroidPlayer && status === 'playing';
+  const isBusy =
+    status === 'loading' || (!usesNativeAndroidPlayer && status === 'buffering');
+  const playbackButtonLabel = usesNativeAndroidPlayer
+    ? 'Abrir player'
+    : isPlaying
+      ? 'Pausar'
+      : 'Reproduzir';
 
   const pushTelemetryEvent = useCallback((event: PlayerTelemetryEvent) => {
     setTelemetryEvents((currentEvents) => {
@@ -333,6 +340,38 @@ export default function UniversalPlayerPage() {
       return;
     }
 
+    if (usesNativeAndroidPlayer) {
+      try {
+        setStatus('loading');
+        await adapter.play();
+        setStatus('ready');
+        pushPlayerEvent(
+          'NATIVE_PLAYER_OPENED',
+          'info',
+          'Player nativo Android aberto para reprodução MPEG-TS.',
+        );
+      } catch (error) {
+        const errorMessage = normalizePlaybackError(error);
+
+        setStatus('error');
+        setPlaybackError({
+          code: 'PLAYBACK_ERROR',
+          message: `Não foi possível abrir o player nativo: ${errorMessage}`,
+          details: error,
+        });
+        pushPlayerEvent(
+          'NATIVE_PLAYER_OPEN_FAILED',
+          'error',
+          'Falha ao abrir player nativo Android.',
+          {
+            message: errorMessage,
+          },
+        );
+      }
+
+      return;
+    }
+
     if (status === 'playing') {
       await adapter.pause();
       setStatus('paused');
@@ -367,7 +406,7 @@ export default function UniversalPlayerPage() {
         },
       );
     }
-  }, [pushPlayerEvent, status]);
+  }, [pushPlayerEvent, status, usesNativeAndroidPlayer]);
 
   const handleRetry = useCallback(() => {
     setPlaybackError(null);
@@ -445,7 +484,7 @@ export default function UniversalPlayerPage() {
             <video
               ref={videoRef}
               className="aspect-video w-full bg-black"
-              controls
+              controls={!usesNativeAndroidPlayer}
               playsInline
               preload="metadata"
               onPlaying={() => {
@@ -544,6 +583,24 @@ export default function UniversalPlayerPage() {
                 );
               }}
             />
+
+            {usesNativeAndroidPlayer ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/70 p-6 text-center">
+                <div className="max-w-xl rounded-2xl border border-white/10 bg-zinc-950/90 p-6 shadow-2xl">
+                  <p className="text-sm font-bold uppercase tracking-[0.3em] text-xf-red">
+                    Player nativo Android
+                  </p>
+
+                  <p className="mt-3 text-xl font-black text-white">
+                    A prévia inline não é usada para MPEG-TS.
+                  </p>
+
+                  <p className="mt-3 text-sm text-xf-muted">
+                    Clique em “Abrir player” para reproduzir este canal em tela cheia com ExoPlayer/Media3.
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             {isBusy ? (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40">
@@ -684,7 +741,7 @@ export default function UniversalPlayerPage() {
           <FocusableButton
             focusKey="player-fullscreen-button"
             className="rounded-xl bg-white/10 px-6 py-4 text-lg font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!isPlaybackReady}
+            disabled={!isPlaybackReady || usesNativeAndroidPlayer}
             onEnterPress={() => {
               void handleToggleFullscreen();
             }}
@@ -692,7 +749,11 @@ export default function UniversalPlayerPage() {
               void handleToggleFullscreen();
             }}
           >
-            {isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+            {usesNativeAndroidPlayer
+              ? 'Player nativo'
+              : isFullscreen
+                ? 'Sair da tela cheia'
+                : 'Tela cheia'}
           </FocusableButton>
         </nav>
       </div>
