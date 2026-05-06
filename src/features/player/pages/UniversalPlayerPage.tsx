@@ -11,6 +11,7 @@ import { FocusableButton } from '@/components/tv/FocusableButton';
 import { createHlsAdapter } from '../lib/hlsAdapter';
 import { createMpegTsAdapter } from '../lib/mpegTsAdapter';
 import { createNativeVideoAdapter } from '../lib/nativeVideoAdapter';
+import { maskStreamUrl } from '../lib/maskStreamUrl';
 import { logPlayerDebugEvent } from '../lib/playerDebug';
 import { prepareUniversalPlayerSource } from '../lib/playerFactory';
 import type {
@@ -103,6 +104,7 @@ export default function UniversalPlayerPage() {
 
   const streamUrl = searchParams.get('src') ?? '';
   const title = searchParams.get('title') ?? 'Conteúdo Xandeflix';
+  const maskedStreamUrl = useMemo(() => maskStreamUrl(streamUrl), [streamUrl]);
 
   const preparation = useMemo(() => {
     return prepareUniversalPlayerSource({
@@ -184,7 +186,7 @@ export default function UniversalPlayerPage() {
         preparation.error.message,
         {
           code: preparation.error.code,
-          url: streamUrl,
+          url: maskedStreamUrl,
         },
       );
 
@@ -239,7 +241,7 @@ export default function UniversalPlayerPage() {
       'Iniciando carga da fonte.',
       {
         kind: stream.kind,
-        url: stream.url,
+        url: maskedStreamUrl,
         attempt: loadAttempt + 1,
       },
     );
@@ -258,7 +260,7 @@ export default function UniversalPlayerPage() {
           'Fonte carregada e pronta para reprodução.',
           {
             kind: stream.kind,
-            url: stream.url,
+            url: maskedStreamUrl,
             attempt: loadAttempt + 1,
           },
         );
@@ -280,7 +282,7 @@ export default function UniversalPlayerPage() {
           'Falha ao carregar a fonte.',
           {
             kind: stream.kind,
-            url: stream.url,
+            url: maskedStreamUrl,
             message: errorMessage,
             attempt: loadAttempt + 1,
           },
@@ -307,6 +309,7 @@ export default function UniversalPlayerPage() {
     pushTelemetryEvent,
     stream,
     streamUrl,
+    maskedStreamUrl,
     title,
   ]);
 
@@ -595,7 +598,7 @@ export default function UniversalPlayerPage() {
               <div>
                 <dt className="text-xf-muted">URL</dt>
                 <dd className="break-all font-mono text-sm text-white/80">
-                  {streamUrl || 'nenhuma URL informada'}
+                  {maskedStreamUrl || 'nenhuma URL informada'}
                 </dd>
               </div>
             </dl>

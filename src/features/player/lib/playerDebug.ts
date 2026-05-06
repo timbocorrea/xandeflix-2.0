@@ -1,3 +1,5 @@
+import { maskObjectStreamUrls } from './maskStreamUrl';
+
 import type { PlayerTelemetryEvent } from '../types/player';
 
 const PLAYER_DEBUG_ENABLED =
@@ -22,7 +24,7 @@ export function logPlayerDebugEvent(event: PlayerTelemetryEvent) {
   }
 
   const scope = `[XANDEFLIX:PLAYER:${event.source}]`;
-  const payload = normalizeDebugPayload(event.data);
+  const payload = maskObjectStreamUrls(normalizeDebugPayload(event.data));
 
   if (event.level === 'error') {
     console.error(scope, event.name, event.message ?? '', payload);
