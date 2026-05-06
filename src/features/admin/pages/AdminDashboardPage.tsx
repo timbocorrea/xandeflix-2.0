@@ -1,6 +1,8 @@
+import { AdminLayout } from '../components/AdminLayout';
+
 export function AdminDashboardPage() {
   return (
-    <main className="xf-app min-h-screen px-8 py-10 text-white">
+    <AdminLayout>
       <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.3em] text-xf-muted">
@@ -52,6 +54,6 @@ export function AdminDashboardPage() {
           </article>
         </div>
       </section>
-    </main>
+    </AdminLayout>
   );
 }
