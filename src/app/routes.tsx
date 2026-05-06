@@ -12,6 +12,7 @@ import { isCurrentUserAdmin } from '../features/admin/services';
 import { AdminClientsPage } from '../features/admin/pages/AdminClientsPage';
 import { AdminDevicesPage } from '../features/admin/pages/AdminDevicesPage';
 import { AdminIptvSourcesPage } from '../features/admin/pages/AdminIptvSourcesPage';
+import { AdminChannelsPage } from '../features/admin/pages/AdminChannelsPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
@@ -175,6 +176,16 @@ export function AppRoutes() {
                 </AdminRoute>
               }
             />
+
+            <Route
+              path="/admin/channels"
+              element={
+                <AdminRoute>
+                  <AdminChannelsPage />
+                </AdminRoute>
+              }
+            />
+
 
             <Route
               path="/player"
