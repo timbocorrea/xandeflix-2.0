@@ -109,8 +109,12 @@ export function AdminIptvSourcesPage() {
       setSuccessMessage(
         `Fonte "${source.name}" importada com ${result.total} canais encontrados.`,
       );
-    } catch {
-      setErrorMessage('Não foi possível sincronizar a fonte IPTV.');
+    } catch (syncError) {
+      setErrorMessage(
+        syncError instanceof Error
+          ? syncError.message
+          : 'Não foi possível sincronizar a fonte IPTV.',
+      );
     } finally {
       setSyncingSourceId(null);
     }
