@@ -49,19 +49,6 @@ export interface IptvSource {
   updated_at: string;
 }
 
-export interface ChannelCache {
-  id: string;
-  iptv_source_id: string;
-  name: string;
-  logo_url: string | null;
-  group_title: string | null;
-  stream_url: string;
-  tvg_id: string | null;
-  sort_order: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface AuditLog {
   id: string;
   actor_id: string | null;
