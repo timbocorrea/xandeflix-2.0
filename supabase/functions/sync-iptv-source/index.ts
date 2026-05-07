@@ -4,6 +4,14 @@ type SyncIptvSourceRequest = {
   sourceId?: string;
 };
 
+type IptvSource = {
+  id: string;
+  name: string;
+  source_url: string;
+  type: 'm3u' | 'xtream' | 'manual';
+  is_active: boolean;
+};
+
 type ParsedChannel = {
   iptv_source_id: string;
   name: string;
@@ -106,6 +114,7 @@ function parseM3u(content: string, sourceId: string): ParsedChannel[] {
       `Canal ${channels.length + 1}`;
 
     channels.push({
+      iptv_source_id: sourceId,
       name,
       logo_url: pendingMetadata?.logo || null,
       group_title: pendingMetadata?.groupTitle || null,
@@ -117,10 +126,7 @@ function parseM3u(content: string, sourceId: string): ParsedChannel[] {
     pendingMetadata = null;
   }
 
-  return channels.map((channel) => ({
-    iptv_source_id: sourceId,
-    ...channel,
-  }));
+  return channels;
 }
 
 Deno.serve(async (request) => {
@@ -143,197 +149,206 @@ Deno.serve(async (request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    return jsonResponse(
-      {
-        error: 'Variáveis de ambiente Supabase não configuradas.',
-      },
-      500,
-    );
-  }
+    if (!supabaseUrl || !serviceRoleKey) {
+      return jsonResponse(
+        {
+          error: 'Variáveis de ambiente Supabase não configuradas.',
+        },
+        500,
+      );
+    }
 
-  const authorization = request.headers.get('Authorization');
+    const authorization = request.headers.get('Authorization');
 
-  if (!authorization) {
-    return jsonResponse(
-      {
-        error: 'Token de autenticação não informado.',
-      },
-      401,
-    );
-  }
+    if (!authorization?.startsWith('Bearer ')) {
+      return jsonResponse(
+        {
+          error: 'Token de autenticação não informado.',
+        },
+        401,
+      );
+    }
 
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-    global: {
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+    const token = authorization.replace('Bearer ', '');
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError || !user) {
+      return jsonResponse(
+        {
+          error: 'Usuário não autenticado.',
+          details: userError?.message,
+        },
+        401,
+      );
+    }
+
+    const { data: adminProfile, error: adminError } = await supabaseAdmin
+      .from('admin_profiles')
+      .select('id, role, is_active')
+      .eq('id', user.id)
+      .eq('is_active', true)
+      .single();
+
+    if (adminError || !adminProfile) {
+      return jsonResponse(
+        {
+          error: 'Acesso administrativo não autorizado.',
+          details: adminError?.message,
+        },
+        403,
+      );
+    }
+
+    let payload: SyncIptvSourceRequest;
+
+    try {
+      payload = (await request.json()) as SyncIptvSourceRequest;
+    } catch {
+      return jsonResponse(
+        {
+          error: 'Payload inválido.',
+        },
+        400,
+      );
+    }
+
+    const sourceId = payload.sourceId?.trim();
+
+    if (!sourceId) {
+      return jsonResponse(
+        {
+          error: 'sourceId é obrigatório.',
+        },
+        400,
+      );
+    }
+
+    const { data: source, error: sourceError } = await supabaseAdmin
+      .from('iptv_sources')
+      .select('id, name, source_url, type, is_active')
+      .eq('id', sourceId)
+      .single<IptvSource>();
+
+    if (sourceError || !source) {
+      return jsonResponse(
+        {
+          error: 'Fonte IPTV não encontrada.',
+          details: sourceError?.message,
+        },
+        404,
+      );
+    }
+
+    if (!source.is_active) {
+      return jsonResponse(
+        {
+          error: 'Fonte IPTV inativa.',
+        },
+        400,
+      );
+    }
+
+    if (source.type !== 'm3u') {
+      return jsonResponse(
+        {
+          error: `Sincronização automática ainda não disponível para fontes do tipo ${source.type}.`,
+          details: 'Nesta fase, apenas fontes M3U são sincronizadas automaticamente.',
+        },
+        400,
+      );
+    }
+
+    const playlistResponse = await fetch(source.source_url, {
+      method: 'GET',
       headers: {
-        Authorization: authorization,
+        Accept:
+          'application/vnd.apple.mpegurl, application/x-mpegURL, audio/mpegurl, text/plain, */*',
+        'User-Agent': 'Xandeflix/1.0',
       },
-    },
-  });
+    });
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabaseAdmin.auth.getUser(
-    authorization.replace('Bearer ', ''),
-  );
+    if (!playlistResponse.ok) {
+      return jsonResponse(
+        {
+          error: `Falha ao baixar playlist. HTTP ${playlistResponse.status}.`,
+        },
+        502,
+      );
+    }
 
-  if (userError || !user) {
-    return jsonResponse(
-      {
-        error: 'Usuário não autenticado.',
+    const content = await playlistResponse.text();
+    const channels = parseM3u(content, source.id);
+
+    if (channels.length === 0) {
+      return jsonResponse(
+        {
+          error: 'Nenhum canal válido encontrado na playlist.',
+        },
+        422,
+      );
+    }
+
+    const { error: deleteError } = await supabaseAdmin
+      .from('channels_cache')
+      .delete()
+      .eq('iptv_source_id', source.id);
+
+    if (deleteError) {
+      return jsonResponse(
+        {
+          error: 'Não foi possível limpar o cache anterior de canais.',
+          details: deleteError.message,
+        },
+        500,
+      );
+    }
+
+    const { error: insertError } = await supabaseAdmin
+      .from('channels_cache')
+      .insert(channels);
+
+    if (insertError) {
+      return jsonResponse(
+        {
+          error: 'Não foi possível salvar canais no cache.',
+          details: insertError.message,
+        },
+        500,
+      );
+    }
+
+    await supabaseAdmin
+      .from('iptv_sources')
+      .update({
+        last_sync_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', source.id);
+
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_id: user.id,
+      action: 'sync_iptv_source',
+      entity: 'iptv_sources',
+      entity_id: source.id,
+      metadata: {
+        source_name: source.name,
+        source_type: source.type,
+        channels_count: channels.length,
       },
-      401,
-    );
-  }
+    });
 
-  const { data: adminProfile, error: adminError } = await supabaseAdmin
-    .from('admin_profiles')
-    .select('id, role, is_active')
-    .eq('id', user.id)
-    .eq('is_active', true)
-    .single();
-
-  if (adminError || !adminProfile) {
-    return jsonResponse(
-      {
-        error: 'Acesso administrativo não autorizado.',
-      },
-      403,
-    );
-  }
-
-  let payload: SyncIptvSourceRequest;
-
-  try {
-    payload = (await request.json()) as SyncIptvSourceRequest;
-  } catch {
-    return jsonResponse(
-      {
-        error: 'Payload inválido.',
-      },
-      400,
-    );
-  }
-
-  const sourceId = payload.sourceId?.trim();
-
-  if (!sourceId) {
-    return jsonResponse(
-      {
-        error: 'sourceId é obrigatório.',
-      },
-      400,
-    );
-  }
-
-  const { data: source, error: sourceError } = await supabaseAdmin
-    .from('iptv_sources')
-    .select('id, name, source_url, type, is_active')
-    .eq('id', sourceId)
-    .single();
-
-  if (sourceError || !source) {
-    return jsonResponse(
-      {
-        error: 'Fonte IPTV não encontrada.',
-      },
-      404,
-    );
-  }
-
-  if (!source.is_active) {
-    return jsonResponse(
-      {
-        error: 'Fonte IPTV inativa.',
-      },
-      400,
-    );
-  }
-
-  const response = await fetch(source.source_url, {
-    method: 'GET',
-    headers: {
-      Accept:
-        'application/vnd.apple.mpegurl, application/x-mpegURL, audio/mpegurl, text/plain, */*',
-      'User-Agent': 'Xandeflix/1.0',
-    },
-  });
-
-  if (!response.ok) {
-    return jsonResponse(
-      {
-        error: `Falha ao baixar playlist. HTTP ${response.status}.`,
-      },
-      502,
-    );
-  }
-
-  const content = await response.text();
-  const channels = parseM3u(content, source.id);
-
-  if (channels.length === 0) {
-    return jsonResponse(
-      {
-        error: 'Nenhum canal válido encontrado na playlist.',
-      },
-      422,
-    );
-  }
-
-  const { error: deleteError } = await supabaseAdmin
-    .from('channels_cache')
-    .delete()
-    .eq('iptv_source_id', source.id);
-
-  if (deleteError) {
-    return jsonResponse(
-      {
-        error: 'Não foi possível limpar o cache anterior de canais.',
-      },
-      500,
-    );
-  }
-
-  const { error: insertError } = await supabaseAdmin
-    .from('channels_cache')
-    .insert(channels);
-
-  if (insertError) {
-    return jsonResponse(
-      {
-        error: 'Não foi possível salvar canais no cache.',
-        details: insertError.message,
-      },
-      500,
-    );
-  }
-
-  await supabaseAdmin
-    .from('iptv_sources')
-    .update({
-      last_sync_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', source.id);
-
-  await supabaseAdmin.from('audit_logs').insert({
-    actor_id: user.id,
-    action: 'sync_iptv_source',
-    entity: 'iptv_sources',
-    entity_id: source.id,
-    metadata: {
-      source_name: source.name,
-      channels_count: channels.length,
-    },
-  });
-
-  return jsonResponse({
-    ok: true,
-    sourceId: source.id,
-    sourceName: source.name,
-    channelsCount: channels.length,
-  });
+    return jsonResponse({
+      ok: true,
+      sourceId: source.id,
+      sourceName: source.name,
+      channelsCount: channels.length,
+    });
   } catch (error) {
     return jsonResponse(
       {

@@ -1,4 +1,5 @@
 import { supabase } from '../../../lib/supabase/supabaseClient';
+import { env } from '../../../config/env';
 
 import type { IptvSource } from '../types/admin.types';
 
@@ -22,25 +23,39 @@ type SyncIptvSourceResponse = {
 export async function importAdminPlaylistSource(
   source: IptvSource,
 ): Promise<AdminPlaylistImportResult> {
-  const { data, error } =
-    await supabase.functions.invoke<SyncIptvSourceResponse>(
-      'sync-iptv-source',
-      {
-        body: {
-          sourceId: source.id,
-        },
-      },
-    );
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
 
-  if (error) {
-    throw new Error(error.message);
+  if (sessionError || !session?.access_token) {
+    throw new Error('Sessão administrativa não encontrada.');
   }
 
-  if (!data?.ok) {
+  const response = await fetch(
+    `${env.supabaseUrl}/functions/v1/sync-iptv-source`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: env.supabaseAnonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sourceId: source.id,
+      }),
+    },
+  );
+
+  const data = (await response.json().catch(() => null)) as
+    | SyncIptvSourceResponse
+    | null;
+
+  if (!response.ok || !data?.ok) {
     throw new Error(
-      data?.error ||
-        data?.details ||
-        'Não foi possível sincronizar a fonte IPTV.',
+      data?.details ||
+        data?.error ||
+        `Não foi possível sincronizar a fonte IPTV. HTTP ${response.status}`,
     );
   }
 
