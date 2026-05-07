@@ -113,3 +113,24 @@ values (
   'super_admin',
   true
 );
+```
+
+## Validação manual concluída
+
+Validações realizadas em ambiente local:
+
+- Usuário comum autenticado tentando acessar `/admin` foi redirecionado para `/`.
+- Migration administrativa foi aplicada com sucesso no Supabase remoto.
+- Usuário `teste@xandeflix.com` foi promovido para `super_admin` em `public.admin_profiles`.
+- Usuário admin conseguiu acessar `/admin`.
+- Todas as telas administrativas abriram corretamente:
+  - `/admin/clients`
+  - `/admin/devices`
+  - `/admin/iptv-sources`
+  - `/admin/channels`
+  - `/admin/audit-logs`
+- Todas as telas exibiram estado vazio corretamente.
+- Botão `Voltar ao catálogo` funcionou.
+- Usuário deslogado tentando acessar `/admin` foi redirecionado para `/login`.
+
+Com isso, a base administrativa de consulta da Fase 9 está validada.
