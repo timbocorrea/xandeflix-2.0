@@ -8,7 +8,6 @@ import {
   listAdminIptvSources,
 } from '../services';
 
-import { importAdminPlaylistSource } from '../lib/adminPlaylistImport.service';
 
 import type { IptvSource } from '../types/admin.types';
 
@@ -48,8 +47,6 @@ export function AdminIptvSourcesPage() {
   const [type, setType] = useState<IptvSource['type']>('m3u');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [syncingSourceId, setSyncingSourceId] =
-    useState<string | null>(null);
 
   async function loadSources() {
     try {
@@ -98,26 +95,11 @@ export function AdminIptvSourcesPage() {
     }
   }
 
-  async function handleSyncSource(source: IptvSource) {
-    try {
-      setSyncingSourceId(source.id);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-
-      const result = await importAdminPlaylistSource(source);
-
-      setSuccessMessage(
-        `Fonte "${source.name}" importada com ${result.total} canais encontrados.`,
-      );
-    } catch (syncError) {
-      setErrorMessage(
-        syncError instanceof Error
-          ? syncError.message
-          : 'Não foi possível sincronizar a fonte IPTV.',
-      );
-    } finally {
-      setSyncingSourceId(null);
-    }
+  function handleSyncSource(source: IptvSource) {
+    setErrorMessage(null);
+    setSuccessMessage(
+      'Fonte "' + source.name + '" mantida apenas como autorização. A importação de canais no admin foi desativada pela nova arquitetura.',
+    );
   }
 
   return (
@@ -278,12 +260,10 @@ export function AdminIptvSourcesPage() {
                         <button
                           type="button"
                           onClick={() => handleSyncSource(source)}
-                          disabled={syncingSourceId === source.id}
+                          disabled={false}
                           className="rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:opacity-50"
                         >
-                          {syncingSourceId === source.id
-                            ? 'Sincronizando...'
-                            : 'Sincronizar'}
+                          Validar acesso
                         </button>
                       </td>
                     </tr>
