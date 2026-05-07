@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { AppShell } from '../../../components/layout/AppShell';
 import { CatalogHero } from '../../../components/media/CatalogHero';
@@ -22,6 +23,7 @@ const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 
 export function CatalogPage() {
+  const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
 
@@ -77,6 +79,26 @@ export function CatalogPage() {
         onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
         onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
       />
+
+      <div className="mb-10 rounded-3xl border border-white/10 bg-white/5 p-6">
+        <p className="text-sm font-bold uppercase tracking-[0.3em] text-xf-red">
+          IPTV autorizado
+        </p>
+        <h2 className="mt-2 text-2xl font-black text-white md:text-3xl">
+          Acessar lista vinculada ao dispositivo
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm text-xf-muted md:text-base">
+          Carregue a fonte IPTV autorizada para este dispositivo, mantendo o parse dos canais em memória local e enviando apenas o canal escolhido ao Player Universal.
+        </p>
+        <FocusableButton
+          focusKey="catalog-authorized-iptv-entry"
+          className="mt-5 inline-flex rounded-xl bg-xf-red px-6 py-4 text-base font-black text-white"
+          onEnterPress={() => navigate('/playlists/direct-source')}
+          onClick={() => navigate('/playlists/direct-source')}
+        >
+          Abrir IPTV autorizado
+        </FocusableButton>
+      </div>
 
       {visibleCatalogSections.map((section, categoryIndex) => {
         const sectionItems =
