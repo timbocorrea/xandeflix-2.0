@@ -67,6 +67,7 @@ function DirectSourcePlaylistContent() {
   const [searchTerm, setSearchTerm] = useState('');
   const maskedSourceUrl = useMemo(() => maskStreamUrl(sourceUrl), [sourceUrl]);
   const [lastProgressAt, setLastProgressAt] = useState<string | null>(null);
+  const [authorizedLoadError, setAuthorizedLoadError] = useState<string | null>(null);
 
   const filteredChannels = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -104,13 +105,23 @@ function DirectSourcePlaylistContent() {
   }, [loadFromSource, sourceUrl]);
 
   const handleLoadAuthorizedSource = useCallback(() => {
-    void (async () => {
-      const deviceIdentifier = getOrCreateDeviceIdentifier();
-      const authorizedSource = await getAuthorizedIptvSource(deviceIdentifier);
-      const playlistSource = mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
+    setAuthorizedLoadError(null);
 
-      setSourceUrl(playlistSource.url);
-      await loadFromSource(playlistSource);
+    void (async () => {
+      try {
+        const deviceIdentifier = getOrCreateDeviceIdentifier();
+        const authorizedSource = await getAuthorizedIptvSource(deviceIdentifier);
+        const playlistSource = mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
+
+        setSourceUrl(playlistSource.url);
+        await loadFromSource(playlistSource);
+      } catch (loadError) {
+        setAuthorizedLoadError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Não foi possível carregar a fonte IPTV autorizada.',
+        );
+      }
     })();
   }, [loadFromSource]);
 
@@ -251,6 +262,13 @@ function DirectSourcePlaylistContent() {
             <p className="mt-3 break-all font-mono text-xs text-xf-muted">
               URL protegida para diagnóstico: {maskedSourceUrl}
             </p>
+          ) : null}
+
+          {authorizedLoadError ? (
+            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+              <p className="font-bold">Falha ao carregar fonte autorizada</p>
+              <p className="mt-1">{authorizedLoadError}</p>
+            </div>
           ) : null}
 
           <div className="mt-6 flex flex-wrap gap-4">
