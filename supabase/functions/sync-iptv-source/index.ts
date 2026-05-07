@@ -254,11 +254,24 @@ Deno.serve(async (request) => {
       );
     }
 
-    if (source.type !== 'm3u') {
+    if (source.type === 'manual') {
       return jsonResponse(
         {
-          error: `Sincronização automática ainda não disponível para fontes do tipo ${source.type}.`,
-          details: 'Nesta fase, apenas fontes M3U são sincronizadas automaticamente.',
+          error: 'Sincronização automática ainda não disponível para fontes manuais.',
+          details: 'Nesta fase, fontes manuais devem ser cadastradas individualmente ou convertidas para M3U/Xtream.',
+        },
+        400,
+      );
+    }
+
+    if (
+      source.type === 'xtream' &&
+      !source.source_url.toLowerCase().includes('get.php')
+    ) {
+      return jsonResponse(
+        {
+          error: 'URL Xtream inválida para sincronização automática.',
+          details: 'Use uma URL no formato get.php?username=...&password=...&type=m3u_plus&output=ts.',
         },
         400,
       );
