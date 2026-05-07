@@ -22,10 +22,6 @@ const UniversalPlayerPage = lazy(
   () => import('../features/player/pages/UniversalPlayerPage'),
 );
 
-const TestPlaylistPage = lazy(
-  () => import('../features/player/pages/TestPlaylistPage'),
-);
-
 const DirectSourcePlaylistPage = lazy(
   () => import('../features/playlists/pages/DirectSourcePlaylistPage'),
 );
@@ -191,15 +187,6 @@ export function AppRoutes() {
               element={
                 <ProtectedRoute>
                   <UniversalPlayerPage />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/player/test-playlist"
-              element={
-                <ProtectedRoute>
-                  <TestPlaylistPage />
                 </ProtectedRoute>
               }
             />
