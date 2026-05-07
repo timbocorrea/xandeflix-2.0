@@ -1,3 +1,6 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
 import { AppShell } from '../../../components/layout/AppShell';
 import { CatalogHero } from '../../../components/media/CatalogHero';
 import { MediaCard } from '../../../components/media/MediaCard';
@@ -8,45 +11,78 @@ import { useAuth } from '../../../app/providers/AuthProvider';
 import { useRouteInitialFocus } from '../../../hooks/useRouteInitialFocus';
 import { useCatalogGridNavigation } from '../../../hooks/useCatalogGridNavigation';
 import { catalogSections } from '../data/catalogSections';
+import { listCatalogChannelSections } from '../services/catalogChannels.service';
+import type { CatalogSection } from '../types';
 import {
   getCategoryItemFocusKey,
   getCategorySectionFocusKey,
   getCategorySeeAllFocusKey,
 } from '../../../lib/spatial/categoryFocusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
-import { useEffect, useMemo, useState } from 'react';
-
 
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 
 export function CatalogPage() {
+  const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
+
+  const [dynamicSections, setDynamicSections] =
+    useState<CatalogSection[]>(catalogSections);
   const [visibleSectionCount, setVisibleSectionCount] = useState(
-  isTv ? INITIAL_TV_VISIBLE_SECTIONS : catalogSections.length,
-);
+    isTv ? INITIAL_TV_VISIBLE_SECTIONS : catalogSections.length,
+  );
 
-useEffect(() => {
-  if (!isTv) {
-    setVisibleSectionCount(catalogSections.length);
-    return;
-  }
+  useEffect(() => {
+    let isMounted = true;
 
-  setVisibleSectionCount(INITIAL_TV_VISIBLE_SECTIONS);
+    async function loadCatalogSections() {
+      try {
+        const channelSections = await listCatalogChannelSections();
 
-  const timer = window.setTimeout(() => {
-    setVisibleSectionCount(catalogSections.length);
-  }, TV_REMAINING_SECTIONS_DELAY_MS);
+        if (!isMounted) {
+          return;
+        }
 
-  return () => window.clearTimeout(timer);
-}, [isTv]);
+        setDynamicSections(
+          channelSections.length > 0 ? channelSections : catalogSections,
+        );
+      } catch {
+        if (isMounted) {
+          setDynamicSections(catalogSections);
+        }
+      }
+    }
 
-const visibleCatalogSections = useMemo(
-  () => catalogSections.slice(0, visibleSectionCount),
-  [visibleSectionCount],
-);
+    void loadCatalogSections();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTv) {
+      setVisibleSectionCount(dynamicSections.length);
+      return;
+    }
+
+    setVisibleSectionCount(INITIAL_TV_VISIBLE_SECTIONS);
+
+    const timer = window.setTimeout(() => {
+      setVisibleSectionCount(dynamicSections.length);
+    }, TV_REMAINING_SECTIONS_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [isTv, dynamicSections.length]);
+
+  const visibleCatalogSections = useMemo(
+    () => dynamicSections.slice(0, visibleSectionCount),
+    [dynamicSections, visibleSectionCount],
+  );
+
   useRouteInitialFocus();
 
   const gridClassName = isTv
@@ -57,7 +93,7 @@ const visibleCatalogSections = useMemo(
 
   const spatialNavigation = useCatalogGridNavigation({
     columnsPerRow,
-    sections: catalogSections,
+    sections: dynamicSections,
   });
 
   return (
@@ -79,7 +115,7 @@ const visibleCatalogSections = useMemo(
       {visibleCatalogSections.map((section, categoryIndex) => {
         const sectionItems =
           isTv &&
-          visibleSectionCount < catalogSections.length &&
+          visibleSectionCount < dynamicSections.length &&
           categoryIndex === 0
             ? section.items.slice(0, INITIAL_TV_VISIBLE_ITEMS_PER_SECTION)
             : section.items;
@@ -144,6 +180,15 @@ const visibleCatalogSections = useMemo(
                   focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
                   onEnterPress={() => {
                     spatialDebug('catalog-grid', 'Abrir item:', item.title);
+
+                    if (item.streamUrl) {
+                      const params = new URLSearchParams({
+                        src: item.streamUrl,
+                        title: item.title,
+                      });
+
+                      navigate(`/player?${params.toString()}`);
+                    }
                   }}
                   onArrowPress={(direction) =>
                     spatialNavigation.handleCategoryCardArrowPress(
