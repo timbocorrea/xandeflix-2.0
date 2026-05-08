@@ -1,8 +1,43 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 import { AdminLayout } from '../components/AdminLayout';
-import { listAdminClients } from '../services';
-import type { Client } from '../types/admin.types';
+import {
+  createAdminClient,
+  createAdminDevice,
+  createAdminIptvSource,
+  listAdminClients,
+} from '../services';
+import type { Client, ClientStatus, IptvSourceType } from '../types/admin.types';
+
+type ClientCreationForm = {
+  name: string;
+  email: string;
+  phone: string;
+  status: ClientStatus;
+  expires_at: string;
+  notes: string;
+  device_identifier: string;
+  device_name: string;
+  platform: string;
+  provider_name: string;
+  source_url: string;
+  source_type: IptvSourceType;
+};
+
+const INITIAL_FORM: ClientCreationForm = {
+  name: '',
+  email: '',
+  phone: '',
+  status: 'active',
+  expires_at: '',
+  notes: '',
+  device_identifier: '',
+  device_name: '',
+  platform: 'android-tv',
+  provider_name: '',
+  source_url: '',
+  source_type: 'm3u',
+};
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -23,41 +58,115 @@ function getStatusLabel(status: Client['status']) {
   return labels[status];
 }
 
+function normalizeOptionalValue(value: string) {
+  const normalizedValue = value.trim();
+
+  return normalizedValue ? normalizedValue : null;
+}
+
 export function AdminClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [form, setForm] = useState<ClientCreationForm>(INITIAL_FORM);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const loadClients = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setErrorMessage(null);
+
+      const data = await listAdminClients();
+
+      setClients(data);
+    } catch {
+      setErrorMessage('Não foi possível carregar os clientes.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let isMounted = true;
+    void loadClients();
+  }, [loadClients]);
 
-    async function loadClients() {
-      try {
-        setIsLoading(true);
-        setErrorMessage(null);
+  const updateFormField = <Field extends keyof ClientCreationForm>(
+    field: Field,
+    value: ClientCreationForm[Field],
+  ) => {
+    setForm((currentForm) => ({
+      ...currentForm,
+      [field]: value,
+    }));
+  };
 
-        const data = await listAdminClients();
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-        if (isMounted) {
-          setClients(data);
-        }
-      } catch {
-        if (isMounted) {
-          setErrorMessage('Não foi possível carregar os clientes.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
+    const clientName = form.name.trim();
+    const deviceIdentifier = form.device_identifier.trim();
+    const providerName = form.provider_name.trim();
+    const sourceUrl = form.source_url.trim();
+
+    if (!clientName) {
+      setErrorMessage('Informe o nome do cliente.');
+      return;
     }
 
-    void loadClients();
+    if ((deviceIdentifier || providerName || sourceUrl) && !deviceIdentifier) {
+      setErrorMessage('Informe o ID permanente do dispositivo.');
+      return;
+    }
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+    if ((providerName || sourceUrl) && (!providerName || !sourceUrl)) {
+      setErrorMessage('Informe o nome do provedor e a URL da lista IPTV.');
+      return;
+    }
+
+    try {
+      setIsCreating(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const createdClient = await createAdminClient({
+        name: clientName,
+        email: normalizeOptionalValue(form.email),
+        phone: normalizeOptionalValue(form.phone),
+        status: form.status,
+        expires_at: normalizeOptionalValue(form.expires_at),
+        notes: normalizeOptionalValue(form.notes),
+      });
+
+      if (deviceIdentifier) {
+        await createAdminDevice({
+          client_id: createdClient.id,
+          device_name: normalizeOptionalValue(form.device_name) ?? 'Dispositivo principal',
+          device_identifier: deviceIdentifier,
+          platform: normalizeOptionalValue(form.platform),
+          is_active: true,
+        });
+      }
+
+      if (providerName && sourceUrl) {
+        await createAdminIptvSource({
+          client_id: createdClient.id,
+          name: providerName,
+          source_url: sourceUrl,
+          type: form.source_type,
+          is_active: true,
+        });
+      }
+
+      setSuccessMessage('Cliente cadastrado e vínculos autorizados criados com sucesso.');
+      setForm(INITIAL_FORM);
+      await loadClients();
+    } catch {
+      setErrorMessage('Não foi possível cadastrar o cliente e seus vínculos.');
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   return (
     <AdminLayout>
@@ -68,15 +177,191 @@ export function AdminClientsPage() {
           </p>
           <h1 className="mt-3 text-4xl font-black tracking-tight">Clientes</h1>
           <p className="mt-3 max-w-3xl text-base text-xf-muted">
-            Lista administrativa dos clientes cadastrados no Xandeflix.
+            Cadastre clientes e vincule o ID permanente do dispositivo à lista
+            IPTV individual autorizada.
           </p>
         </div>
+
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-2xl border border-white/10 bg-white/5 p-6"
+        >
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.3em] text-xf-red">
+              Novo cliente autorizado
+            </p>
+            <h2 className="mt-2 text-2xl font-black text-white">
+              Cliente + dispositivo + lista IPTV
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-xf-muted">
+              A lista não é global. Ela será vinculada ao cliente e entregue
+              somente ao dispositivo cujo ID permanente foi informado.
+            </p>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Nome do cliente *
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.name}
+                onChange={(event) => updateFormField('name', event.target.value)}
+                placeholder="Ex.: João Silva"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Status
+              <select
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.status}
+                onChange={(event) =>
+                  updateFormField('status', event.target.value as ClientStatus)
+                }
+              >
+                <option value="active">Ativo</option>
+                <option value="inactive">Inativo</option>
+                <option value="expired">Expirado</option>
+                <option value="blocked">Bloqueado</option>
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              E-mail
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.email}
+                onChange={(event) => updateFormField('email', event.target.value)}
+                placeholder="cliente@email.com"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Telefone
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.phone}
+                onChange={(event) => updateFormField('phone', event.target.value)}
+                placeholder="(62) 99999-9999"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Vencimento
+              <input
+                type="date"
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.expires_at}
+                onChange={(event) => updateFormField('expires_at', event.target.value)}
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              ID permanente do dispositivo
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 font-mono text-white outline-none focus:border-xf-red"
+                value={form.device_identifier}
+                onChange={(event) =>
+                  updateFormField('device_identifier', event.target.value)
+                }
+                placeholder="xf-..."
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Nome do dispositivo
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.device_name}
+                onChange={(event) =>
+                  updateFormField('device_name', event.target.value)
+                }
+                placeholder="Fire Stick da sala"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Plataforma
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.platform}
+                onChange={(event) => updateFormField('platform', event.target.value)}
+                placeholder="android-tv"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Nome do provedor
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.provider_name}
+                onChange={(event) =>
+                  updateFormField('provider_name', event.target.value)
+                }
+                placeholder="Provedor IPTV do cliente"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white">
+              Tipo da lista
+              <select
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.source_type}
+                onChange={(event) =>
+                  updateFormField('source_type', event.target.value as IptvSourceType)
+                }
+              >
+                <option value="m3u">M3U</option>
+                <option value="xtream">Xtream</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white md:col-span-2">
+              URL da lista IPTV
+              <input
+                className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.source_url}
+                onChange={(event) => updateFormField('source_url', event.target.value)}
+                placeholder="https://..."
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-semibold text-white md:col-span-2">
+              Observações
+              <textarea
+                className="min-h-24 rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white outline-none focus:border-xf-red"
+                value={form.notes}
+                onChange={(event) => updateFormField('notes', event.target.value)}
+                placeholder="Observações administrativas..."
+              />
+            </label>
+          </div>
+
+          {errorMessage ? (
+            <p className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {errorMessage}
+            </p>
+          ) : null}
+
+          {successMessage ? (
+            <p className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {successMessage}
+            </p>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={isCreating}
+            className="mt-6 rounded-xl bg-xf-red px-6 py-3 text-sm font-black uppercase tracking-[0.2em] text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isCreating ? 'Cadastrando...' : 'Cadastrar cliente autorizado'}
+          </button>
+        </form>
 
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
           {isLoading ? (
             <div className="p-6 text-sm text-xf-muted">Carregando clientes...</div>
-          ) : errorMessage ? (
-            <div className="p-6 text-sm text-red-300">{errorMessage}</div>
           ) : clients.length === 0 ? (
             <div className="p-6 text-sm text-xf-muted">
               Nenhum cliente cadastrado até o momento.
