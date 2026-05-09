@@ -4,6 +4,7 @@ import { AdminLayout } from '../components/AdminLayout';
 
 import {
   createAdminLicense,
+  createAdminLicenseIptvSource,
   listAdminLicenseDevices,
   listAdminLicenseIptvSources,
   listAdminLicenses,
@@ -78,6 +79,10 @@ export function AdminLicensesPage() {
   const [licenseSources, setLicenseSources] = useState<LicenseIptvSource[]>([]);
   const [playbackSessions, setPlaybackSessions] = useState<PlaybackSession[]>([]);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isCreatingSource, setIsCreatingSource] = useState(false);
+  const [sourceName, setSourceName] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceType, setSourceType] = useState<LicenseIptvSource['type']>('m3u');
 
   const activeLicensesCount = useMemo(
     () => licenses.filter((license) => license.status === 'active').length,
@@ -122,6 +127,46 @@ export function AdminLicensesPage() {
       setErrorMessage('Não foi possível carregar os detalhes da licença.');
     } finally {
       setIsLoadingDetails(false);
+    }
+  }
+
+  async function handleCreateLicenseIptvSource(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedLicense) {
+      setErrorMessage('Selecione uma licença antes de cadastrar a fonte IPTV.');
+      return;
+    }
+
+    if (!sourceName.trim() || !sourceUrl.trim()) {
+      setErrorMessage('Informe o nome e a URL da fonte IPTV.');
+      return;
+    }
+
+    try {
+      setIsCreatingSource(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      await createAdminLicenseIptvSource({
+        license_id: selectedLicense.id,
+        name: sourceName,
+        source_url: sourceUrl,
+        type: sourceType,
+        is_active: true,
+        created_by: 'admin',
+      });
+
+      setSuccessMessage('Fonte IPTV vinculada à licença com sucesso.');
+      setSourceName('');
+      setSourceUrl('');
+      setSourceType('m3u');
+
+      await loadLicenseDetails(selectedLicense);
+    } catch {
+      setErrorMessage('Não foi possível cadastrar a fonte IPTV da licença.');
+    } finally {
+      setIsCreatingSource(false);
     }
   }
 
@@ -459,6 +504,43 @@ export function AdminLicensesPage() {
               <p className="mt-1 text-sm text-xf-muted">
                 {licenseSources.length} fonte(s) vinculada(s).
               </p>
+
+              <form
+                onSubmit={handleCreateLicenseIptvSource}
+                className="mt-4 flex flex-col gap-3 rounded-xl border border-white/10 bg-black/20 p-3"
+              >
+                <input
+                  value={sourceName}
+                  onChange={(event) => setSourceName(event.target.value)}
+                  placeholder="Nome da lista"
+                  className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+                />
+
+                <input
+                  value={sourceUrl}
+                  onChange={(event) => setSourceUrl(event.target.value)}
+                  placeholder="URL M3U / Xtream"
+                  className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+                />
+
+                <select
+                  value={sourceType}
+                  onChange={(event) => setSourceType(event.target.value as LicenseIptvSource['type'])}
+                  className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+                >
+                  <option value="m3u">M3U</option>
+                  <option value="xtream">Xtream</option>
+                  <option value="manual">Manual</option>
+                </select>
+
+                <button
+                  type="submit"
+                  disabled={isCreatingSource}
+                  className="rounded-xl bg-xf-red px-4 py-3 text-xs font-black text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isCreatingSource ? 'Salvando...' : 'Adicionar fonte'}
+                </button>
+              </form>
 
               <div className="mt-4 flex flex-col gap-3">
                 {licenseSources.length === 0 ? (
