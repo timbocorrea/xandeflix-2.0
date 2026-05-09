@@ -5,6 +5,7 @@ const adminNavItems = [
   { label: 'Visão geral', to: '/admin' },
   { label: 'Clientes', to: '/admin/clients' },
   { label: 'Dispositivos', to: '/admin/devices' },
+  { label: 'Licenças', to: '/admin/licenses' },
   { label: 'Fontes IPTV', to: '/admin/iptv-sources' },
   { label: 'Auditoria', to: '/admin/audit-logs' },
 ];

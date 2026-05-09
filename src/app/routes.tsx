@@ -12,6 +12,7 @@ import { isCurrentUserAdmin } from '../features/admin/services';
 import { AdminClientsPage } from '../features/admin/pages/AdminClientsPage';
 import { AdminDevicesPage } from '../features/admin/pages/AdminDevicesPage';
 import { AdminIptvSourcesPage } from '../features/admin/pages/AdminIptvSourcesPage';
+import { AdminLicensesPage } from '../features/admin/pages/AdminLicensesPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { LoginPage } from '../features/auth/pages/LoginPage';
@@ -160,6 +161,15 @@ export function AppRoutes() {
               element={
                 <AdminRoute>
                   <AdminDevicesPage />
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/licenses"
+              element={
+                <AdminRoute>
+                  <AdminLicensesPage />
                 </AdminRoute>
               }
             />
