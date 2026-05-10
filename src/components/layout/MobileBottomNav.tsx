@@ -21,7 +21,7 @@ const mobileItems = [
     label: 'Canais',
     icon: Tv,
     navId: 'mobile-channels',
-    path: '/playlists/direct-source',
+    path: '/live',
   },
   {
     label: 'Ajustes',

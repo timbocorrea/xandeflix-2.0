@@ -133,3 +133,48 @@ button {
     transform: scale(1.03);
   }
 }
+/* Live TV layout: força colunas também em WebView/Fire Stick com largura lógica menor. */
+.xf-live-tv-layout {
+  grid-template-columns: 260px 340px minmax(0, 1fr);
+}
+
+@media (max-width: 900px) {
+  .xf-live-tv-layout {
+    grid-template-columns: 220px 300px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .xf-live-tv-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Fire Stick / Android TV WebView: reduz escala da tela Live para caber melhor. */
+@media (min-width: 761px) and (max-width: 900px) {
+  .xf-live-tv-layout {
+    width: 125%;
+    min-height: calc((100vh - 7rem) / 0.8);
+    transform: scale(0.8);
+    transform-origin: top left;
+    grid-template-columns: 260px 340px minmax(0, 1fr);
+  }
+}
+
+/* Ajuste forte de escala para Live TV em Android TV / Fire Stick / WebView. */
+@media (min-width: 761px) {
+  .xf-live-tv-layout {
+    zoom: 0.8;
+    width: 125%;
+    grid-template-columns: 260px 340px minmax(0, 1fr);
+  }
+}
+
+/* Correção final Fire Stick: manter 3 colunas sem estourar lateral. */
+@media (min-width: 761px) {
+  .xf-live-tv-layout {
+    zoom: 0.8;
+    width: 100%;
+    grid-template-columns: 230px 285px minmax(0, 1fr);
+  }
+}

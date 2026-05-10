@@ -27,6 +27,10 @@ const DirectSourcePlaylistPage = lazy(
   () => import('../features/playlists/pages/DirectSourcePlaylistPage'),
 );
 
+const LiveTvPage = lazy(
+  () => import('../features/live/pages/LiveTvPage'),
+);
+
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
 
@@ -191,6 +195,15 @@ export function AppRoutes() {
                 </AdminRoute>
               }
             />
+
+              <Route
+                path="/live"
+                element={
+                  <ProtectedRoute>
+                    <LiveTvPage />
+                  </ProtectedRoute>
+                }
+              />
 
             <Route
               path="/player"

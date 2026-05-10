@@ -28,7 +28,7 @@ const menuItems = [
     label: 'Canais',
     icon: Tv,
     navId: 'sidebar-channels',
-    path: '/playlists/direct-source',
+    path: '/live',
   },
   {
     label: 'Filmes',

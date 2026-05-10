@@ -93,8 +93,8 @@ export function CatalogPage() {
         <FocusableButton
           focusKey="catalog-authorized-iptv-entry"
           className="mt-5 inline-flex rounded-xl bg-xf-red px-6 py-4 text-base font-black text-white"
-          onEnterPress={() => navigate('/playlists/direct-source')}
-          onClick={() => navigate('/playlists/direct-source')}
+          onEnterPress={() => navigate('/live')}
+          onClick={() => navigate('/live')}
         >
           Abrir IPTV autorizado
         </FocusableButton>
