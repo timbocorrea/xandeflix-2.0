@@ -13,7 +13,7 @@
 
   --radius-card: 0.75rem;
 
-  --shadow-tv-focus: 0 0 0 4px #E50914;
+  --shadow-tv-focus: 0 0 0 2px #E50914;
 }
 
 :root {
@@ -72,8 +72,8 @@ button {
 
 .tv-focusable:focus-visible,
 .tv-focusable[data-focused="true"] {
-  outline: 4px solid #E50914;
-  outline-offset: 2px;
+  outline: 2px solid #E50914;
+  outline-offset: 1px;
   transform: scale(1.08);
 }
 

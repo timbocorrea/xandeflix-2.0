@@ -22,7 +22,8 @@ export function AppHeader({
   onSignOut,
   navigation,
 }: AppHeaderProps) {
-  const { isMobile } = useDeviceType();
+  const { isMobile, isTv } = useDeviceType();
+  const shouldShowActions = !isTv;
 
   return (
     <header className="sticky top-0 z-30 flex h-20 items-center justify-between bg-gradient-to-b from-black via-xf-bg to-transparent px-4 md:px-8 lg:px-10">
@@ -36,49 +37,51 @@ export function AppHeader({
         </p>
       </div>
 
-      <FocusableSection
-        focusKey={FOCUS_KEYS.HEADER_ACTIONS_SECTION}
-        className="flex items-center gap-3"
-      >
-        {!isMobile && (
-          <FocusableButton
-            focusKey={FOCUS_KEYS.HEADER_SEARCH_BUTTON}
-            className="inline-flex rounded-full bg-xf-surface-soft p-3 text-white"
-            aria-label="Pesquisar"
-            onEnterPress={() => {
-              spatialDebug('header', 'Pesquisar');
-            }}
-            onArrowPress={navigation?.onSearchArrowPress}
-          >
-            <Search size={22} />
-          </FocusableButton>
-        )}
-
-        {!isMobile && (
-          <FocusableButton
-            focusKey={FOCUS_KEYS.HEADER_PROFILE_BUTTON}
-            className="inline-flex rounded-full bg-xf-surface-soft p-3 text-white"
-            aria-label="Perfil"
-            onEnterPress={() => {
-              spatialDebug('header', 'Perfil');
-            }}
-            onArrowPress={navigation?.onProfileArrowPress}
-          >
-            <UserRound size={22} />
-          </FocusableButton>
-        )}
-
-        <FocusableButton
-          focusKey={FOCUS_KEYS.HEADER_LOGOUT_BUTTON}
-          className="inline-flex items-center gap-2 rounded-full bg-xf-red px-4 py-3 text-sm font-bold text-white"
-          onEnterPress={onSignOut}
-          onClick={onSignOut}
-          onArrowPress={navigation?.onLogoutArrowPress}
+      {shouldShowActions ? (
+        <FocusableSection
+          focusKey={FOCUS_KEYS.HEADER_ACTIONS_SECTION}
+          className="flex items-center gap-3"
         >
-          <LogOut size={18} />
-          <span className={isMobile ? 'hidden' : 'inline'}>Sair</span>
-        </FocusableButton>
-      </FocusableSection>
+          {!isMobile && (
+            <FocusableButton
+              focusKey={FOCUS_KEYS.HEADER_SEARCH_BUTTON}
+              className="inline-flex rounded-full bg-xf-surface-soft p-3 text-white"
+              aria-label="Pesquisar"
+              onEnterPress={() => {
+                spatialDebug('header', 'Pesquisar');
+              }}
+              onArrowPress={navigation?.onSearchArrowPress}
+            >
+              <Search size={22} />
+            </FocusableButton>
+          )}
+
+          {!isMobile && (
+            <FocusableButton
+              focusKey={FOCUS_KEYS.HEADER_PROFILE_BUTTON}
+              className="inline-flex rounded-full bg-xf-surface-soft p-3 text-white"
+              aria-label="Perfil"
+              onEnterPress={() => {
+                spatialDebug('header', 'Perfil');
+              }}
+              onArrowPress={navigation?.onProfileArrowPress}
+            >
+              <UserRound size={22} />
+            </FocusableButton>
+          )}
+
+          <FocusableButton
+            focusKey={FOCUS_KEYS.HEADER_LOGOUT_BUTTON}
+            className="inline-flex items-center gap-2 rounded-full bg-xf-red px-4 py-3 text-sm font-bold text-white"
+            onEnterPress={onSignOut}
+            onClick={onSignOut}
+            onArrowPress={navigation?.onLogoutArrowPress}
+          >
+            <LogOut size={18} />
+            <span className={isMobile ? 'hidden' : 'inline'}>Sair</span>
+          </FocusableButton>
+        </FocusableSection>
+      ) : null}
     </header>
   );
 }

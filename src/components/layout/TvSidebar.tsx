@@ -5,10 +5,13 @@ import {
   Search,
   Settings,
   Tv,
+  UserRound,
+  LogOut,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 
@@ -47,45 +50,77 @@ const menuItems = [
   },
 ];
 
-export function TvSidebar() {
+interface TvSidebarProps {
+  onSignOut: () => void;
+}
+
+export function TvSidebar({ onSignOut }: TvSidebarProps) {
   const navigate = useNavigate();
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-24 flex-col items-center border-r border-white/5 bg-black/80 py-6 backdrop-blur">
-      <div className="mb-10 flex size-12 items-center justify-center rounded-2xl bg-xf-red text-xl font-black text-white">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-16 flex-col items-center bg-black/80 py-5 backdrop-blur">
+      <div className="mb-8 flex size-10 items-center justify-center rounded-xl bg-xf-red text-lg font-black text-white">
         X
       </div>
 
       <FocusableSection
-        focusKey="sidebar-section"
-        className="flex flex-1 flex-col items-center gap-4"
+        focusKey={FOCUS_KEYS.SIDEBAR_SECTION}
+        className="flex min-h-0 flex-1 flex-col items-center"
       >
-        {menuItems.map((item) => {
-          const Icon = item.icon;
+        <div className="flex flex-col items-center gap-3">
+          <FocusableButton
+            focusKey={FOCUS_KEYS.SIDEBAR_PROFILE}
+            className="group flex size-11 items-center justify-center rounded-xl bg-transparent text-xf-muted hover:text-white"
+            aria-label="Perfil"
+            title="Perfil"
+            onEnterPress={() => {
+              spatialDebug('sidebar', 'Perfil');
+            }}
+            onClick={() => {
+              spatialDebug('sidebar', 'Perfil');
+            }}
+          >
+            <UserRound size={20} />
+          </FocusableButton>
 
-          const handlePress = () => {
-            if (item.path) {
-              navigate(item.path);
-              return;
-            }
+          {menuItems.map((item) => {
+            const Icon = item.icon;
 
-            spatialDebug('sidebar', 'Menu:', item.label);
-          };
+            const handlePress = () => {
+              if (item.path) {
+                navigate(item.path);
+                return;
+              }
 
-          return (
-            <FocusableButton
-              key={item.navId}
-              focusKey={item.navId}
-              className="group flex size-14 items-center justify-center rounded-2xl bg-transparent text-xf-muted hover:text-white"
-              aria-label={item.label}
-              title={item.label}
-              onEnterPress={handlePress}
-              onClick={handlePress}
-            >
-              <Icon size={26} />
-            </FocusableButton>
-          );
-        })}
+              spatialDebug('sidebar', 'Menu:', item.label);
+            };
+
+            return (
+              <FocusableButton
+                key={item.navId}
+                focusKey={item.navId}
+                className="group flex size-11 items-center justify-center rounded-xl bg-transparent text-xf-muted hover:text-white"
+                aria-label={item.label}
+                title={item.label}
+                onEnterPress={handlePress}
+                onClick={handlePress}
+              >
+                <Icon size={20} />
+              </FocusableButton>
+            );
+          })}
+        </div>
+
+        <FocusableButton
+          focusKey={FOCUS_KEYS.SIDEBAR_LOGOUT}
+          className="mt-auto flex size-11 items-center justify-center rounded-xl bg-xf-red text-white"
+          aria-label="Sair"
+          title="Sair"
+          onEnterPress={onSignOut}
+          onClick={onSignOut}
+        >
+          <LogOut size={19} />
+        </FocusableButton>
       </FocusableSection>
     </aside>
   );

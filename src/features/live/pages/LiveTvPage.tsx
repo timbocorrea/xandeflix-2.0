@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/app/providers/AuthProvider";
@@ -84,7 +84,7 @@ export default function LiveTvPage() {
         setSourceLoadError(
           loadError instanceof Error
             ? loadError.message
-            : "Não foi possível carregar os canais ao vivo.",
+            : "NÃ£o foi possÃ­vel carregar os canais ao vivo.",
         );
       }
     })();
@@ -151,14 +151,19 @@ export default function LiveTvPage() {
   const userFacingError = sourceLoadError ?? error;
 
   return (
-    <AppShell userEmail={user?.email} onSignOut={() => void signOut()}>
-      <section className="xf-live-tv-layout grid min-h-[calc(100vh-7rem)] gap-4 text-white">
-        <aside className="rounded-2xl border border-white/10 bg-black/70 p-3">
+    <AppShell
+      userEmail={user?.email}
+      onSignOut={() => void signOut()}
+      hideHeaderOnTv
+      mainClassName="px-0 pt-0 pb-0 pr-4 md:px-0 md:pt-0 md:pb-0 md:pr-4 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-4"
+    >
+      <section className="xf-live-tv-layout grid min-h-screen md:h-[125vh] gap-x-0 gap-y-4 text-white">
+        <aside className="h-full min-h-full bg-black/70 p-3">
           <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
             Grupos
           </p>
 
-          <div className="mt-5 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+          <div className="mt-5 max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto pr-1">
             {groups.length > 0 ? (
               groups.map((group, index) => {
                 const isActive = group.name === activeGroupName;
@@ -191,16 +196,18 @@ export default function LiveTvPage() {
           </div>
         </aside>
 
-        <aside className="rounded-2xl border border-white/10 bg-black/70 p-3">
+        <aside className="h-full min-h-full bg-black/70 p-3">
           <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
             Canais
           </p>
 
-          <h1 className="mt-3 truncate text-2xl font-black">
-            {activeGroupName ?? "Canais ao vivo"}
-          </h1>
+          {activeGroupName ? (
+            <h1 className="mt-3 truncate text-2xl font-black">
+              {activeGroupName}
+            </h1>
+          ) : null}
 
-          <div className="mt-5 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+          <div className="mt-5 max-h-[calc(100vh-9rem)] space-y-2 overflow-y-auto pr-1">
             {activeGroupChannels.length > 0 ? (
               activeGroupChannels.map((channel, index) => {
                 const isActive =
@@ -256,10 +263,10 @@ export default function LiveTvPage() {
           </div>
         </aside>
 
-        <section className="flex min-w-0 flex-col gap-4">
-          <div className="relative aspect-video overflow-hidden rounded-3xl border border-white/10 bg-zinc-950">
+        <section className="flex min-h-[calc(100vh-2rem)] min-w-0 flex-col gap-4 md:pl-4">
+          <div className="relative aspect-video overflow-hidden bg-zinc-950">
             <div className="absolute inset-0 flex items-center justify-center bg-black">
-              <div className="max-w-xl rounded-3xl border border-white/10 bg-zinc-950/95 p-8 text-center">
+              <div className="h-full w-full bg-zinc-950/95 p-8 text-center">
                 <p className="text-xs font-black uppercase tracking-[0.4em] text-xf-red">
                   Xandeflix Live
                 </p>
@@ -269,14 +276,14 @@ export default function LiveTvPage() {
                 </h2>
 
                 <p className="mt-3 text-sm text-xf-muted">
-                  A prévia inline MPEG-TS será ativada no próximo ciclo de forma
+                  A prÃ©via inline MPEG-TS serÃ¡ ativada no prÃ³ximo ciclo de forma
                   controlada. Por enquanto, clique novamente no mesmo canal para
                   abrir em tela cheia.
                 </p>
 
                 {isLoading && progress ? (
                   <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
-                    {getProgressLabel(progress.phase)} ·{" "}
+                    {getProgressLabel(progress.phase)} Â·{" "}
                     {progress.channelsParsed} canais processados
                   </p>
                 ) : null}
@@ -291,38 +298,19 @@ export default function LiveTvPage() {
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/70 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
+            <p className="text-xs font-black uppercase tracking-[0.35em] text-white">
               Canal ativo
-            </p>
-            <h2 className="mt-2 text-2xl font-black">
-              {selectedChannel?.name ?? "Nenhum canal selecionado"}
-            </h2>
-            <p className="mt-2 text-sm text-xf-muted">
-              {selectedChannel?.groupTitle ??
-                "Escolha um grupo e selecione um canal."}
             </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/70 p-4">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
-                  Guia de programação
-                </p>
-                <h3 className="mt-2 text-2xl font-black">
-                  {selectedChannel?.tvgName ?? selectedChannel?.name ?? "EPG"}
-                </h3>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-xf-muted">
-              A estrutura visual do guia está pronta. A integração real depende
-              de uma URL XMLTV/EPG cadastrada no backend/admin e retornada junto
-              da fonte autorizada.
-            </div>
+            <p className="text-xs font-black uppercase tracking-[0.35em] text-white">
+              Guia de programaÃ§Ã£o
+            </p>
           </div>
         </section>
       </section>
     </AppShell>
   );
 }
+

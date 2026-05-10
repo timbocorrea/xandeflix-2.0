@@ -177,6 +177,7 @@ export function focusHeaderSearchButton() {
   return focusHeaderWithFallback([
     FOCUS_KEYS.HEADER_SEARCH_BUTTON,
     FOCUS_KEYS.HEADER_LOGOUT_BUTTON,
+    FOCUS_KEYS.SIDEBAR_SEARCH,
   ]);
 }
 
@@ -184,6 +185,7 @@ export function focusHeaderProfileButton() {
   return focusHeaderWithFallback([
     FOCUS_KEYS.HEADER_PROFILE_BUTTON,
     FOCUS_KEYS.HEADER_LOGOUT_BUTTON,
+    FOCUS_KEYS.SIDEBAR_PROFILE,
   ]);
 }
 
@@ -192,6 +194,7 @@ export function focusHeaderLogoutButton() {
     FOCUS_KEYS.HEADER_LOGOUT_BUTTON,
     FOCUS_KEYS.HEADER_PROFILE_BUTTON,
     FOCUS_KEYS.HEADER_SEARCH_BUTTON,
+    FOCUS_KEYS.SIDEBAR_LOGOUT,
   ]);
 }
 

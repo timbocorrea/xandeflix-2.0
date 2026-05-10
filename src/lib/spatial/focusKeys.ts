@@ -22,8 +22,10 @@ export const FOCUS_KEYS = {
   FIRST_MEDIA_CARD: 'catalog-section-continue-watching-item-0',
 
   SIDEBAR_SECTION: 'sidebar-section',
+  SIDEBAR_PROFILE: 'sidebar-profile',
   SIDEBAR_HOME: 'sidebar-home',
   SIDEBAR_SEARCH: 'sidebar-search',
+  SIDEBAR_LOGOUT: 'sidebar-logout',
 
   MOBILE_BOTTOM_NAV_SECTION: 'mobile-bottom-nav-section',
   MOBILE_HOME: 'mobile-home',
