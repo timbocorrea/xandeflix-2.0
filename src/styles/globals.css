@@ -22,6 +22,20 @@
   font-family: Inter, system-ui, sans-serif;
   text-rendering: geometricPrecision;
   font-synthesis: none;
+
+  /*
+   * Device profile responsive foundation.
+   *
+   * Estes tokens permitem ajustar escala visual por perfil sem usar zoom global,
+   * transform no app inteiro ou tamanhos fixos por resolução.
+   */
+  --xf-device-scale: 1;
+  --xf-tv-focus-scale: 1.08;
+  --xf-shell-inline-padding: clamp(1rem, 2vw, 2.5rem);
+  --xf-shell-block-padding: clamp(0.75rem, 1.5vh, 1.5rem);
+  --xf-action-height: clamp(3.5rem, 7vh, 6.5rem);
+  --xf-action-inline-padding: clamp(1.5rem, 3vw, 3rem);
+  --xf-hero-min-height: clamp(26rem, 56vh, 52.5rem);
 }
 
 html,
@@ -133,15 +147,18 @@ button {
     transform: scale(1.03);
   }
 }
-/* Live TV layout: força colunas também em WebView/Fire Stick com largura lógica menor. */
+/* Live TV layout controlado por perfil de dispositivo. */
 .xf-live-tv-layout {
-  grid-template-columns: 260px 340px minmax(0, 1fr);
+  width: 100%;
+  grid-template-columns: minmax(13.75rem, 16rem) minmax(18rem, 21.25rem) minmax(0, 1fr);
 }
 
-@media (max-width: 900px) {
-  .xf-live-tv-layout {
-    grid-template-columns: 220px 300px minmax(0, 1fr);
-  }
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-layout {
+  grid-template-columns: minmax(14.375rem, 16.25rem) minmax(17.8125rem, 21.25rem) minmax(0, 1fr);
+}
+
+.xf-app[data-device-form-factor="tablet"] .xf-live-tv-layout {
+  grid-template-columns: minmax(13.75rem, 15.5rem) minmax(18rem, 20rem) minmax(0, 1fr);
 }
 
 @media (max-width: 760px) {
@@ -150,31 +167,32 @@ button {
   }
 }
 
-/* Fire Stick / Android TV WebView: reduz escala da tela Live para caber melhor. */
-@media (min-width: 761px) and (max-width: 900px) {
-  .xf-live-tv-layout {
-    width: 125%;
-    min-height: calc((100vh - 7rem) / 0.8);
-    transform: scale(0.8);
-    transform-origin: top left;
-    grid-template-columns: 260px 340px minmax(0, 1fr);
-  }
+.xf-app[data-device-form-factor="tv"] {
+  --xf-device-scale: 1.08;
+  --xf-tv-focus-scale: 1.1;
+  --xf-shell-inline-padding: clamp(1.5rem, 2.2vw, 3rem);
+  --xf-shell-block-padding: clamp(1rem, 1.8vh, 1.75rem);
+  --xf-action-height: clamp(5rem, 9vh, 7.75rem);
+  --xf-action-inline-padding: clamp(2rem, 3.6vw, 4rem);
+  --xf-hero-min-height: clamp(32rem, 72vh, 52.5rem);
 }
 
-/* Ajuste forte de escala para Live TV em Android TV / Fire Stick / WebView. */
-@media (min-width: 761px) {
-  .xf-live-tv-layout {
-    zoom: 0.8;
-    width: 125%;
-    grid-template-columns: 260px 340px minmax(0, 1fr);
-  }
+.xf-app[data-device-form-factor="tablet"] {
+  --xf-device-scale: 0.96;
+  --xf-tv-focus-scale: 1.05;
+  --xf-shell-inline-padding: clamp(1.25rem, 2vw, 2.25rem);
+  --xf-shell-block-padding: clamp(0.75rem, 1.4vh, 1.25rem);
+  --xf-action-height: clamp(3.5rem, 6vh, 5.5rem);
+  --xf-action-inline-padding: clamp(1.25rem, 2.4vw, 2.75rem);
+  --xf-hero-min-height: clamp(28rem, 58vh, 48rem);
 }
 
-/* Correção final Fire Stick: manter 3 colunas sem estourar lateral. */
-@media (min-width: 761px) {
-  .xf-live-tv-layout {
-    zoom: 0.8;
-    width: 100%;
-    grid-template-columns: 230px 285px minmax(0, 1fr);
-  }
+.xf-app[data-device-form-factor="mobile"] {
+  --xf-device-scale: 0.92;
+  --xf-tv-focus-scale: 1.03;
+  --xf-shell-inline-padding: 1rem;
+  --xf-shell-block-padding: 0.75rem;
+  --xf-action-height: 3.5rem;
+  --xf-action-inline-padding: 1.25rem;
+  --xf-hero-min-height: 26rem;
 }

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { cn } from '../../utils/cn';
 
 import { useDeviceType } from '../../hooks/useDeviceType';
+import { useDeviceProfile } from '../../platform/useDeviceProfile';
 import { AppHeader, type HeaderNavigationHandlers } from './AppHeader';
 import { MobileBottomNav } from './MobileBottomNav';
 import { TvSidebar } from './TvSidebar';
@@ -23,11 +24,22 @@ export function AppShell({
   hideHeaderOnTv = false,
   mainClassName,
 }: AppShellProps) {
-  const { isTv, isMobile } = useDeviceType();
+  const deviceProfile = useDeviceProfile();
+  const { isTv: legacyIsTv, isMobile } = useDeviceType();
+  const isTv = deviceProfile.formFactor === 'tv' || legacyIsTv;
   const shouldShowHeader = !(isTv && hideHeaderOnTv);
 
   return (
-    <div className="xf-app min-h-screen">
+    <div
+      className="xf-app min-h-screen"
+      data-device-runtime={deviceProfile.runtime}
+      data-device-form-factor={deviceProfile.formFactor}
+      data-device-input={deviceProfile.inputMode}
+      data-viewport-width={deviceProfile.viewportWidth}
+      data-viewport-height={deviceProfile.viewportHeight}
+      data-device-pixel-ratio={deviceProfile.devicePixelRatio}
+      data-player-strategy={deviceProfile.playerStrategy}
+    >
       {isTv && <TvSidebar onSignOut={onSignOut} />}
 
       <div className={cn('min-h-screen', isTv && 'pl-0 md:pl-16')}>
