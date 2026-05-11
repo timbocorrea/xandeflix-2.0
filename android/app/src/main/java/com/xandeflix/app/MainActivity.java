@@ -35,8 +35,8 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void configureFocus(View view) {
-        view.setFocusable(true);
-        view.setFocusableInTouchMode(true);
+        view.setFocusable(false);
+        view.setFocusableInTouchMode(false);
 
         // Remove o highlight de foco nativo (borda amarela/laranja)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -71,11 +71,6 @@ public class MainActivity extends BridgeActivity {
             }
 
             if (webView != null) {
-                // Garante que o WebView tenha o foco antes de injetar
-                if (!webView.isFocused()) {
-                    webView.requestFocus();
-                }
-
                 if (action == KeyEvent.ACTION_DOWN) {
                     injectJsKey(keyCode);
                 }
