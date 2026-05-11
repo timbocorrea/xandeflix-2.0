@@ -516,13 +516,15 @@ export default function UniversalPlayerPage() {
   }, [pushPlayerEvent]);
 
   const handleNavigateBack = useCallback(() => {
+    endCurrentPlaybackSession();
+
     if (window.history.length > 1) {
       navigate(-1);
       return;
     }
 
     navigate('/');
-  }, [navigate]);
+  }, [endCurrentPlaybackSession, navigate]);
 
   return (
     <main className="xf-app min-h-screen bg-black px-8 py-8 text-white">
