@@ -1,14 +1,14 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type HTMLAttributes, type ReactNode } from 'react';
 import {
   FocusContext,
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
 
-interface FocusableSectionProps {
+interface FocusableSectionProps
+  extends Omit<HTMLAttributes<HTMLElement>, 'onFocus'> {
   focusKey: string;
   children: ReactNode;
   autoFocus?: boolean;
-  className?: string;
   onArrowPress?: (direction: string) => boolean;
   focusScrollOptions?: ScrollIntoViewOptions;
 }
@@ -20,6 +20,7 @@ export function FocusableSection({
   className,
   onArrowPress,
   focusScrollOptions,
+  ...sectionProps
 }: FocusableSectionProps) {
   const { ref, focusSelf, focused, hasFocusedChild } = useFocusable({
     focusKey,
@@ -51,6 +52,7 @@ export function FocusableSection({
   return (
     <FocusContext.Provider value={focusKey}>
       <section
+        {...sectionProps}
         ref={ref}
         className={className}
         data-nav-id={focusKey}

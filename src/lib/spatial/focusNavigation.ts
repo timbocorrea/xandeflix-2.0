@@ -202,3 +202,37 @@ export function focusSidebarSearch() {
   setFocus(FOCUS_KEYS.SIDEBAR_SEARCH);
   return false;
 }
+
+
+export function rememberLastCatalogFocusKey(focusKey: string) {
+  if (!canUseDom()) {
+    return;
+  }
+
+  (
+    window as Window & {
+      __XANDEFLIX_LAST_CATALOG_FOCUS_KEY?: string;
+    }
+  ).__XANDEFLIX_LAST_CATALOG_FOCUS_KEY = focusKey;
+}
+
+export function focusLastCatalogItem() {
+  if (!canUseDom()) {
+    return false;
+  }
+
+  const lastCatalogFocusKey = (
+    window as Window & {
+      __XANDEFLIX_LAST_CATALOG_FOCUS_KEY?: string;
+    }
+  ).__XANDEFLIX_LAST_CATALOG_FOCUS_KEY;
+
+  if (lastCatalogFocusKey && focusKeyExists(lastCatalogFocusKey)) {
+    return setFocusAndScroll({
+      focusKey: lastCatalogFocusKey,
+      scrollOptions: CARD_SCROLL_OPTIONS,
+    });
+  }
+
+  return focusFirstMediaCard();
+}

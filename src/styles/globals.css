@@ -172,9 +172,9 @@ button {
   --xf-tv-focus-scale: 1.1;
   --xf-shell-inline-padding: clamp(1.5rem, 2.2vw, 3rem);
   --xf-shell-block-padding: clamp(1rem, 1.8vh, 1.75rem);
-  --xf-action-height: clamp(5rem, 9vh, 7.75rem);
-  --xf-action-inline-padding: clamp(2rem, 3.6vw, 4rem);
-  --xf-hero-min-height: clamp(32rem, 72vh, 52.5rem);
+  --xf-action-height: clamp(4rem, 6.4vh, 5.5rem);
+  --xf-action-inline-padding: clamp(1.75rem, 2.8vw, 3rem);
+  --xf-hero-min-height: clamp(28rem, 56vh, 40.5rem);
 }
 
 .xf-app[data-device-form-factor="tablet"] {
@@ -184,7 +184,7 @@ button {
   --xf-shell-block-padding: clamp(0.75rem, 1.4vh, 1.25rem);
   --xf-action-height: clamp(3.5rem, 6vh, 5.5rem);
   --xf-action-inline-padding: clamp(1.25rem, 2.4vw, 2.75rem);
-  --xf-hero-min-height: clamp(28rem, 58vh, 48rem);
+  --xf-hero-min-height: clamp(28rem, 56vh, 40.5rem);
 }
 
 .xf-app[data-device-form-factor="mobile"] {
@@ -195,4 +195,95 @@ button {
   --xf-action-height: 3.5rem;
   --xf-action-inline-padding: 1.25rem;
   --xf-hero-min-height: 26rem;
+}
+
+/* Equalização final: Fire Stick/TV usa a mesma proporção visual do tablet no Hero. */
+.xf-app[data-device-form-factor="tv"] [data-xf-hero="catalog"],
+.xf-app[data-device-form-factor="tablet"] [data-xf-hero="catalog"] {
+  width: 100%;
+  max-width: 100%;
+  height: clamp(31rem, 64vh, 34rem);
+  min-height: 0;
+  aspect-ratio: auto;
+}
+
+/* Catalog rows: apresentação em carrossel horizontal. */
+.xf-carousel-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.xf-carousel-row::-webkit-scrollbar {
+  display: none;
+}
+
+.xf-carousel-row > .media-card {
+  width: clamp(9.5rem, 15vw, 13.5rem);
+  flex: 0 0 clamp(9.5rem, 15vw, 13.5rem);
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-carousel-row > .media-card {
+  width: clamp(8.75rem, 13vw, 11.5rem);
+  flex-basis: clamp(8.75rem, 13vw, 11.5rem);
+}
+
+.xf-app[data-device-form-factor="tablet"] .xf-carousel-row > .media-card {
+  width: clamp(10rem, 14vw, 12.75rem);
+  flex-basis: clamp(10rem, 14vw, 12.75rem);
+}
+
+.xf-app[data-device-form-factor="mobile"] .xf-carousel-row > .media-card {
+  width: clamp(8.5rem, 42vw, 11rem);
+  flex-basis: clamp(8.5rem, 42vw, 11rem);
+}
+
+/* Correção D-pad no carrossel: evita sobreposição do foco com a linha acima. */
+.xf-carousel-row {
+  position: relative;
+  isolation: isolate;
+  padding-top: 1.75rem;
+  padding-bottom: 2.25rem;
+  scroll-padding-inline: 2rem;
+}
+
+.xf-carousel-row > .media-card {
+  position: relative;
+  z-index: 1;
+}
+
+.xf-carousel-row > .media-card:focus-visible,
+.xf-carousel-row > .media-card[data-focused="true"] {
+  z-index: 5;
+  transform: scale(1.06);
+  outline-offset: 4px;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-carousel-row > .media-card:focus-visible,
+.xf-app[data-device-form-factor="tv"] .xf-carousel-row > .media-card[data-focused="true"] {
+  transform: scale(1.06);
+}
+
+/* Respiro lateral do carrossel: evita corte do foco no primeiro card. */
+.xf-carousel-row {
+  margin-left: -1.75rem;
+  padding-left: 1.75rem;
+  padding-right: 2.25rem;
+  scroll-padding-left: 1.75rem;
+  scroll-padding-right: 2.25rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-carousel-row {
+  margin-left: -2rem;
+  padding-left: 2rem;
+  padding-right: 2.5rem;
+  scroll-padding-left: 2rem;
+  scroll-padding-right: 2.5rem;
+}
+
+.xf-app[data-device-form-factor="tablet"] .xf-carousel-row {
+  margin-left: -1.75rem;
+  padding-left: 1.75rem;
+  padding-right: 2.25rem;
+  scroll-padding-left: 1.75rem;
+  scroll-padding-right: 2.25rem;
 }

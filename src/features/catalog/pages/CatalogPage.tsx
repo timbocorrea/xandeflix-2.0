@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 import { AppShell } from '../../../components/layout/AppShell';
 import { CatalogHero } from '../../../components/media/CatalogHero';
@@ -23,8 +22,7 @@ const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 
 export function CatalogPage() {
-  const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const { signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
 
   const [visibleSectionCount, setVisibleSectionCount] = useState(
@@ -53,20 +51,12 @@ export function CatalogPage() {
 
   useRouteInitialFocus();
 
-  const gridClassName = isTv
-    ? 'grid-cols-5'
-    : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5';
-
-  const columnsPerRow = isTv ? 5 : isMobile ? 2 : 5;
-
   const spatialNavigation = useCatalogGridNavigation({
-    columnsPerRow,
     sections: catalogSections,
   });
 
   return (
     <AppShell
-      userEmail={user?.email}
       onSignOut={() => void signOut()}
       headerNavigation={{
         onSearchArrowPress: spatialNavigation.handleHeaderSearchArrowPress,
@@ -80,25 +70,6 @@ export function CatalogPage() {
         onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
       />
 
-      <div className="mb-10 rounded-3xl border border-white/10 bg-white/5 p-6">
-        <p className="text-sm font-bold uppercase tracking-[0.3em] text-xf-red">
-          IPTV autorizado
-        </p>
-        <h2 className="mt-2 text-2xl font-black text-white md:text-3xl">
-          Acessar lista vinculada ao dispositivo
-        </h2>
-        <p className="mt-2 max-w-3xl text-sm text-xf-muted md:text-base">
-          Carregue a fonte IPTV autorizada para este dispositivo, mantendo o parse dos canais em memória local e enviando apenas o canal escolhido ao Player Universal.
-        </p>
-        <FocusableButton
-          focusKey="catalog-authorized-iptv-entry"
-          className="mt-5 inline-flex rounded-xl bg-xf-red px-6 py-4 text-base font-black text-white"
-          onEnterPress={() => navigate('/live')}
-          onClick={() => navigate('/live')}
-        >
-          Abrir IPTV autorizado
-        </FocusableButton>
-      </div>
 
       {visibleCatalogSections.map((section, categoryIndex) => {
         const sectionItems =
@@ -158,7 +129,7 @@ export function CatalogPage() {
               )}
             </div>
 
-            <div className={`grid gap-4 md:gap-5 ${gridClassName}`}>
+            <div className="xf-carousel-row flex gap-4 overflow-x-auto overflow-y-visible pb-6 pr-8 scroll-smooth md:gap-5">
               {sectionItems.map((item, itemIndex) => (
                 <MediaCard
                   key={item.id}

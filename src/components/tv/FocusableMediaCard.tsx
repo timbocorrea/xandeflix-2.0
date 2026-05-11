@@ -1,5 +1,7 @@
 import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 
+import { rememberLastCatalogFocusKey } from '@/lib/spatial/focusNavigation';
+
 interface FocusableMediaCardProps {
   title: string;
   subtitle?: string;
@@ -20,6 +22,10 @@ export function FocusableMediaCard({
     onEnterPress,
     onArrowPress,
     onFocus: () => {
+      if (focusKey.startsWith('catalog-section-')) {
+        rememberLastCatalogFocusKey(focusKey);
+      }
+
       ref.current?.scrollIntoView({
         behavior: 'auto',
         block: 'center',

@@ -8,8 +8,7 @@ import { MobileBottomNav } from './MobileBottomNav';
 import { TvSidebar } from './TvSidebar';
 
 interface AppShellProps {
-  children: ReactNode;
-  userEmail?: string;
+  children: ReactNode;
   onSignOut: () => void;
   headerNavigation?: HeaderNavigationHandlers;
   hideHeaderOnTv?: boolean;
@@ -17,8 +16,7 @@ interface AppShellProps {
 }
 
 export function AppShell({
-  children,
-  userEmail,
+  children,
   onSignOut,
   headerNavigation,
   hideHeaderOnTv = false,
@@ -44,8 +42,7 @@ export function AppShell({
 
       <div className={cn('min-h-screen', isTv && 'pl-0 md:pl-16')}>
         {shouldShowHeader ? (
-          <AppHeader
-            userEmail={userEmail}
+          <AppHeader
             onSignOut={onSignOut}
             navigation={headerNavigation}
           />

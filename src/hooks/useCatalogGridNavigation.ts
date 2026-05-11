@@ -14,12 +14,10 @@ import {
 import { getCategoryItemFocusKey } from '../lib/spatial/categoryFocusKeys';
 
 interface UseCatalogGridNavigationParams {
-  columnsPerRow: number;
   sections: CatalogSection[];
 }
 
 export function useCatalogGridNavigation({
-  columnsPerRow,
   sections,
 }: UseCatalogGridNavigationParams) {
   return useMemo(() => {
@@ -55,7 +53,7 @@ export function useCatalogGridNavigation({
 
       const focusKey = getCategoryItemFocusKey(section.id, itemIndex);
 
-      spatialDebug('catalog-grid', 'Focus category item', {
+      spatialDebug('catalog-grid', 'Focus carousel item', {
         categoryIndex,
         categoryId: section.id,
         itemIndex,
@@ -68,9 +66,9 @@ export function useCatalogGridNavigation({
       });
     }
 
-    function focusPreviousCategorySameColumn(
+    function focusPreviousCategorySameIndex(
       categoryIndex: number,
-      columnIndex: number,
+      itemIndex: number,
     ) {
       const previousCategoryIndex =
         getPreviousNonEmptyCategoryIndex(categoryIndex);
@@ -80,14 +78,9 @@ export function useCatalogGridNavigation({
       }
 
       const previousSection = sections[previousCategoryIndex];
-      const previousItemsLength = previousSection.items.length;
-
-      const previousRows = Math.ceil(previousItemsLength / columnsPerRow);
-      const previousLastRowStartIndex = (previousRows - 1) * columnsPerRow;
-
       const targetItemIndex = Math.min(
-        previousLastRowStartIndex + columnIndex,
-        previousItemsLength - 1,
+        itemIndex,
+        previousSection.items.length - 1,
       );
 
       return focusCategoryItemByIndexes(
@@ -96,9 +89,9 @@ export function useCatalogGridNavigation({
       );
     }
 
-    function focusNextCategorySameColumn(
+    function focusNextCategorySameIndex(
       categoryIndex: number,
-      columnIndex: number,
+      itemIndex: number,
     ) {
       const nextCategoryIndex = getNextNonEmptyCategoryIndex(categoryIndex);
 
@@ -108,7 +101,7 @@ export function useCatalogGridNavigation({
 
       const nextSection = sections[nextCategoryIndex];
       const targetItemIndex = Math.min(
-        columnIndex,
+        itemIndex,
         nextSection.items.length - 1,
       );
 
@@ -126,39 +119,12 @@ export function useCatalogGridNavigation({
         return true;
       }
 
-      const itemCount = section.items.length;
-      const currentRowIndex = Math.floor(itemIndex / columnsPerRow);
-      const columnIndex = itemIndex % columnsPerRow;
-
       if (direction === 'up') {
-        if (currentRowIndex > 0) {
-          const previousRowStartIndex =
-            (currentRowIndex - 1) * columnsPerRow;
-
-          const targetItemIndex = Math.min(
-            previousRowStartIndex + columnIndex,
-            itemCount - 1,
-          );
-
-          return focusCategoryItemByIndexes(categoryIndex, targetItemIndex);
-        }
-
-        return focusPreviousCategorySameColumn(categoryIndex, columnIndex);
+        return focusPreviousCategorySameIndex(categoryIndex, itemIndex);
       }
 
       if (direction === 'down') {
-        const nextRowStartIndex = (currentRowIndex + 1) * columnsPerRow;
-
-        if (nextRowStartIndex < itemCount) {
-          const targetItemIndex = Math.min(
-            nextRowStartIndex + columnIndex,
-            itemCount - 1,
-          );
-
-          return focusCategoryItemByIndexes(categoryIndex, targetItemIndex);
-        }
-
-        return focusNextCategorySameColumn(categoryIndex, columnIndex);
+        return focusNextCategorySameIndex(categoryIndex, itemIndex);
       }
 
       return true;
@@ -169,7 +135,7 @@ export function useCatalogGridNavigation({
       categoryIndex: number,
     ) {
       if (direction === 'up') {
-        return focusPreviousCategorySameColumn(categoryIndex, 0);
+        return focusPreviousCategorySameIndex(categoryIndex, 0);
       }
 
       if (direction === 'down') {
@@ -179,7 +145,7 @@ export function useCatalogGridNavigation({
           return focusCategoryItemByIndexes(categoryIndex, 0);
         }
 
-        return focusNextCategorySameColumn(categoryIndex, 0);
+        return focusNextCategorySameIndex(categoryIndex, 0);
       }
 
       return true;
@@ -190,7 +156,7 @@ export function useCatalogGridNavigation({
       categoryIndex: number,
     ) {
       if (direction === 'up') {
-        return focusPreviousCategorySameColumn(categoryIndex, 0);
+        return focusPreviousCategorySameIndex(categoryIndex, 0);
       }
 
       if (direction === 'down') {
@@ -265,5 +231,5 @@ export function useCatalogGridNavigation({
       handleCategorySeeAllArrowPress,
       handleCategoryCardArrowPress,
     };
-  }, [columnsPerRow, sections]);
+  }, [sections]);
 }

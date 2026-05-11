@@ -33,22 +33,24 @@ export interface DeviceProfile {
   aspectRatio: number;
 }
 
-function getRuntime(userAgent: string): DeviceRuntime {
-  const normalizedUserAgent = userAgent.toLowerCase();
+function normalizeDeviceText(...values: Array<string | undefined>) {
+  return values.filter(Boolean).join(' ').toLowerCase();
+}
 
-  if (normalizedUserAgent.includes('tizen')) {
+function getRuntime(deviceText: string): DeviceRuntime {
+  if (deviceText.includes('tizen')) {
     return 'tizen';
   }
 
   if (
-    normalizedUserAgent.includes('web0s') ||
-    normalizedUserAgent.includes('webos') ||
-    normalizedUserAgent.includes('lg browser')
+    deviceText.includes('web0s') ||
+    deviceText.includes('webos') ||
+    deviceText.includes('lg browser')
   ) {
     return 'webos';
   }
 
-  if (normalizedUserAgent.includes('android')) {
+  if (deviceText.includes('android')) {
     return 'capacitor-android';
   }
 
@@ -57,31 +59,44 @@ function getRuntime(userAgent: string): DeviceRuntime {
 
 function getFormFactor(params: {
   runtime: DeviceRuntime;
-  userAgent: string;
+  deviceText: string;
   viewportWidth: number;
   viewportHeight: number;
 }): DeviceFormFactor {
-  const { runtime, userAgent, viewportWidth, viewportHeight } = params;
-  const normalizedUserAgent = userAgent.toLowerCase();
+  const { runtime, deviceText, viewportWidth, viewportHeight } = params;
   const shortestSide = Math.min(viewportWidth, viewportHeight);
+  const aspectRatio = viewportHeight > 0 ? viewportWidth / viewportHeight : 16 / 9;
 
   if (
-    normalizedUserAgent.includes('aft') ||
-    normalizedUserAgent.includes('fire tv') ||
-    normalizedUserAgent.includes('smart-tv') ||
-    normalizedUserAgent.includes('smarttv') ||
-    normalizedUserAgent.includes('android tv') ||
+    deviceText.includes('aft') ||
+    deviceText.includes('aftsss') ||
+    deviceText.includes('sheldon') ||
+    deviceText.includes('fire tv') ||
+    deviceText.includes('firetv') ||
+    deviceText.includes('android tv') ||
+    deviceText.includes('smart-tv') ||
+    deviceText.includes('smarttv') ||
     runtime === 'tizen' ||
     runtime === 'webos'
   ) {
     return 'tv';
   }
 
-  if (normalizedUserAgent.includes('mobile') && shortestSide < 768) {
+  if (
+    runtime === 'capacitor-android' &&
+    viewportWidth >= 900 &&
+    viewportHeight >= 500 &&
+    aspectRatio >= 1.7 &&
+    shortestSide <= 720
+  ) {
+    return 'tv';
+  }
+
+  if (deviceText.includes('mobile') && shortestSide < 768) {
     return 'mobile';
   }
 
-  if (shortestSide >= 768 && normalizedUserAgent.includes('android')) {
+  if (shortestSide >= 768 && runtime === 'capacitor-android') {
     return 'tablet';
   }
 
@@ -134,14 +149,18 @@ export function getDeviceProfile(): DeviceProfile {
     };
   }
 
-  const userAgent = window.navigator.userAgent;
+  const deviceText = normalizeDeviceText(
+    window.navigator.userAgent,
+    window.navigator.platform,
+    window.navigator.vendor,
+  );
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
   const devicePixelRatio = window.devicePixelRatio || 1;
-  const runtime = getRuntime(userAgent);
+  const runtime = getRuntime(deviceText);
   const formFactor = getFormFactor({
     runtime,
-    userAgent,
+    deviceText,
     viewportWidth,
     viewportHeight,
   });

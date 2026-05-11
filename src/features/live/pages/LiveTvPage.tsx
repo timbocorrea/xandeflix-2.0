@@ -37,7 +37,7 @@ function getProgressLabel(phase?: string) {
 
 export default function LiveTvPage() {
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const { signOut } = useAuth();
   const {
     channels,
     selectedChannel,
@@ -148,8 +148,7 @@ export default function LiveTvPage() {
   const userFacingError = sourceLoadError ?? error;
 
   return (
-    <AppShell
-      userEmail={user?.email}
+    <AppShell
       onSignOut={() => void signOut()}
       hideHeaderOnTv
       mainClassName="px-0 pt-0 pb-0 pr-4 md:px-0 md:pt-0 md:pb-0 md:pr-4 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-4"

@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
+import { focusLastCatalogItem } from '@/lib/spatial/focusNavigation';
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 
@@ -57,6 +58,14 @@ interface TvSidebarProps {
 export function TvSidebar({ onSignOut }: TvSidebarProps) {
   const navigate = useNavigate();
 
+  function handleSidebarArrowPress(direction: string) {
+    if (direction === 'right' && window.location.pathname === '/') {
+      return focusLastCatalogItem();
+    }
+
+    return true;
+  }
+
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-16 flex-col items-center bg-black/80 py-5 backdrop-blur">
       <div className="mb-8 flex size-10 items-center justify-center rounded-xl bg-xf-red text-lg font-black text-white">
@@ -79,6 +88,7 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
             onClick={() => {
               spatialDebug('sidebar', 'Perfil');
             }}
+            onArrowPress={handleSidebarArrowPress}
           >
             <UserRound size={20} />
           </FocusableButton>
@@ -104,6 +114,7 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
                 title={item.label}
                 onEnterPress={handlePress}
                 onClick={handlePress}
+                onArrowPress={handleSidebarArrowPress}
               >
                 <Icon size={20} />
               </FocusableButton>
@@ -118,6 +129,7 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
           title="Sair"
           onEnterPress={onSignOut}
           onClick={onSignOut}
+          onArrowPress={handleSidebarArrowPress}
         >
           <LogOut size={19} />
         </FocusableButton>
