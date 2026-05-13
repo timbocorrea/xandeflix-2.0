@@ -16,6 +16,7 @@ import { AdminLicensesPage } from '../features/admin/pages/AdminLicensesPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { AdminLoginPage } from '../features/admin/pages/AdminLoginPage';
+import { SuperAdminOnly } from '../features/admin/components/SuperAdminOnly';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { getStoredLicenseActivation } from '../features/licensing/lib/licenseActivationStorage';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
@@ -193,7 +194,9 @@ export function AppRoutes() {
               path="/admin/audit-logs"
               element={
                 <AdminRoute>
-                  <AdminAuditLogsPage />
+                  <SuperAdminOnly>
+                    <AdminAuditLogsPage />
+                  </SuperAdminOnly>
                 </AdminRoute>
               }
             />
