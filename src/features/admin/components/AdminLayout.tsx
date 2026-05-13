@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 
 import { useCurrentAdminProfile } from '../hooks/useCurrentAdminProfile';
+import { canViewAuditLogs } from '../lib/adminPermissions';
 
 const adminNavItems = [
   { label: 'Visão geral', to: '/admin' },
@@ -9,6 +10,9 @@ const adminNavItems = [
   { label: 'Dispositivos', to: '/admin/devices' },
   { label: 'Licenças', to: '/admin/licenses' },
   { label: 'Fontes IPTV', to: '/admin/iptv-sources' },
+];
+
+const superAdminNavItems = [
   { label: 'Auditoria', to: '/admin/audit-logs' },
 ];
 
@@ -27,6 +31,9 @@ function getAdminRoleLabel(role?: string) {
 export function AdminLayout({ children }: { children: ReactNode }) {
   const { adminProfile, isLoading } = useCurrentAdminProfile();
   const adminRoleLabel = getAdminRoleLabel(adminProfile?.role);
+  const visibleAdminNavItems = canViewAuditLogs(adminProfile)
+    ? [...adminNavItems, ...superAdminNavItems]
+    : adminNavItems;
 
   return (
     <main className="xf-app min-h-screen text-white">
@@ -52,7 +59,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </div>
 
           <nav className="mt-8 flex flex-col gap-2">
-            {adminNavItems.map((item) => (
+            {visibleAdminNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -91,7 +98,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             </div>
 
             <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
-              {adminNavItems.map((item) => (
+              {visibleAdminNavItems.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
