@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 
+import { useCurrentAdminProfile } from '../hooks/useCurrentAdminProfile';
+
 const adminNavItems = [
   { label: 'Visão geral', to: '/admin' },
   { label: 'Clientes', to: '/admin/clients' },
@@ -10,7 +12,22 @@ const adminNavItems = [
   { label: 'Auditoria', to: '/admin/audit-logs' },
 ];
 
+function getAdminRoleLabel(role?: string) {
+  if (role === 'super_admin') {
+    return 'Super Admin';
+  }
+
+  if (role === 'admin') {
+    return 'Admin';
+  }
+
+  return 'Admin';
+}
+
 export function AdminLayout({ children }: { children: ReactNode }) {
+  const { adminProfile, isLoading } = useCurrentAdminProfile();
+  const adminRoleLabel = getAdminRoleLabel(adminProfile?.role);
+
   return (
     <main className="xf-app min-h-screen text-white">
       <div className="flex min-h-screen">
@@ -21,6 +38,18 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             </p>
             <h1 className="mt-2 text-2xl font-black">Admin</h1>
           </Link>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+            <p className="text-[0.65rem] font-black uppercase tracking-[0.24em] text-xf-muted">
+              Perfil atual
+            </p>
+            <p className="mt-2 break-all text-sm font-bold text-white">
+              {isLoading ? 'Carregando...' : adminProfile?.email ?? 'Admin autenticado'}
+            </p>
+            <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-xf-red">
+              {adminRoleLabel}
+            </p>
+          </div>
 
           <nav className="mt-8 flex flex-col gap-2">
             {adminNavItems.map((item) => (
@@ -52,9 +81,14 @@ export function AdminLayout({ children }: { children: ReactNode }) {
 
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="border-b border-white/10 bg-black/20 px-5 py-4 lg:hidden">
-            <Link to="/admin" className="text-lg font-black">
-              Xandeflix Admin
-            </Link>
+            <div className="flex flex-col gap-1">
+              <Link to="/admin" className="text-lg font-black">
+                Xandeflix Admin
+              </Link>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-xf-red">
+                {adminRoleLabel}
+              </p>
+            </div>
 
             <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
               {adminNavItems.map((item) => (
