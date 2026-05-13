@@ -1,5 +1,6 @@
 import { supabase } from '../../../lib/supabase/supabaseClient';
 
+import { getCurrentAdminProfile } from './adminAccess.service';
 import type { Client } from '../types/admin.types';
 
 export interface CreateClientInput {
@@ -39,9 +40,12 @@ export async function getAdminClientById(clientId: string): Promise<Client | nul
 }
 
 export async function createAdminClient(input: CreateClientInput): Promise<Client> {
+  const adminProfile = await getCurrentAdminProfile();
+
   const { data, error } = await supabase
     .from('clients')
     .insert({
+      admin_owner_id: adminProfile?.id ?? null,
       name: input.name,
       email: input.email ?? null,
       phone: input.phone ?? null,

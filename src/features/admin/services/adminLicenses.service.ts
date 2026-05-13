@@ -1,4 +1,5 @@
 import { supabase } from '../../../lib/supabase/supabaseClient';
+import { getCurrentAdminProfile } from './adminAccess.service';
 
 import type {
   License,
@@ -62,9 +63,12 @@ export async function listAdminLicenses(): Promise<License[]> {
 }
 
 export async function createAdminLicense(input: CreateLicenseInput): Promise<License> {
+  const adminProfile = await getCurrentAdminProfile();
+
   const { data, error } = await supabase
     .from('licenses')
     .insert({
+      admin_owner_id: adminProfile?.id ?? null,
       license_code: input.license_code.trim().toUpperCase(),
       label: input.label ?? null,
       status: input.status ?? 'active',
@@ -151,7 +155,6 @@ export async function listAdminPlaybackSessions(
 
   return (data ?? []) as PlaybackSession[];
 }
-
 
 export async function createAdminLicenseIptvSource(
   input: CreateLicenseIptvSourceInput,
