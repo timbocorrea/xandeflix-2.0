@@ -3,6 +3,7 @@ import { FocusableMediaCard } from '../tv/FocusableMediaCard';
 interface MediaCardProps {
   title: string;
   subtitle?: string;
+  posterUrl?: string;
   index: number;
   focusKey?: string;
   onEnterPress?: () => void;
@@ -12,6 +13,7 @@ interface MediaCardProps {
 export function MediaCard({
   title,
   subtitle,
+  posterUrl,
   index,
   focusKey,
   onEnterPress,
@@ -21,6 +23,7 @@ export function MediaCard({
     <FocusableMediaCard
       title={title}
       subtitle={subtitle}
+      posterUrl={posterUrl}
       focusKey={focusKey ?? `media-card-${index + 1}`}
       onEnterPress={onEnterPress}
       onArrowPress={onArrowPress}

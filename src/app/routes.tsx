@@ -15,8 +15,11 @@ import { AdminIptvSourcesPage } from '../features/admin/pages/AdminIptvSourcesPa
 import { AdminLicensesPage } from '../features/admin/pages/AdminLicensesPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
+import { AdminLoginPage } from '../features/admin/pages/AdminLoginPage';
 import { LoginPage } from '../features/auth/pages/LoginPage';
+import { getStoredLicenseActivation } from '../features/licensing/lib/licenseActivationStorage';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
+import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
 
 const UniversalPlayerPage = lazy(
@@ -35,18 +38,10 @@ const SettingsPage = lazy(
   () => import('../features/settings/pages/SettingsPage'),
 );
 
-function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+function LicenseRoute({ children }: { children: ReactNode }) {
+  const storedActivation = getStoredLicenseActivation();
 
-  if (isLoading) {
-    return (
-      <main className="xf-app flex min-h-screen items-center justify-center">
-        <p className="text-xl font-semibold text-xf-muted">Carregando...</p>
-      </main>
-    );
-  }
-
-  if (!isAuthenticated) {
+  if (!storedActivation?.licenseCode || !storedActivation.deviceIdentifier) {
     return <Navigate to="/login" replace />;
   }
 
@@ -111,7 +106,7 @@ function AdminRoute({ children }: { children: ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/admin/login" replace />;
   }
 
   if (!isAdmin) {
@@ -136,13 +131,16 @@ export function AppRoutes() {
         <Suspense fallback={<RouteLoader />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/admin/login" element={<AdminLoginPage />} />
+
+            <Route path="/preparing-home" element={<PreparingHomePage />} />
 
             <Route
               path="/"
               element={
-                <ProtectedRoute>
+                <LicenseRoute>
                   <CatalogPage />
-                </ProtectedRoute>
+                </LicenseRoute>
               }
             />
 
@@ -203,37 +201,37 @@ export function AppRoutes() {
               <Route
                 path="/live"
                 element={
-                  <ProtectedRoute>
+                  <LicenseRoute>
                     <LiveTvPage />
-                  </ProtectedRoute>
+                  </LicenseRoute>
                 }
               />
 
             <Route
               path="/player"
               element={
-                <ProtectedRoute>
+                <LicenseRoute>
                   <UniversalPlayerPage />
-                </ProtectedRoute>
+                </LicenseRoute>
               }
             />
               <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute>
-                    <SettingsPage />
-                  </ProtectedRoute>
-                }
-              />
+              path="/settings"
+              element={
+                <LicenseRoute>
+                  <SettingsPage />
+                </LicenseRoute>
+              }
+            />
 
 
 
             <Route
               path="/playlists/direct-source"
               element={
-                <ProtectedRoute>
+                <LicenseRoute>
                   <DirectSourcePlaylistPage />
-                </ProtectedRoute>
+                </LicenseRoute>
               }
             />
 

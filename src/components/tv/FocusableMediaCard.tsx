@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 
 import { rememberLastCatalogFocusKey } from '@/lib/spatial/focusNavigation';
@@ -5,6 +6,7 @@ import { rememberLastCatalogFocusKey } from '@/lib/spatial/focusNavigation';
 interface FocusableMediaCardProps {
   title: string;
   subtitle?: string;
+  posterUrl?: string;
   focusKey: string;
   onEnterPress?: () => void;
   onArrowPress?: (direction: string) => boolean;
@@ -13,10 +15,14 @@ interface FocusableMediaCardProps {
 export function FocusableMediaCard({
   title,
   subtitle,
+  posterUrl,
   focusKey,
   onEnterPress,
   onArrowPress,
 }: FocusableMediaCardProps) {
+  const [hasPosterError, setHasPosterError] = useState(false);
+  const shouldShowPoster = Boolean(posterUrl) && !hasPosterError;
+
   const { ref, focused } = useFocusable({
     focusKey,
     onEnterPress,
@@ -43,6 +49,19 @@ export function FocusableMediaCard({
       data-nav-id={focusKey}
       onClick={onEnterPress}
     >
+      {shouldShowPoster && (
+        <img
+          src={posterUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+          onError={() => setHasPosterError(true)}
+        />
+      )}
+
+      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
+
       <div className="absolute inset-x-0 bottom-0 z-10 bg-black/75 p-4">
         <p className="line-clamp-2 text-base font-black text-white md:text-lg">
           {title}
