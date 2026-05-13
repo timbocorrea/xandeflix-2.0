@@ -29,6 +29,11 @@ export function FocusableInput({
       return;
     }
 
+    input.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+
     input.focus({ preventScroll: true });
 
     if (selectTextOnEnter) {
@@ -43,6 +48,12 @@ export function FocusableInput({
       focusNativeInput();
       onEnterPress?.();
     },
+    onFocus: () => {
+      inputRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    },
   });
 
   return (
@@ -53,7 +64,7 @@ export function FocusableInput({
 
       <div
         ref={ref}
-        className={cn('tv-focusable rounded-lg')}
+        className={cn('tv-focusable xf-focusable-input rounded-lg')}
         data-focused={focused ? 'true' : undefined}
         data-nav-id={focusKey}
       >
@@ -63,6 +74,7 @@ export function FocusableInput({
             'w-full rounded-lg border border-white/10 bg-black px-4 py-4 text-white outline-none focus:border-xf-red',
             className,
           )}
+          readOnly={props.readOnly}
           {...props}
         />
       </div>

@@ -48,6 +48,7 @@ const menuItems = [
     label: 'Configurações',
     icon: Settings,
     navId: 'sidebar-settings',
+    path: '/settings',
   },
 ];
 

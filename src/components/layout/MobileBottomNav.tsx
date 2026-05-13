@@ -27,6 +27,7 @@ const mobileItems = [
     label: 'Ajustes',
     icon: Settings,
     navId: 'mobile-settings',
+    path: '/settings',
   },
 ];
 

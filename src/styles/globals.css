@@ -154,7 +154,11 @@ button {
 }
 
 .xf-app[data-device-form-factor="tv"] .xf-live-tv-layout {
-  grid-template-columns: minmax(14.375rem, 16.25rem) minmax(17.8125rem, 21.25rem) minmax(0, 1fr);
+  grid-template-columns: 20% 30% 50%;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-preview {
+  display: flex;
 }
 
 .xf-app[data-device-form-factor="tablet"] .xf-live-tv-layout {
@@ -286,4 +290,122 @@ button {
   padding-right: 2.25rem;
   scroll-padding-left: 1.75rem;
   scroll-padding-right: 2.25rem;
+}
+
+/* Live TV em TV/Fire Stick: reduz proporção visual da tela sem afetar tablet. */
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page {
+  font-size: 55%;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page aside {
+  padding: 0.45rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page .xf-live-tv-preview {
+  gap: 0.45rem;
+  padding-left: 0.35rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page .xf-live-tv-preview > div {
+  padding: 0.45rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page h1,
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page h2 {
+  font-size: 60%;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page button {
+  padding-block: 0.4rem;
+  padding-inline: 0.55rem;
+}
+
+
+/* Settings / device activation tuned for TV and Fire Stick */
+.xf-app[data-device-form-factor="tv"] .xf-settings-page {
+  font-size: 42%;
+  max-width: min(78rem, calc(100vw - 8rem));
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page h1 {
+  font-size: 1.54rem;
+  line-height: 1.05;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page h2 {
+  font-size: 0.92rem;
+  line-height: 1.15;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page section {
+  margin-top: 0.72rem;
+  padding: 0.86rem;
+  border-radius: 1.25rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page input,
+.xf-app[data-device-form-factor="tv"] .xf-settings-page button,
+.xf-app[data-device-form-factor="tv"] .xf-settings-page .font-mono {
+  font-size: 0.64rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page input {
+  padding: 0.5rem 0.64rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page button {
+  padding: 0.54rem 0.74rem;
+}
+
+
+/* Settings focus corrections for TV D-pad */
+.xf-app[data-device-form-factor="tv"] .xf-settings-page .xf-focusable-input {
+  transform: none !important;
+  outline-offset: 0;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page .xf-focusable-input[data-focused="true"] {
+  transform: none !important;
+  box-shadow: none;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page .xf-focusable-input[data-focused="true"] input {
+  border-color: rgb(239 0 18);
+  box-shadow: 0 0 0 1px rgb(239 0 18);
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page .xf-focusable-input input {
+  min-width: 0;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-settings-page .tv-focusable[data-focused="true"] {
+  scroll-margin-top: 1rem;
+  scroll-margin-bottom: 1rem;
+}
+
+
+/* TV keyboard scale tuning */
+.xf-app[data-device-form-factor="tv"] .xf-tv-keyboard-panel {
+  transform: scale(0.8);
+  transform-origin: center;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-tv-keyboard-panel h2 {
+  font-size: 1.9rem;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-tv-keyboard-panel .tv-focusable {
+  transform: none !important;
+}
+
+.xf-app[data-device-form-factor="tv"] .xf-tv-keyboard-panel .tv-focusable[data-focused="true"] {
+  transform: none !important;
+  box-shadow: 0 0 0 2px rgb(239 0 18);
+}
+
+/* Live TV: evita corte/transbordamento do contorno de foco nas listas roláveis. */
+.xf-app[data-device-form-factor="tv"] .xf-live-tv-page .tv-focusable[data-focused="true"] {
+  transform: scale(1.02);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 2px rgba(229, 9, 20, 0.95);
 }

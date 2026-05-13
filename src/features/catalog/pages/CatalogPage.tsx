@@ -21,38 +21,58 @@ const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 
+function shouldShowSeeAll(section: unknown) {
+  return Boolean(
+    section &&
+      typeof section === 'object' &&
+      'showSeeAll' in section &&
+      (section as { showSeeAll?: unknown }).showSeeAll,
+  );
+}
+
+function getCatalogItemPosterUrl(item: unknown) {
+  if (!item || typeof item !== 'object' || !('posterUrl' in item)) {
+    return undefined;
+  }
+
+  const posterUrl = (item as { posterUrl?: unknown }).posterUrl;
+
+  return typeof posterUrl === 'string' ? posterUrl : undefined;
+}
+
 export function CatalogPage() {
   const { signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
+  const resolvedCatalogSections = catalogSections;
 
   const [visibleSectionCount, setVisibleSectionCount] = useState(
-    isTv ? INITIAL_TV_VISIBLE_SECTIONS : catalogSections.length,
+    isTv ? INITIAL_TV_VISIBLE_SECTIONS : resolvedCatalogSections.length,
   );
 
   useEffect(() => {
     if (!isTv) {
-      setVisibleSectionCount(catalogSections.length);
+      setVisibleSectionCount(resolvedCatalogSections.length);
       return;
     }
 
     setVisibleSectionCount(INITIAL_TV_VISIBLE_SECTIONS);
 
     const timer = window.setTimeout(() => {
-      setVisibleSectionCount(catalogSections.length);
+      setVisibleSectionCount(resolvedCatalogSections.length);
     }, TV_REMAINING_SECTIONS_DELAY_MS);
 
     return () => window.clearTimeout(timer);
   }, [isTv]);
 
   const visibleCatalogSections = useMemo(
-    () => catalogSections.slice(0, visibleSectionCount),
-    [visibleSectionCount],
+    () => resolvedCatalogSections.slice(0, visibleSectionCount),
+    [resolvedCatalogSections, visibleSectionCount],
   );
 
   useRouteInitialFocus();
 
   const spatialNavigation = useCatalogGridNavigation({
-    sections: catalogSections,
+    sections: resolvedCatalogSections,
   });
 
   return (
@@ -70,14 +90,14 @@ export function CatalogPage() {
         onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
       />
 
-
       {visibleCatalogSections.map((section, categoryIndex) => {
         const sectionItems =
           isTv &&
-          visibleSectionCount < catalogSections.length &&
+          visibleSectionCount < resolvedCatalogSections.length &&
           categoryIndex === 0
             ? section.items.slice(0, INITIAL_TV_VISIBLE_ITEMS_PER_SECTION)
             : section.items;
+
         const eyebrow =
           section.id === 'continue-watching'
             ? isMobile
@@ -110,7 +130,7 @@ export function CatalogPage() {
                 </h2>
               </div>
 
-              {section.showSeeAll && !isMobile && !isTv && (
+              {shouldShowSeeAll(section) && !isMobile && !isTv && (
                 <FocusableButton
                   focusKey={getCategorySeeAllFocusKey(section.id)}
                   className="inline-flex rounded-full bg-xf-surface px-5 py-3 text-sm font-bold text-white"
@@ -135,6 +155,7 @@ export function CatalogPage() {
                   key={item.id}
                   title={item.title}
                   subtitle={item.subtitle}
+                  posterUrl={getCatalogItemPosterUrl(item)}
                   index={itemIndex}
                   focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
                   onEnterPress={() => {

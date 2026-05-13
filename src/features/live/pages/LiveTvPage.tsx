@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App } from "@capacitor/app";
+import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/app/providers/AuthProvider";
@@ -21,11 +23,35 @@ type ChannelGroup = {
 };
 
 function getChannelGroupName(channel: IptvChannel) {
-  return channel.groupTitle?.trim() || "Sem grupo";
+  const groupTitle = channel.groupTitle?.trim();
+
+  if (!groupTitle) {
+    return "Sem grupo";
+  }
+
+  return groupTitle.replace(/^canais\s*\|\s*/i, "").trim() || groupTitle;
 }
 
 function getChannelKey(channel: IptvChannel) {
   return `${channel.id}:${channel.url}`;
+}
+
+function isLiveTvChannel(channel: IptvChannel) {
+  const groupName = getChannelGroupName(channel).toLowerCase();
+
+  return ![
+    "filmes",
+    "filme",
+    "movies",
+    "movie",
+    "series",
+    "séries",
+    "serie",
+    "série",
+    "novelas",
+    "documentarios",
+    "documentários",
+  ].some((blockedTerm) => groupName.includes(blockedTerm));
 }
 
 function getProgressLabel(phase?: string) {
@@ -53,6 +79,39 @@ export default function LiveTvPage() {
   );
   const [sourceLoadError, setSourceLoadError] = useState<string | null>(null);
   const hasRequestedSourceRef = useRef(false);
+
+  useEffect(() => {
+    let isActive = true;
+    let listener: { remove: () => Promise<void> } | null = null;
+
+    void App.addListener("backButton", ({ canGoBack }) => {
+      if (!isActive) {
+        return;
+      }
+
+      if (canGoBack || window.history.length > 1) {
+        navigate(-1);
+        return;
+      }
+
+      navigate("/");
+    }).then((handle) => {
+      if (!isActive) {
+        void handle.remove();
+        return;
+      }
+
+      listener = handle;
+    });
+
+    return () => {
+      isActive = false;
+
+      if (listener) {
+        void listener.remove();
+      }
+    };
+  }, [navigate]);
 
   useEffect(() => {
     if (
@@ -89,10 +148,14 @@ export default function LiveTvPage() {
     })();
   }, [channels.length, loadFromSource, status]);
 
+  const liveTvChannels = useMemo(() => {
+    return channels.filter(isLiveTvChannel);
+  }, [channels]);
+
   const groups = useMemo<ChannelGroup[]>(() => {
     const groupMap = new Map<string, number>();
 
-    for (const channel of channels) {
+    for (const channel of liveTvChannels) {
       const groupName = getChannelGroupName(channel);
       groupMap.set(groupName, (groupMap.get(groupName) ?? 0) + 1);
     }
@@ -101,12 +164,16 @@ export default function LiveTvPage() {
       name,
       count,
     }));
-  }, [channels]);
+  }, [liveTvChannels]);
 
   const activeGroupName =
     selectedGroupName && groups.some((group) => group.name === selectedGroupName)
       ? selectedGroupName
       : groups[0]?.name ?? null;
+
+  const activeGroupIndex = activeGroupName
+    ? groups.findIndex((group) => group.name === activeGroupName)
+    : -1;
 
 
   const activeGroupChannels = useMemo(() => {
@@ -114,14 +181,52 @@ export default function LiveTvPage() {
       return [];
     }
 
-    return channels
+    return liveTvChannels
       .filter((channel) => getChannelGroupName(channel) === activeGroupName)
       .slice(0, MAX_VISIBLE_CHANNELS_PER_GROUP);
-  }, [activeGroupName, channels]);
+  }, [activeGroupName, liveTvChannels]);
 
   const handleSelectGroup = useCallback((groupName: string) => {
     setSelectedGroupName(groupName);
   }, []);
+
+  const handleGroupArrowPress = useCallback(
+    (direction: string, groupIndex: number) => {
+      if (direction === "up" && groupIndex === 0) {
+        return false;
+      }
+
+      if (direction === "down" && groupIndex === groups.length - 1) {
+        return false;
+      }
+
+      return true;
+    },
+    [groups.length],
+  );
+
+  const handleChannelArrowPress = useCallback(
+    (direction: string, channelIndex: number) => {
+      if (direction === "up" && channelIndex === 0) {
+        return false;
+      }
+
+      if (
+        direction === "down" &&
+        channelIndex === activeGroupChannels.length - 1
+      ) {
+        return false;
+      }
+
+      if (direction !== "left" || activeGroupIndex < 0) {
+        return true;
+      }
+
+      setFocus(`live-group-${activeGroupIndex}`);
+      return false;
+    },
+    [activeGroupChannels.length, activeGroupIndex],
+  );
 
   const handleSelectChannel = useCallback(
     (channel: IptvChannel) => {
@@ -148,18 +253,18 @@ export default function LiveTvPage() {
   const userFacingError = sourceLoadError ?? error;
 
   return (
-    <AppShell
+    <AppShell
       onSignOut={() => void signOut()}
       hideHeaderOnTv
-      mainClassName="px-0 pt-0 pb-0 pr-4 md:px-0 md:pt-0 md:pb-0 md:pr-4 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-4"
+      mainClassName="px-0 pt-0 pb-0 pr-0 md:px-0 md:pt-0 md:pb-0 md:pr-0 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-0"
     >
-      <section className="xf-live-tv-layout grid min-h-screen md:h-[125vh] gap-x-0 gap-y-4 text-white">
-        <aside className="h-full min-h-full bg-black/70 p-3">
+      <section className="xf-live-tv-page xf-live-tv-layout grid min-h-screen gap-x-0 gap-y-4 text-white">
+        <aside className="flex h-screen min-h-screen flex-col bg-black/70 p-3">
           <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
             Grupos
           </p>
 
-          <div className="mt-5 max-h-[calc(100vh-7rem)] space-y-2 overflow-y-auto pr-1">
+          <div className="mt-5 min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 scroll-py-2">
             {groups.length > 0 ? (
               groups.map((group, index) => {
                 const isActive = group.name === activeGroupName;
@@ -174,6 +279,7 @@ export default function LiveTvPage() {
                         ? "border border-xf-red/70 bg-xf-red/20 text-white"
                         : "border border-white/5 bg-white/5 text-xf-muted hover:text-white",
                     ].join(" ")}
+                    onArrowPress={(direction) => handleGroupArrowPress(direction, index)}
                     onEnterPress={() => handleSelectGroup(group.name)}
                     onClick={() => handleSelectGroup(group.name)}
                   >
@@ -186,13 +292,15 @@ export default function LiveTvPage() {
               })
             ) : (
               <p className="text-sm text-xf-muted">
-                {isLoading ? "Carregando grupos..." : "Nenhum grupo carregado."}
+                {isLoading
+                    ? "Carregando lista autorizada de canais. Aguarde alguns instantes..."
+                    : "Nenhum grupo carregado."}
               </p>
             )}
           </div>
         </aside>
 
-        <aside className="h-full min-h-full bg-black/70 p-3">
+        <aside className="flex h-screen min-h-screen flex-col bg-black/70 p-3">
           <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
             Canais
           </p>
@@ -203,7 +311,7 @@ export default function LiveTvPage() {
             </h1>
           ) : null}
 
-          <div className="mt-5 max-h-[calc(100vh-9rem)] space-y-2 overflow-y-auto pr-1">
+          <div className="mt-5 min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 scroll-py-2">
             {activeGroupChannels.length > 0 ? (
               activeGroupChannels.map((channel, index) => {
                 const isActive =
@@ -215,15 +323,16 @@ export default function LiveTvPage() {
                     key={getChannelKey(channel)}
                     focusKey={`live-channel-${index}`}
                     className={[
-                      "flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left",
+                      "flex w-full items-center gap-2 rounded-2xl border px-4 py-2 text-left text-sm font-black uppercase tracking-wide",
                       isActive
                         ? "border-xf-red bg-xf-red/15 text-white"
                         : "border-white/5 bg-white/5 text-xf-muted hover:text-white",
                     ].join(" ")}
+                    onArrowPress={(direction) => handleChannelArrowPress(direction, index)}
                     onEnterPress={() => handleSelectChannel(channel)}
                     onClick={() => handleSelectChannel(channel)}
                   >
-                    <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/10">
+                    <div className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10">
                       {channel.logo ? (
                         <img
                           src={channel.logo}
@@ -237,10 +346,10 @@ export default function LiveTvPage() {
                     </div>
 
                     <div className="min-w-0">
-                      <span className="block truncate text-base font-black">
+                      <span className="block truncate text-sm font-black uppercase tracking-wide leading-none">
                         {channel.name}
                       </span>
-                      <span className="mt-1 block truncate text-xs text-xf-muted">
+                      <span className="mt-0.5 block truncate text-[0.65rem] uppercase tracking-wide leading-none text-xf-muted">
                         {isActive
                           ? "Clique novamente para abrir em tela cheia"
                           : channel.tvgName || "Clique para selecionar"}
@@ -259,7 +368,7 @@ export default function LiveTvPage() {
           </div>
         </aside>
 
-        <section className="flex min-h-[calc(100vh-2rem)] min-w-0 flex-col gap-4 md:pl-4">
+        <section className="xf-live-tv-preview flex min-h-[calc(100vh-2rem)] min-w-0 flex-col gap-4 md:pl-4">
           <div className="relative aspect-video overflow-hidden bg-zinc-950">
             <div className="absolute inset-0 flex items-center justify-center bg-black">
               <div className="h-full w-full bg-zinc-950/95 p-8 text-center">
