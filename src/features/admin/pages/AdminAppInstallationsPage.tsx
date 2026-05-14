@@ -179,6 +179,34 @@ export function AdminAppInstallationsPage() {
     }
   }
 
+  async function handleMarkManuallyUninstalled(installation: AppInstallation) {
+    const confirmed = window.confirm(
+      `Deseja marcar a instalação ${installation.device_identifier} como desinstalada manualmente? Esta ação registra uma baixa operacional sem afirmar desinstalação automática pelo aparelho.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setActionMessage(null);
+    setErrorMessage(null);
+    setUpdatingInstallationId(installation.id);
+
+    try {
+      await updateAdminAppInstallationStatus({
+        installationId: installation.id,
+        status: 'manually_marked_uninstalled',
+      });
+
+      setActionMessage('Instalação marcada manualmente como desinstalada.');
+      await loadInstallations();
+    } catch {
+      setErrorMessage('Não foi possível marcar a instalação como desinstalada.');
+    } finally {
+      setUpdatingInstallationId(null);
+    }
+  }
+
   const summary = useMemo(() => {
     return installations.reduce(
       (acc, installation) => {
@@ -345,29 +373,51 @@ export function AdminAppInstallationsPage() {
                       </td>
 
                       <td className="px-5 py-4">
-                        {installation.installation_status === 'blocked' ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleUnblockInstallation(installation)}
-                            disabled={updatingInstallationId === installation.id}
-                            className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {updatingInstallationId === installation.id
-                              ? 'Desbloqueando...'
-                              : 'Desbloquear'}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void handleBlockInstallation(installation)}
-                            disabled={updatingInstallationId === installation.id}
-                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {updatingInstallationId === installation.id
-                              ? 'Bloqueando...'
-                              : 'Bloquear'}
-                          </button>
-                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {installation.installation_status === 'blocked' ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleUnblockInstallation(installation)}
+                              disabled={updatingInstallationId === installation.id}
+                              className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updatingInstallationId === installation.id
+                                ? 'Desbloqueando...'
+                                : 'Desbloquear'}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => void handleBlockInstallation(installation)}
+                              disabled={
+                                installation.installation_status ===
+                                  'manually_marked_uninstalled' ||
+                                updatingInstallationId === installation.id
+                              }
+                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updatingInstallationId === installation.id
+                                ? 'Bloqueando...'
+                                : 'Bloquear'}
+                            </button>
+                          )}
+
+                          {installation.installation_status !==
+                          'manually_marked_uninstalled' ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleMarkManuallyUninstalled(installation)
+                              }
+                              disabled={updatingInstallationId === installation.id}
+                              className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs font-black text-yellow-100 transition hover:bg-yellow-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updatingInstallationId === installation.id
+                                ? 'Marcando...'
+                                : 'Marcar desinstalada'}
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))}
