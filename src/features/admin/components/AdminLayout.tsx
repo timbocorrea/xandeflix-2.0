@@ -13,6 +13,7 @@ const adminNavItems = [
 ];
 
 const superAdminNavItems = [
+  { label: 'Administradores', to: '/admin/admin-users' },
   { label: 'Auditoria', to: '/admin/audit-logs' },
 ];
 

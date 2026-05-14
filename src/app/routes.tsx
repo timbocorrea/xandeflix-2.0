@@ -14,6 +14,7 @@ import { AdminDevicesPage } from '../features/admin/pages/AdminDevicesPage';
 import { AdminIptvSourcesPage } from '../features/admin/pages/AdminIptvSourcesPage';
 import { AdminLicensesPage } from '../features/admin/pages/AdminLicensesPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
+import { AdminUsersPage } from '../features/admin/pages/AdminUsersPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { AdminLoginPage } from '../features/admin/pages/AdminLoginPage';
 import { SuperAdminOnly } from '../features/admin/components/SuperAdminOnly';
@@ -191,6 +192,17 @@ export function AppRoutes() {
             />
 
             <Route
+              path="/admin/admin-users"
+              element={
+                <AdminRoute>
+                  <SuperAdminOnly>
+                    <AdminUsersPage />
+                  </SuperAdminOnly>
+                </AdminRoute>
+              }
+            />
+
+            <Route
               path="/admin/audit-logs"
               element={
                 <AdminRoute>
@@ -201,14 +213,14 @@ export function AppRoutes() {
               }
             />
 
-              <Route
-                path="/live"
-                element={
-                  <LicenseRoute>
-                    <LiveTvPage />
-                  </LicenseRoute>
-                }
-              />
+            <Route
+              path="/live"
+              element={
+                <LicenseRoute>
+                  <LiveTvPage />
+                </LicenseRoute>
+              }
+            />
 
             <Route
               path="/player"
