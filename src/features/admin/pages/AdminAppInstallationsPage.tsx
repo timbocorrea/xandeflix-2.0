@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AdminLayout } from '../components/AdminLayout';
 import {
-  listAdminAppInstallations,
+  getAdminAppInstallationsSummary,
+  listAdminAppInstallationPlatforms,
+  listPaginatedAdminAppInstallations,
   updateAdminAppInstallationStatus,
 } from '../services/adminAppInstallations.service';
 
@@ -11,6 +13,7 @@ import type { AppInstallation } from '../types/admin.types';
 const INACTIVE_AFTER_DAYS = 7;
 const POSSIBLY_UNINSTALLED_AFTER_DAYS = 30;
 const ALL_FILTER_VALUE = 'all';
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 const APP_INSTALLATION_STATUS_OPTIONS = [
   { value: ALL_FILTER_VALUE, label: 'Todos os status' },
@@ -123,6 +126,18 @@ export function AdminAppInstallationsPage() {
     useState<AppInstallationStatusFilter>(ALL_FILTER_VALUE);
   const [platformFilter, setPlatformFilter] = useState(ALL_FILTER_VALUE);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(
+    10,
+  );
+  const [totalInstallations, setTotalInstallations] = useState(0);
+  const [serverPlatformOptions, setServerPlatformOptions] = useState<string[]>([]);
+  const [serverSummary, setServerSummary] = useState({
+    total: 0,
+    communicating: 0,
+    inactive: 0,
+    possiblyUninstalled: 0,
+  });
 
 
   async function loadInstallations() {
@@ -130,9 +145,33 @@ export function AdminAppInstallationsPage() {
     setErrorMessage(null);
 
     try {
-      const data = await listAdminAppInstallations();
+      const [installationsResult, platformsResult, summaryResult] =
+        await Promise.all([
+          listPaginatedAdminAppInstallations({
+            page: currentPage,
+            pageSize,
+            status:
+              statusFilter === ALL_FILTER_VALUE
+                ? null
+                : statusFilter,
+            platform:
+              platformFilter === ALL_FILTER_VALUE
+                ? null
+                : platformFilter,
+            searchTerm,
+          }),
+          listAdminAppInstallationPlatforms(),
+          getAdminAppInstallationsSummary({
+            inactiveAfterDays: INACTIVE_AFTER_DAYS,
+            possiblyUninstalledAfterDays:
+              POSSIBLY_UNINSTALLED_AFTER_DAYS,
+          }),
+        ]);
 
-      setInstallations(data);
+      setInstallations(installationsResult.installations);
+      setTotalInstallations(installationsResult.totalCount);
+      setServerPlatformOptions(platformsResult);
+      setServerSummary(summaryResult);
     } catch {
       setErrorMessage('Não foi possível carregar as instalações do aplicativo.');
     } finally {
@@ -142,7 +181,13 @@ export function AdminAppInstallationsPage() {
 
   useEffect(() => {
     void loadInstallations();
-  }, []);
+  }, [
+    currentPage,
+    pageSize,
+    platformFilter,
+    searchTerm,
+    statusFilter,
+  ]);
 
   async function handleBlockInstallation(installation: AppInstallation) {
     const confirmed = window.confirm(
@@ -284,76 +329,14 @@ export function AdminAppInstallationsPage() {
     }
   }
 
-  const summary = useMemo(() => {
-    return installations.reduce(
-      (acc, installation) => {
-        const daysSinceLastSeen = getDaysSince(installation.last_seen_at);
-
-        acc.total += 1;
-
-        if (daysSinceLastSeen >= POSSIBLY_UNINSTALLED_AFTER_DAYS) {
-          acc.possiblyUninstalled += 1;
-        } else if (daysSinceLastSeen >= INACTIVE_AFTER_DAYS) {
-          acc.inactive += 1;
-        } else {
-          acc.communicating += 1;
-        }
-
-        return acc;
-      },
-      {
-        total: 0,
-        communicating: 0,
-        inactive: 0,
-        possiblyUninstalled: 0,
-      },
-    );
-  }, [installations]);
-
-  const platformOptions = useMemo(() => {
-    return Array.from(
-      new Set(
-        installations
-          .map((installation) => installation.platform?.trim())
-          .filter((platform): platform is string => Boolean(platform)),
-      ),
-    ).sort((currentPlatform, nextPlatform) =>
-      currentPlatform.localeCompare(nextPlatform, 'pt-BR'),
-    );
-  }, [installations]);
-
-  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
-
-  const filteredInstallations = useMemo(() => {
-    return installations.filter((installation) => {
-      const matchesStatus =
-        statusFilter === ALL_FILTER_VALUE ||
-        installation.installation_status === statusFilter;
-
-      const matchesPlatform =
-        platformFilter === ALL_FILTER_VALUE ||
-        installation.platform?.trim() === platformFilter;
-
-      const searchableContent = [
-        installation.device_identifier,
-        installation.linked_license_id,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-
-      const matchesSearch =
-        normalizedSearchTerm.length === 0 ||
-        searchableContent.includes(normalizedSearchTerm);
-
-      return matchesStatus && matchesPlatform && matchesSearch;
-    });
-  }, [installations, normalizedSearchTerm, platformFilter, statusFilter]);
+  const totalPages = Math.max(1, Math.ceil(totalInstallations / pageSize));
+  const hasPreviousPage = currentPage > 1;
+  const hasNextPage = currentPage < totalPages;
 
   const hasActiveFilters =
     statusFilter !== ALL_FILTER_VALUE ||
     platformFilter !== ALL_FILTER_VALUE ||
-    normalizedSearchTerm.length > 0;
+    searchTerm.trim().length > 0;
 
   return (
     <AdminLayout>
@@ -387,19 +370,19 @@ export function AdminAppInstallationsPage() {
         <div className="grid gap-4 md:grid-cols-4">
           <article className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <p className="text-sm font-bold text-xf-muted">Total</p>
-            <p className="mt-2 text-3xl font-black text-white">{summary.total}</p>
+            <p className="mt-2 text-3xl font-black text-white">{serverSummary.total}</p>
           </article>
 
           <article className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5">
             <p className="text-sm font-bold text-emerald-200">Comunicando</p>
             <p className="mt-2 text-3xl font-black text-white">
-              {summary.communicating}
+              {serverSummary.communicating}
             </p>
           </article>
 
           <article className="rounded-2xl border border-orange-500/20 bg-orange-500/10 p-5">
             <p className="text-sm font-bold text-orange-100">Inativas</p>
-            <p className="mt-2 text-3xl font-black text-white">{summary.inactive}</p>
+            <p className="mt-2 text-3xl font-black text-white">{serverSummary.inactive}</p>
           </article>
 
           <article className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-5">
@@ -407,7 +390,7 @@ export function AdminAppInstallationsPage() {
               Possivelmente desinstaladas
             </p>
             <p className="mt-2 text-3xl font-black text-white">
-              {summary.possiblyUninstalled}
+              {serverSummary.possiblyUninstalled}
             </p>
           </article>
         </div>
@@ -425,7 +408,10 @@ export function AdminAppInstallationsPage() {
               <input
                 type="search"
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(event) => {
+                  setSearchTerm(event.target.value);
+                  setCurrentPage(1);
+                }}
                 placeholder="Device ID ou licença"
                 className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-xf-muted focus:border-white/30"
               />
@@ -454,11 +440,14 @@ export function AdminAppInstallationsPage() {
               Plataforma
               <select
                 value={platformFilter}
-                onChange={(event) => setPlatformFilter(event.target.value)}
+                onChange={(event) => {
+                  setPlatformFilter(event.target.value);
+                  setCurrentPage(1);
+                }}
                 className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-white/30"
               >
                 <option value={ALL_FILTER_VALUE}>Todas as plataformas</option>
-                {platformOptions.map((platform) => (
+                {serverPlatformOptions.map((platform) => (
                   <option key={platform} value={platform}>
                     {platform}
                   </option>
@@ -481,9 +470,55 @@ export function AdminAppInstallationsPage() {
           </div>
 
           <p className="mt-4 text-sm font-semibold text-xf-muted">
-            Exibindo {filteredInstallations.length} de {installations.length}{' '}
-            instalação(ões).
+            Exibindo {installations.length} de {totalInstallations}{' '}
+            instalação(ões). Página {currentPage} de {totalPages}.
           </p>
+        </div>
+
+        <div className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/5 p-5 lg:flex-row lg:items-end lg:justify-between">
+          <label className="flex flex-col gap-2 text-sm font-bold text-white lg:w-52">
+            Itens por página
+            <select
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value) as typeof pageSize);
+                setCurrentPage(1);
+              }}
+              className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-white/30"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option} por página
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={!hasPreviousPage || isLoading}
+              className="rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Anterior
+            </button>
+
+            <span className="text-sm font-semibold text-xf-muted">
+              Página {currentPage} de {totalPages}
+            </span>
+
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentPage((page) => Math.min(totalPages, page + 1))
+              }
+              disabled={!hasNextPage || isLoading}
+              className="rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Próxima
+            </button>
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
@@ -497,7 +532,7 @@ export function AdminAppInstallationsPage() {
             <div className="p-6 text-sm text-xf-muted">
               Nenhuma instalação registrada até o momento.
             </div>
-          ) : filteredInstallations.length === 0 ? (
+          ) : installations.length === 0 ? (
             <div className="p-6 text-sm text-xf-muted">
               Nenhuma instalação encontrada para os filtros aplicados.
             </div>
@@ -518,7 +553,7 @@ export function AdminAppInstallationsPage() {
                 </thead>
 
                 <tbody>
-                  {filteredInstallations.map((installation) => (
+                  {installations.map((installation) => (
                     <tr
                       key={installation.id}
                       className="border-b border-white/5 last:border-0"

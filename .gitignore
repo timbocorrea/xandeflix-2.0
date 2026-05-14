@@ -41,3 +41,4 @@ supabase/.temp/
 
 # Temporary validation builds
 dist-phase24-check/
+dist-phase25-check/
