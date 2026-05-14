@@ -123,3 +123,33 @@ export interface PlaybackSession {
   created_at: string;
   updated_at: string;
 }
+
+export type AppInstallationStatus =
+  | 'installed'
+  | 'awaiting_activation'
+  | 'activated'
+  | 'inactive'
+  | 'possibly_uninstalled'
+  | 'pending_uninstall'
+  | 'manually_marked_uninstalled'
+  | 'blocked';
+
+export interface AppInstallation {
+  id: string;
+  device_identifier: string;
+  installation_status: AppInstallationStatus;
+  platform: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  app_version: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  activated_at: string | null;
+  pending_uninstall_at: string | null;
+  manually_marked_uninstalled_at: string | null;
+  linked_license_id: string | null;
+  linked_license_device_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
