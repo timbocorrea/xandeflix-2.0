@@ -6,6 +6,7 @@ import {
   createAdminLicense,
   createAdminLicenseIptvSource,
   updateAdminLicense,
+  updateAdminLicenseStatus,
   listAdminLicenseDevices,
   listAdminLicenseIptvSources,
   listAdminLicenses,
@@ -34,6 +35,15 @@ const licensePlanLabels: Record<LicensePlanType, string> = {
   quarterly: 'Trimestral',
   semiannual: 'Semestral',
   annual: 'Anual',
+};
+
+type LicenseStatusAction = Extract<LicenseStatus, 'active' | 'expired' | 'canceled'>;
+
+type LicenseStatusActionOption = {
+  status: LicenseStatusAction;
+  label: string;
+  confirmationVerb: string;
+  successMessage: string;
 };
 
 function formatDateTime(value: string | null) {
@@ -66,6 +76,75 @@ function normalizeExpirationDate(value: string) {
   return new Date(value + 'T23:59:59.000Z').toISOString();
 }
 
+function getLicenseStatusActions(status: LicenseStatus): LicenseStatusActionOption[] {
+  if (status === 'active') {
+    return [
+      {
+        status: 'expired',
+        label: 'Expirar',
+        confirmationVerb: 'expirar',
+        successMessage: 'Licença expirada com sucesso.',
+      },
+      {
+        status: 'canceled',
+        label: 'Cancelar',
+        confirmationVerb: 'cancelar',
+        successMessage: 'Licença cancelada com sucesso.',
+      },
+    ];
+  }
+
+  if (status === 'expired') {
+    return [
+      {
+        status: 'active',
+        label: 'Reativar',
+        confirmationVerb: 'reativar',
+        successMessage: 'Licença reativada com sucesso.',
+      },
+      {
+        status: 'canceled',
+        label: 'Cancelar',
+        confirmationVerb: 'cancelar',
+        successMessage: 'Licença cancelada com sucesso.',
+      },
+    ];
+  }
+
+  if (status === 'canceled') {
+    return [
+      {
+        status: 'active',
+        label: 'Reativar',
+        confirmationVerb: 'reativar',
+        successMessage: 'Licença reativada com sucesso.',
+      },
+    ];
+  }
+
+  return [];
+}
+
+function getUpdateLicenseStatusErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível atualizar o status da licença.';
+  }
+
+  const messages: Record<string, string> = {
+    INVALID_PAYLOAD: 'Dados inválidos para atualizar o status da licença.',
+    INVALID_LICENSE_STATUS_ACTION: 'Status de licença inválido para esta ação.',
+    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
+    FORBIDDEN: 'Você não tem permissão para alterar esta licença.',
+    LICENSE_NOT_FOUND: 'Licença não encontrada.',
+    LICENSE_STATUS_UPDATE_FAILED:
+      'Não foi possível atualizar o status da licença.',
+    UPDATE_LICENSE_STATUS_FAILED:
+      'Não foi possível atualizar o status da licença.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 export function AdminLicensesPage() {
   const [licenses, setLicenses] = useState<License[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -88,6 +167,9 @@ export function AdminLicensesPage() {
   const [sourceName, setSourceName] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [sourceType, setSourceType] = useState<LicenseIptvSource['type']>('m3u');
+  const [updatingLicenseStatusId, setUpdatingLicenseStatusId] = useState<string | null>(
+    null,
+  );
 
   const [editingLicense, setEditingLicense] = useState<License | null>(null);
   const [isUpdatingLicense, setIsUpdatingLicense] = useState(false);
@@ -281,6 +363,46 @@ export function AdminLicensesPage() {
       setErrorMessage('Não foi possível atualizar a licença.');
     } finally {
       setIsUpdatingLicense(false);
+    }
+  }
+
+  async function handleUpdateLicenseStatus(
+    license: License,
+    action: LicenseStatusActionOption,
+  ) {
+    const confirmed = window.confirm(
+      `Deseja ${action.confirmationVerb} a licença ${license.license_code}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setUpdatingLicenseStatusId(license.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const updatedLicense = await updateAdminLicenseStatus({
+        licenseId: license.id,
+        status: action.status,
+      });
+
+      setLicenses((currentLicenses) =>
+        currentLicenses.map((currentLicense) =>
+          currentLicense.id === updatedLicense.id ? updatedLicense : currentLicense,
+        ),
+      );
+
+      setSelectedLicense((currentLicense) =>
+        currentLicense?.id === updatedLicense.id ? updatedLicense : currentLicense,
+      );
+
+      setSuccessMessage(action.successMessage);
+    } catch (error) {
+      setErrorMessage(getUpdateLicenseStatusErrorMessage(error));
+    } finally {
+      setUpdatingLicenseStatusId(null);
     }
   }
 
@@ -558,6 +680,22 @@ export function AdminLicensesPage() {
                             >
                               Editar
                             </button>
+
+                            {getLicenseStatusActions(license.status).map((action) => (
+                              <button
+                                key={action.status}
+                                type="button"
+                                onClick={() =>
+                                  void handleUpdateLicenseStatus(license, action)
+                                }
+                                disabled={updatingLicenseStatusId === license.id}
+                                className="rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {updatingLicenseStatusId === license.id
+                                  ? 'Atualizando...'
+                                  : action.label}
+                              </button>
+                            ))}
                           </div>
                         </td>
                     </tr>
