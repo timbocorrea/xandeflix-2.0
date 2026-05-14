@@ -12,6 +12,18 @@ export interface CreateClientInput {
   notes?: string | null;
 }
 
+export interface UpdateAdminClientStatusInput {
+  clientId: string;
+  status: Extract<Client['status'], 'active' | 'blocked'>;
+}
+
+export interface UpdateAdminClientStatusResponse {
+  ok: boolean;
+  client?: Client;
+  error?: string;
+  details?: string;
+}
+
 export async function listAdminClients(): Promise<Client[]> {
   const { data, error } = await supabase
     .from('clients')
@@ -61,4 +73,30 @@ export async function createAdminClient(input: CreateClientInput): Promise<Clien
   }
 
   return data as Client;
+}
+
+export async function updateAdminClientStatus({
+  clientId,
+  status,
+}: UpdateAdminClientStatusInput): Promise<Client> {
+  const { data, error } =
+    await supabase.functions.invoke<UpdateAdminClientStatusResponse>(
+      'update-client-status',
+      {
+        body: {
+          clientId,
+          status,
+        },
+      },
+    );
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.ok || !data.client) {
+    throw new Error(data?.error ?? 'UPDATE_CLIENT_STATUS_FAILED');
+  }
+
+  return data.client;
 }

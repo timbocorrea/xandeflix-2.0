@@ -6,6 +6,7 @@ import {
   createAdminDevice,
   createAdminIptvSource,
   listAdminClients,
+  updateAdminClientStatus,
 } from '../services';
 import type { Client, ClientStatus, IptvSourceType } from '../types/admin.types';
 
@@ -58,6 +59,37 @@ function getStatusLabel(status: Client['status']) {
   return labels[status];
 }
 
+function getStatusClassName(status: Client['status']) {
+  const classNames: Record<Client['status'], string> = {
+    active: 'bg-emerald-500/10 text-emerald-200',
+    inactive: 'bg-orange-500/10 text-orange-100',
+    expired: 'bg-yellow-500/10 text-yellow-100',
+    blocked: 'bg-red-500/10 text-red-200',
+  };
+
+  return classNames[status];
+}
+
+function getUpdateClientStatusErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível atualizar o status do cliente.';
+  }
+
+  const messages: Record<string, string> = {
+    INVALID_PAYLOAD: 'Dados inválidos para atualizar o status do cliente.',
+    INVALID_CLIENT_STATUS_ACTION: 'Status de cliente inválido para esta ação.',
+    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
+    FORBIDDEN: 'Apenas Super Admin pode alterar status de clientes.',
+    CLIENT_NOT_FOUND: 'Cliente não encontrado.',
+    CLIENT_STATUS_UPDATE_FAILED:
+      'Não foi possível atualizar o status do cliente.',
+    UPDATE_CLIENT_STATUS_FAILED:
+      'Não foi possível atualizar o status do cliente.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 function normalizeOptionalValue(value: string) {
   const normalizedValue = value.trim();
 
@@ -69,6 +101,7 @@ export function AdminClientsPage() {
   const [form, setForm] = useState<ClientCreationForm>(INITIAL_FORM);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [updatingClientId, setUpdatingClientId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -165,6 +198,43 @@ export function AdminClientsPage() {
       setErrorMessage('Não foi possível cadastrar o cliente e seus vínculos.');
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleToggleClientStatus = async (client: Client) => {
+    const nextStatus: Extract<ClientStatus, 'active' | 'blocked'> =
+      client.status === 'blocked' ? 'active' : 'blocked';
+    const actionLabel = nextStatus === 'blocked' ? 'suspender' : 'reativar';
+
+    const confirmed = window.confirm(
+      `Deseja ${actionLabel} o cliente ${client.name}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setUpdatingClientId(client.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      await updateAdminClientStatus({
+        clientId: client.id,
+        status: nextStatus,
+      });
+
+      setSuccessMessage(
+        nextStatus === 'blocked'
+          ? 'Cliente suspenso com sucesso.'
+          : 'Cliente reativado com sucesso.',
+      );
+
+      await loadClients();
+    } catch (error) {
+      setErrorMessage(getUpdateClientStatusErrorMessage(error));
+    } finally {
+      setUpdatingClientId(null);
     }
   };
 
@@ -368,7 +438,7 @@ export function AdminClientsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
+              <table className="w-full min-w-[900px] text-left text-sm">
                 <thead className="border-b border-white/10 bg-black/20 text-xs uppercase tracking-[0.2em] text-xf-muted">
                   <tr>
                     <th className="px-5 py-4 font-semibold">Nome</th>
@@ -376,6 +446,7 @@ export function AdminClientsPage() {
                     <th className="px-5 py-4 font-semibold">Telefone</th>
                     <th className="px-5 py-4 font-semibold">Status</th>
                     <th className="px-5 py-4 font-semibold">Vencimento</th>
+                    <th className="px-5 py-4 font-semibold">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -389,12 +460,30 @@ export function AdminClientsPage() {
                         {client.phone ?? 'Não informado'}
                       </td>
                       <td className="px-5 py-4">
-                        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${getStatusClassName(
+                            client.status,
+                          )}`}
+                        >
                           {getStatusLabel(client.status)}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-xf-muted">
                         {formatDate(client.expires_at)}
+                      </td>
+                      <td className="px-5 py-4">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleClientStatus(client)}
+                          disabled={updatingClientId === client.id}
+                          className="rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {updatingClientId === client.id
+                            ? 'Atualizando...'
+                            : client.status === 'blocked'
+                              ? 'Reativar cliente'
+                              : 'Suspender cliente'}
+                        </button>
                       </td>
                     </tr>
                   ))}
