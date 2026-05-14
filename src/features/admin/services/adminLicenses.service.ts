@@ -1,5 +1,4 @@
 import { supabase } from '../../../lib/supabase/supabaseClient';
-import { getCurrentAdminProfile } from './adminAccess.service';
 
 import type {
   License,
@@ -13,13 +12,19 @@ import type {
 export interface CreateLicenseInput {
   license_code: string;
   label?: string | null;
-  status?: LicenseStatus;
   plan_type?: LicensePlanType;
   expires_at?: string | null;
   max_devices?: number;
   max_concurrent_streams?: number;
   allow_user_manage_sources?: boolean;
   notes?: string | null;
+}
+
+export interface CreateAdminLicenseResponse {
+  ok: boolean;
+  license?: License;
+  error?: string;
+  details?: string;
 }
 
 export interface UpdateAdminLicenseStatusInput {
@@ -82,30 +87,32 @@ export async function listAdminLicenses(): Promise<License[]> {
 }
 
 export async function createAdminLicense(input: CreateLicenseInput): Promise<License> {
-  const adminProfile = await getCurrentAdminProfile();
-
-  const { data, error } = await supabase
-    .from('licenses')
-    .insert({
-      admin_owner_id: adminProfile?.id ?? null,
-      license_code: input.license_code.trim().toUpperCase(),
-      label: input.label ?? null,
-      status: input.status ?? 'active',
-      plan_type: input.plan_type ?? 'monthly',
-      expires_at: input.expires_at ?? null,
-      max_devices: input.max_devices ?? 1,
-      max_concurrent_streams: input.max_concurrent_streams ?? 1,
-      allow_user_manage_sources: input.allow_user_manage_sources ?? true,
-      notes: input.notes ?? null,
-    })
-    .select('*')
-    .single();
+  const { data, error } =
+    await supabase.functions.invoke<CreateAdminLicenseResponse>(
+      'create-license',
+      {
+        body: {
+          license_code: input.license_code.trim().toUpperCase(),
+          label: input.label ?? null,
+          plan_type: input.plan_type ?? 'monthly',
+          expires_at: input.expires_at ?? null,
+          max_devices: input.max_devices ?? 1,
+          max_concurrent_streams: input.max_concurrent_streams ?? 1,
+          allow_user_manage_sources: input.allow_user_manage_sources ?? true,
+          notes: input.notes ?? null,
+        },
+      },
+    );
 
   if (error) {
     throw error;
   }
 
-  return data as License;
+  if (!data?.ok || !data.license) {
+    throw new Error(data?.error ?? 'CREATE_LICENSE_FAILED');
+  }
+
+  return data.license;
 }
 
 export async function updateAdminLicenseStatus({

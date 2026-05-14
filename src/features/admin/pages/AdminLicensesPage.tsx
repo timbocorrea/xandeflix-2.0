@@ -168,6 +168,23 @@ function getUpdateLicenseDetailsErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
+function getCreateLicenseErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível criar a licença.';
+  }
+
+  const messages: Record<string, string> = {
+    INVALID_PAYLOAD: 'Dados inválidos para criar a licença.',
+    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
+    FORBIDDEN: 'Você não tem permissão para criar licenças.',
+    LICENSE_CODE_ALREADY_EXISTS: 'Já existe uma licença com este código.',
+    LICENSE_CREATE_FAILED: 'Não foi possível criar a licença.',
+    CREATE_LICENSE_FAILED: 'Não foi possível criar a licença.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 export function AdminLicensesPage() {
   const [licenses, setLicenses] = useState<License[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -449,7 +466,6 @@ export function AdminLicensesPage() {
       await createAdminLicense({
         license_code: normalizedCode,
         label: label.trim() || null,
-        status: 'active',
         plan_type: planType,
         expires_at: normalizeExpirationDate(expiresAt),
         max_devices: maxDevices,
@@ -471,8 +487,8 @@ export function AdminLicensesPage() {
       setPlaybackSessions([]);
 
       await loadLicenses();
-    } catch {
-      setErrorMessage('Não foi possível criar a licença. Verifique se o código já existe.');
+    } catch (error) {
+      setErrorMessage(getCreateLicenseErrorMessage(error));
     } finally {
       setIsCreating(false);
     }
