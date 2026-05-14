@@ -71,7 +71,7 @@ function canUpdateClient({
   actorRole: AdminRole;
   ownerId?: string | null;
 }) {
-  return actorRole === 'super_admin' || ownerId === actorId || ownerId === null;
+  return actorRole === 'super_admin' || ownerId === actorId;
 }
 
 function getComparableValue(field: ClientDetailsField, value: unknown) {
