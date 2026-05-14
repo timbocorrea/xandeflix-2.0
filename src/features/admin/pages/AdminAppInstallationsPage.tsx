@@ -179,6 +179,34 @@ export function AdminAppInstallationsPage() {
     }
   }
 
+  async function handleRequestRemoval(installation: AppInstallation) {
+    const confirmed = window.confirm(
+      `Deseja solicitar a remoção da instalação ${installation.device_identifier}? O status ficará pendente de remoção até validação operacional.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setActionMessage(null);
+    setErrorMessage(null);
+    setUpdatingInstallationId(installation.id);
+
+    try {
+      await updateAdminAppInstallationStatus({
+        installationId: installation.id,
+        status: 'pending_uninstall',
+      });
+
+      setActionMessage('Solicitação de remoção registrada com sucesso.');
+      await loadInstallations();
+    } catch {
+      setErrorMessage('Não foi possível solicitar a remoção da instalação.');
+    } finally {
+      setUpdatingInstallationId(null);
+    }
+  }
+
   async function handleMarkManuallyUninstalled(installation: AppInstallation) {
     const confirmed = window.confirm(
       `Deseja marcar a instalação ${installation.device_identifier} como desinstalada manualmente? Esta ação registra uma baixa operacional sem afirmar desinstalação automática pelo aparelho.`,
@@ -431,7 +459,21 @@ export function AdminAppInstallationsPage() {
                           )}
 
                           {installation.installation_status ===
-                          'manually_marked_uninstalled' ? (
+                          'pending_uninstall' ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleMarkManuallyUninstalled(installation)
+                              }
+                              disabled={updatingInstallationId === installation.id}
+                              className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs font-black text-yellow-100 transition hover:bg-yellow-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updatingInstallationId === installation.id
+                                ? 'Confirmando...'
+                                : 'Confirmar remoção'}
+                            </button>
+                          ) : installation.installation_status ===
+                            'manually_marked_uninstalled' ? (
                             <button
                               type="button"
                               onClick={() => void handleReactivateInstallation(installation)}
@@ -446,14 +488,14 @@ export function AdminAppInstallationsPage() {
                             <button
                               type="button"
                               onClick={() =>
-                                void handleMarkManuallyUninstalled(installation)
+                                void handleRequestRemoval(installation)
                               }
                               disabled={updatingInstallationId === installation.id}
                               className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs font-black text-yellow-100 transition hover:bg-yellow-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {updatingInstallationId === installation.id
-                                ? 'Marcando...'
-                                : 'Marcar desinstalada'}
+                                ? 'Solicitando...'
+                                : 'Solicitar remoção'}
                             </button>
                           )}
                         </div>
