@@ -207,6 +207,34 @@ export function AdminAppInstallationsPage() {
     }
   }
 
+  async function handleReactivateInstallation(installation: AppInstallation) {
+    const confirmed = window.confirm(
+      `Deseja reativar a instalação ${installation.device_identifier}? Ela voltará para o status inativo até comunicar novamente pelo app.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setActionMessage(null);
+    setErrorMessage(null);
+    setUpdatingInstallationId(installation.id);
+
+    try {
+      await updateAdminAppInstallationStatus({
+        installationId: installation.id,
+        status: 'inactive',
+      });
+
+      setActionMessage('Instalação reativada operacionalmente.');
+      await loadInstallations();
+    } catch {
+      setErrorMessage('Não foi possível reativar a instalação.');
+    } finally {
+      setUpdatingInstallationId(null);
+    }
+  }
+
   const summary = useMemo(() => {
     return installations.reduce(
       (acc, installation) => {
@@ -402,8 +430,19 @@ export function AdminAppInstallationsPage() {
                             </button>
                           )}
 
-                          {installation.installation_status !==
+                          {installation.installation_status ===
                           'manually_marked_uninstalled' ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleReactivateInstallation(installation)}
+                              disabled={updatingInstallationId === installation.id}
+                              className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updatingInstallationId === installation.id
+                                ? 'Reativando...'
+                                : 'Reativar'}
+                            </button>
+                          ) : (
                             <button
                               type="button"
                               onClick={() =>
@@ -416,7 +455,7 @@ export function AdminAppInstallationsPage() {
                                 ? 'Marcando...'
                                 : 'Marcar desinstalada'}
                             </button>
-                          ) : null}
+                          )}
                         </div>
                       </td>
                     </tr>
