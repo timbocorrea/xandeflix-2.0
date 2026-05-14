@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { AdminLayout } from '../components/AdminLayout';
-import { listAdminAppInstallations } from '../services/adminAppInstallations.service';
+import {
+  listAdminAppInstallations,
+  updateAdminAppInstallationStatus,
+} from '../services/adminAppInstallations.service';
 
 import type { AppInstallation } from '../types/admin.types';
 
@@ -96,6 +99,10 @@ export function AdminAppInstallationsPage() {
   const [installations, setInstallations] = useState<AppInstallation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [updatingInstallationId, setUpdatingInstallationId] = useState<string | null>(
+    null,
+  );
 
   async function loadInstallations() {
     setIsLoading(true);
@@ -115,6 +122,34 @@ export function AdminAppInstallationsPage() {
   useEffect(() => {
     void loadInstallations();
   }, []);
+
+  async function handleBlockInstallation(installation: AppInstallation) {
+    const confirmed = window.confirm(
+      `Deseja bloquear a instalação ${installation.device_identifier}? Esta ação impedirá o uso técnico desta instalação.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setActionMessage(null);
+    setErrorMessage(null);
+    setUpdatingInstallationId(installation.id);
+
+    try {
+      await updateAdminAppInstallationStatus({
+        installationId: installation.id,
+        status: 'blocked',
+      });
+
+      setActionMessage('Instalação bloqueada com sucesso.');
+      await loadInstallations();
+    } catch {
+      setErrorMessage('Não foi possível bloquear a instalação.');
+    } finally {
+      setUpdatingInstallationId(null);
+    }
+  }
 
   const summary = useMemo(() => {
     return installations.reduce(
@@ -199,6 +234,12 @@ export function AdminAppInstallationsPage() {
           </article>
         </div>
 
+        {actionMessage ? (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-100">
+            {actionMessage}
+          </div>
+        ) : null}
+
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
           {isLoading ? (
             <div className="p-6 text-sm text-xf-muted">
@@ -222,6 +263,7 @@ export function AdminAppInstallationsPage() {
                     <th className="px-5 py-4 font-semibold">Primeiro acesso</th>
                     <th className="px-5 py-4 font-semibold">Última comunicação</th>
                     <th className="px-5 py-4 font-semibold">Licença</th>
+                    <th className="px-5 py-4 font-semibold">Ações</th>
                   </tr>
                 </thead>
 
@@ -272,6 +314,22 @@ export function AdminAppInstallationsPage() {
 
                       <td className="max-w-[220px] truncate px-5 py-4 text-xf-muted">
                         {installation.linked_license_id ?? 'Não vinculada'}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <button
+                          type="button"
+                          onClick={() => void handleBlockInstallation(installation)}
+                          disabled={
+                            installation.installation_status === 'blocked' ||
+                            updatingInstallationId === installation.id
+                          }
+                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {updatingInstallationId === installation.id
+                            ? 'Bloqueando...'
+                            : 'Bloquear'}
+                        </button>
                       </td>
                     </tr>
                   ))}
