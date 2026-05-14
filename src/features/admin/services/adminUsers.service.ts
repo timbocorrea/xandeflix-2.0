@@ -15,6 +15,18 @@ export interface CreateAdminUserResponse {
   details?: string;
 }
 
+export interface UpdateAdminUserStatusInput {
+  adminUserId: string;
+  isActive: boolean;
+}
+
+export interface UpdateAdminUserStatusResponse {
+  ok: boolean;
+  adminUser?: AdminProfile;
+  error?: string;
+  details?: string;
+}
+
 export async function listAdminUsers(): Promise<AdminProfile[]> {
   const { data, error } = await supabase
     .from('admin_profiles')
@@ -48,6 +60,31 @@ export async function createAdminUser(
 
   if (!data?.ok || !data.adminUser) {
     throw new Error(data?.error ?? 'CREATE_ADMIN_USER_FAILED');
+  }
+
+  return data.adminUser;
+}
+
+export async function updateAdminUserStatus(
+  input: UpdateAdminUserStatusInput,
+): Promise<AdminProfile> {
+  const { data, error } =
+    await supabase.functions.invoke<UpdateAdminUserStatusResponse>(
+      'update-admin-user-status',
+      {
+        body: {
+          adminUserId: input.adminUserId,
+          isActive: input.isActive,
+        },
+      },
+    );
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.ok || !data.adminUser) {
+    throw new Error(data?.error ?? 'UPDATE_ADMIN_USER_STATUS_FAILED');
   }
 
   return data.adminUser;

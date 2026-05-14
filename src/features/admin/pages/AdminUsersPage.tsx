@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 import { AdminLayout } from '../components/AdminLayout';
-import { createAdminUser, listAdminUsers } from '../services';
+import {
+  createAdminUser,
+  listAdminUsers,
+  updateAdminUserStatus,
+} from '../services';
 import type { AdminProfile, AdminRole } from '../types/admin.types';
 
 type AdminUserCreationForm = {
@@ -55,11 +59,34 @@ function getCreateAdminUserErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
+function getUpdateAdminUserStatusErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível atualizar o status do administrador.';
+  }
+
+  const messages: Record<string, string> = {
+    CANNOT_DISABLE_SELF:
+      'Você não pode desativar o próprio usuário administrativo.',
+    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
+    FORBIDDEN: 'Apenas Super Admin pode alterar status de administradores.',
+    ADMIN_USER_NOT_FOUND: 'Administrador não encontrado.',
+    ADMIN_PROFILE_UPDATE_FAILED:
+      'Não foi possível atualizar o status do administrador.',
+    UPDATE_ADMIN_USER_STATUS_FAILED:
+      'Não foi possível atualizar o status do administrador.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 export function AdminUsersPage() {
   const [adminUsers, setAdminUsers] = useState<AdminProfile[]>([]);
   const [form, setForm] = useState<AdminUserCreationForm>(INITIAL_FORM);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [updatingAdminUserId, setUpdatingAdminUserId] = useState<string | null>(
+    null,
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -126,6 +153,42 @@ export function AdminUsersPage() {
       setErrorMessage(getCreateAdminUserErrorMessage(error));
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleToggleAdminUserStatus = async (adminUser: AdminProfile) => {
+    const nextIsActive = !adminUser.is_active;
+    const actionLabel = nextIsActive ? 'ativar' : 'desativar';
+
+    const confirmed = window.confirm(
+      `Deseja ${actionLabel} o administrador ${adminUser.email}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setUpdatingAdminUserId(adminUser.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      await updateAdminUserStatus({
+        adminUserId: adminUser.id,
+        isActive: nextIsActive,
+      });
+
+      setSuccessMessage(
+        nextIsActive
+          ? 'Administrador ativado com sucesso.'
+          : 'Administrador desativado com sucesso.',
+      );
+
+      await loadAdminUsers();
+    } catch (error) {
+      setErrorMessage(getUpdateAdminUserStatusErrorMessage(error));
+    } finally {
+      setUpdatingAdminUserId(null);
     }
   };
 
@@ -257,6 +320,7 @@ export function AdminUsersPage() {
                     <th className="px-5 py-4 font-semibold">Criado em</th>
                     <th className="px-5 py-4 font-semibold">Atualizado em</th>
                     <th className="px-5 py-4 font-semibold">ID</th>
+                    <th className="px-5 py-4 font-semibold">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -284,6 +348,20 @@ export function AdminUsersPage() {
                       </td>
                       <td className="max-w-[180px] truncate px-5 py-4 text-xf-muted">
                         {adminUser.id}
+                      </td>
+                      <td className="px-5 py-4">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleAdminUserStatus(adminUser)}
+                          disabled={updatingAdminUserId === adminUser.id}
+                          className="rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {updatingAdminUserId === adminUser.id
+                            ? 'Atualizando...'
+                            : adminUser.is_active
+                              ? 'Desativar'
+                              : 'Ativar'}
+                        </button>
                       </td>
                     </tr>
                   ))}
