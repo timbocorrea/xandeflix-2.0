@@ -8,6 +8,7 @@ import {
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { useAuth } from './providers/AuthProvider';
+import { useAppInstallationHeartbeat } from '../features/app-installations/hooks/useAppInstallationHeartbeat';
 import { isCurrentUserAdmin } from '../features/admin/services';
 import { AdminClientsPage } from '../features/admin/pages/AdminClientsPage';
 import { AdminDevicesPage } from '../features/admin/pages/AdminDevicesPage';
@@ -127,6 +128,8 @@ function RouteLoader() {
 }
 
 export function AppRoutes() {
+  useAppInstallationHeartbeat();
+
   return (
     <BrowserRouter>
       <PlaylistRuntimeProvider>
