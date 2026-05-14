@@ -101,6 +101,22 @@ export async function listPaginatedAdminAppInstallations({
   };
 }
 
+export async function getAdminAppInstallationById(
+  installationId: string,
+): Promise<AppInstallation | null> {
+  const { data, error } = await supabase
+    .from('app_installations')
+    .select('*')
+    .eq('id', installationId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as AppInstallation | null;
+}
+
 export async function listAdminAppInstallationPlatforms(): Promise<string[]> {
   const { data, error } = await supabase
     .from('app_installations')

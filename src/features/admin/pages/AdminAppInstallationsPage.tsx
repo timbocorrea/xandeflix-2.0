@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { AdminLayout } from '../components/AdminLayout';
 import {
@@ -603,6 +604,12 @@ export function AdminAppInstallationsPage() {
 
                       <td className="px-5 py-4">
                         <div className="flex flex-wrap gap-2">
+                          <Link
+                            to={`/admin/app-installations/${installation.id}`}
+                            className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-100 transition hover:bg-cyan-500/20"
+                          >
+                            Ver detalhes
+                          </Link>
                           {installation.installation_status === 'blocked' ? (
                             <button
                               type="button"

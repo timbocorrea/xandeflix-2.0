@@ -15,6 +15,7 @@ import { AdminDevicesPage } from '../features/admin/pages/AdminDevicesPage';
 import { AdminIptvSourcesPage } from '../features/admin/pages/AdminIptvSourcesPage';
 import { AdminLicensesPage } from '../features/admin/pages/AdminLicensesPage';
 import { AdminAppInstallationsPage } from '../features/admin/pages/AdminAppInstallationsPage';
+import { AdminAppInstallationDetailsPage } from '../features/admin/pages/AdminAppInstallationDetailsPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
 import { AdminUsersPage } from '../features/admin/pages/AdminUsersPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
@@ -201,6 +202,17 @@ export function AppRoutes() {
                 <AdminRoute>
                   <SuperAdminOnly>
                     <AdminAppInstallationsPage />
+                  </SuperAdminOnly>
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/app-installations/:installationId"
+              element={
+                <AdminRoute>
+                  <SuperAdminOnly>
+                    <AdminAppInstallationDetailsPage />
                   </SuperAdminOnly>
                 </AdminRoute>
               }
