@@ -38,3 +38,6 @@ supabase/.temp/
 # env files
 .env
 .env.*
+
+# Temporary validation builds
+dist-phase24-check/

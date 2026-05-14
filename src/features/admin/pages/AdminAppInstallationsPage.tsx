@@ -10,6 +10,22 @@ import type { AppInstallation } from '../types/admin.types';
 
 const INACTIVE_AFTER_DAYS = 7;
 const POSSIBLY_UNINSTALLED_AFTER_DAYS = 30;
+const ALL_FILTER_VALUE = 'all';
+
+const APP_INSTALLATION_STATUS_OPTIONS = [
+  { value: ALL_FILTER_VALUE, label: 'Todos os status' },
+  { value: 'activated', label: 'Ativadas' },
+  { value: 'inactive', label: 'Inativas' },
+  { value: 'pending_uninstall', label: 'Remoção solicitada' },
+  {
+    value: 'manually_marked_uninstalled',
+    label: 'Marcadas como desinstaladas',
+  },
+  { value: 'blocked', label: 'Bloqueadas' },
+] as const;
+
+type AppInstallationStatusFilter =
+  (typeof APP_INSTALLATION_STATUS_OPTIONS)[number]['value'];
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -103,6 +119,11 @@ export function AdminAppInstallationsPage() {
   const [updatingInstallationId, setUpdatingInstallationId] = useState<string | null>(
     null,
   );
+  const [statusFilter, setStatusFilter] =
+    useState<AppInstallationStatusFilter>(ALL_FILTER_VALUE);
+  const [platformFilter, setPlatformFilter] = useState(ALL_FILTER_VALUE);
+  const [searchTerm, setSearchTerm] = useState('');
+
 
   async function loadInstallations() {
     setIsLoading(true);
@@ -289,6 +310,51 @@ export function AdminAppInstallationsPage() {
     );
   }, [installations]);
 
+  const platformOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        installations
+          .map((installation) => installation.platform?.trim())
+          .filter((platform): platform is string => Boolean(platform)),
+      ),
+    ).sort((currentPlatform, nextPlatform) =>
+      currentPlatform.localeCompare(nextPlatform, 'pt-BR'),
+    );
+  }, [installations]);
+
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+
+  const filteredInstallations = useMemo(() => {
+    return installations.filter((installation) => {
+      const matchesStatus =
+        statusFilter === ALL_FILTER_VALUE ||
+        installation.installation_status === statusFilter;
+
+      const matchesPlatform =
+        platformFilter === ALL_FILTER_VALUE ||
+        installation.platform?.trim() === platformFilter;
+
+      const searchableContent = [
+        installation.device_identifier,
+        installation.linked_license_id,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      const matchesSearch =
+        normalizedSearchTerm.length === 0 ||
+        searchableContent.includes(normalizedSearchTerm);
+
+      return matchesStatus && matchesPlatform && matchesSearch;
+    });
+  }, [installations, normalizedSearchTerm, platformFilter, statusFilter]);
+
+  const hasActiveFilters =
+    statusFilter !== ALL_FILTER_VALUE ||
+    platformFilter !== ALL_FILTER_VALUE ||
+    normalizedSearchTerm.length > 0;
+
   return (
     <AdminLayout>
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -352,6 +418,74 @@ export function AdminAppInstallationsPage() {
           </div>
         ) : null}
 
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+            <label className="flex flex-1 flex-col gap-2 text-sm font-bold text-white">
+              Buscar instalação
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Device ID ou licença"
+                className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-xf-muted focus:border-white/30"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-bold text-white lg:w-64">
+              Status
+              <select
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(
+                    event.target.value as AppInstallationStatusFilter,
+                  )
+                }
+                className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-white/30"
+              >
+                {APP_INSTALLATION_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-2 text-sm font-bold text-white lg:w-64">
+              Plataforma
+              <select
+                value={platformFilter}
+                onChange={(event) => setPlatformFilter(event.target.value)}
+                className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none transition focus:border-white/30"
+              >
+                <option value={ALL_FILTER_VALUE}>Todas as plataformas</option>
+                {platformOptions.map((platform) => (
+                  <option key={platform} value={platform}>
+                    {platform}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSearchTerm('');
+                setStatusFilter(ALL_FILTER_VALUE);
+                setPlatformFilter(ALL_FILTER_VALUE);
+              }}
+              disabled={!hasActiveFilters}
+              className="rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Limpar filtros
+            </button>
+          </div>
+
+          <p className="mt-4 text-sm font-semibold text-xf-muted">
+            Exibindo {filteredInstallations.length} de {installations.length}{' '}
+            instalação(ões).
+          </p>
+        </div>
+
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
           {isLoading ? (
             <div className="p-6 text-sm text-xf-muted">
@@ -362,6 +496,10 @@ export function AdminAppInstallationsPage() {
           ) : installations.length === 0 ? (
             <div className="p-6 text-sm text-xf-muted">
               Nenhuma instalação registrada até o momento.
+            </div>
+          ) : filteredInstallations.length === 0 ? (
+            <div className="p-6 text-sm text-xf-muted">
+              Nenhuma instalação encontrada para os filtros aplicados.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -380,7 +518,7 @@ export function AdminAppInstallationsPage() {
                 </thead>
 
                 <tbody>
-                  {installations.map((installation) => (
+                  {filteredInstallations.map((installation) => (
                     <tr
                       key={installation.id}
                       className="border-b border-white/5 last:border-0"
