@@ -9,6 +9,34 @@ import type {
   PlaybackSession,
 } from '../types/admin.types';
 
+async function throwFunctionInvokeError(error: unknown): Promise<never> {
+  const context = (error as { context?: { json?: () => Promise<unknown> } }).context;
+  let structuredError: string | null = null;
+
+  if (context && typeof context.json === 'function') {
+    try {
+      const body = await context.json();
+
+      if (
+        body &&
+        typeof body === 'object' &&
+        'error' in body &&
+        typeof body.error === 'string'
+      ) {
+        structuredError = body.error;
+      }
+    } catch {
+      structuredError = null;
+    }
+  }
+
+  if (structuredError) {
+    throw new Error(structuredError);
+  }
+
+  throw error;
+}
+
 export interface CreateLicenseInput {
   license_code: string;
   label?: string | null;
@@ -116,6 +144,33 @@ export interface LicenseIptvSourceDiagnostic {
 export interface TestAdminLicenseIptvSourceResponse {
   ok: boolean;
   diagnostic?: LicenseIptvSourceDiagnostic;
+  error?: string;
+  details?: string;
+}
+
+export interface ImportLicenseIptvSourceChannelSample {
+  name: string;
+  groupTitle: string | null;
+}
+
+export interface ImportLicenseIptvSourceChannelsResult {
+  fetched: boolean;
+  parsed: boolean;
+  totalParsed: number;
+  totalImported: number;
+  totalUpdated: number;
+  totalSkipped: number;
+  totalFailed: number;
+  wasLimited: boolean;
+  limit: number;
+  sampleChannels: ImportLicenseIptvSourceChannelSample[];
+  message: string;
+}
+
+export interface ImportAdminLicenseIptvSourceChannelsResponse {
+  ok: boolean;
+  sourceId?: string;
+  result?: ImportLicenseIptvSourceChannelsResult;
   error?: string;
   details?: string;
 }
@@ -361,6 +416,32 @@ export async function testAdminLicenseIptvSource(
   }
 
   return data.diagnostic;
+}
+
+export async function importAdminLicenseIptvSourceChannels(
+  sourceId: string,
+  limit?: number,
+): Promise<ImportLicenseIptvSourceChannelsResult> {
+  const { data, error } =
+    await supabase.functions.invoke<ImportAdminLicenseIptvSourceChannelsResponse>(
+      'import-license-iptv-source-channels',
+      {
+        body: {
+          sourceId,
+          ...(limit === undefined ? {} : { limit }),
+        },
+      },
+    );
+
+  if (error) {
+    await throwFunctionInvokeError(error);
+  }
+
+  if (!data?.ok || !data.result) {
+    throw new Error(data?.error ?? 'IMPORT_LICENSE_IPTV_SOURCE_CHANNELS_FAILED');
+  }
+
+  return data.result;
 }
 
 export async function updateAdminLicenseDeviceStatus({

@@ -5,6 +5,7 @@ import { AdminLayout } from '../components/AdminLayout';
 import {
   createAdminLicense,
   createAdminLicenseIptvSource,
+  importAdminLicenseIptvSourceChannels,
   testAdminLicenseIptvSource,
   updateAdminLicenseDetails,
   updateAdminLicenseDeviceStatus,
@@ -15,7 +16,10 @@ import {
   listAdminPlaybackSessions,
 } from '../services';
 
-import type { LicenseIptvSourceDiagnostic } from '../services';
+import type {
+  ImportLicenseIptvSourceChannelsResult,
+  LicenseIptvSourceDiagnostic,
+} from '../services';
 
 import type {
   License,
@@ -226,6 +230,32 @@ function getTestLicenseIptvSourceErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
+function getImportLicenseIptvSourceChannelsErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível importar os canais desta fonte.';
+  }
+
+  const messages: Record<string, string> = {
+    INVALID_PAYLOAD: 'Fonte inválida para importação.',
+    UNAUTHORIZED: 'Sessão administrativa inválida.',
+    FORBIDDEN: 'Você não tem permissão para importar esta fonte.',
+    LICENSE_IPTV_SOURCE_NOT_FOUND: 'Fonte IPTV não encontrada.',
+    LICENSE_NOT_FOUND: 'Licença vinculada não encontrada.',
+    IPTV_SOURCE_TYPE_NOT_SUPPORTED:
+      'Tipo de fonte ainda não suportado para importação.',
+    XTREAM_IMPORT_NOT_SUPPORTED_YET:
+      'Importação Xtream ainda não suportada nesta fase.',
+    IPTV_SOURCE_FETCH_FAILED: 'Não foi possível acessar a fonte IPTV.',
+    IPTV_SOURCE_PARSE_FAILED: 'Não foi possível interpretar a playlist.',
+    CHANNELS_CACHE_IMPORT_FAILED:
+      'Não foi possível gravar os canais no cache.',
+    IMPORT_LICENSE_IPTV_SOURCE_CHANNELS_FAILED:
+      'Não foi possível importar os canais desta fonte.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 function getUpdateLicenseDeviceStatusErrorMessage(error: unknown) {
   if (!(error instanceof Error)) {
     return 'Não foi possível atualizar o dispositivo.';
@@ -297,6 +327,10 @@ export function AdminLicensesPage() {
   const [testingSourceId, setTestingSourceId] = useState<string | null>(null);
   const [sourceDiagnostics, setSourceDiagnostics] = useState<
     Record<string, LicenseIptvSourceDiagnostic>
+  >({});
+  const [importingSourceId, setImportingSourceId] = useState<string | null>(null);
+  const [sourceImportResults, setSourceImportResults] = useState<
+    Record<string, ImportLicenseIptvSourceChannelsResult>
   >({});
   const [updatingLicenseStatusId, setUpdatingLicenseStatusId] = useState<string | null>(
     null,
@@ -455,6 +489,27 @@ export function AdminLicensesPage() {
       setErrorMessage(getTestLicenseIptvSourceErrorMessage(error));
     } finally {
       setTestingSourceId(null);
+    }
+  }
+
+  async function handleImportLicenseIptvSourceChannels(source: LicenseIptvSource) {
+    try {
+      setImportingSourceId(source.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const result = await importAdminLicenseIptvSourceChannels(source.id);
+
+      setSourceImportResults((currentResults) => ({
+        ...currentResults,
+        [source.id]: result,
+      }));
+
+      setSuccessMessage('Importação de canais concluída.');
+    } catch (error) {
+      setErrorMessage(getImportLicenseIptvSourceChannelsErrorMessage(error));
+    } finally {
+      setImportingSourceId(null);
     }
   }
 
@@ -650,6 +705,7 @@ export function AdminLicensesPage() {
       setLicenseSources([]);
       setPlaybackSessions([]);
       setSourceDiagnostics({});
+      setSourceImportResults({});
 
       await loadLicenses();
     } catch (error) {
@@ -1048,7 +1104,9 @@ export function AdminLicensesPage() {
                 ) : (
                   licenseSources.map((source) => {
                     const diagnostic = sourceDiagnostics[source.id];
+                    const importResult = sourceImportResults[source.id];
                     const isTestingSource = testingSourceId === source.id;
+                    const isImportingSource = importingSourceId === source.id;
 
                     return (
                       <div
@@ -1067,14 +1125,29 @@ export function AdminLicensesPage() {
                             </p>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => void handleTestLicenseIptvSource(source)}
-                            disabled={isTestingSource}
-                            className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isTestingSource ? 'Testando...' : 'Testar fonte'}
-                          </button>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void handleTestLicenseIptvSource(source)}
+                              disabled={isTestingSource}
+                              className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isTestingSource ? 'Testando...' : 'Testar fonte'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleImportLicenseIptvSourceChannels(source)
+                              }
+                              disabled={isImportingSource}
+                              className="rounded-xl bg-xf-red px-3 py-2 text-xs font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isImportingSource
+                                ? 'Importando...'
+                                : 'Importar canais'}
+                            </button>
+                          </div>
                         </div>
 
                         {diagnostic ? (
@@ -1138,6 +1211,80 @@ export function AdminLicensesPage() {
                             {diagnostic.sampleChannels.length > 0 ? (
                               <div className="mt-3 flex flex-wrap gap-2">
                                 {diagnostic.sampleChannels.map((channel) => (
+                                  <span
+                                    key={`${channel.name}-${channel.groupTitle ?? 'sem-grupo'}`}
+                                    className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white"
+                                  >
+                                    {channel.groupTitle
+                                      ? `${channel.name} · ${channel.groupTitle}`
+                                      : channel.name}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {importResult ? (
+                          <div className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 p-3">
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-sm font-black text-sky-100">
+                                  Importação concluída
+                                </p>
+                                <p className="mt-1 text-xs text-sky-100/80">
+                                  {importResult.message}
+                                </p>
+                              </div>
+                              <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-black text-white">
+                                Limite: {importResult.limit}
+                              </span>
+                            </div>
+
+                            <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
+                              <div>
+                                <p className="font-black text-white">Lidos</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {importResult.totalParsed}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-black text-white">Importados</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {importResult.totalImported}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-black text-white">Atualizados</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {importResult.totalUpdated}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-black text-white">Ignorados</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {importResult.totalSkipped}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-black text-white">Falhas</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {importResult.totalFailed}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-black text-white">
+                                  Limite aplicado
+                                </p>
+                                <p className="mt-1 text-xf-muted">
+                                  {importResult.wasLimited ? 'Sim' : 'Não'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {importResult.sampleChannels.length > 0 ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {importResult.sampleChannels.map((channel) => (
                                   <span
                                     key={`${channel.name}-${channel.groupTitle ?? 'sem-grupo'}`}
                                     className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white"
