@@ -107,6 +107,22 @@ export interface LicenseIptvSource {
   updated_at: string;
 }
 
+export interface LicenseChannelCache {
+  id: string;
+  license_id: string;
+  license_iptv_source_id: string;
+  name: string;
+  stream_url: string;
+  logo_url: string | null;
+  group_title: string | null;
+  tvg_id: string | null;
+  sort_order: number;
+  is_active: boolean;
+  last_imported_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PlaybackSession {
   id: string;
   license_id: string;
