@@ -5,6 +5,7 @@ import { AdminLayout } from '../components/AdminLayout';
 import {
   createAdminLicense,
   createAdminLicenseIptvSource,
+  testAdminLicenseIptvSource,
   updateAdminLicenseDetails,
   updateAdminLicenseDeviceStatus,
   updateAdminLicenseStatus,
@@ -13,6 +14,8 @@ import {
   listAdminLicenses,
   listAdminPlaybackSessions,
 } from '../services';
+
+import type { LicenseIptvSourceDiagnostic } from '../services';
 
 import type {
   License,
@@ -205,6 +208,24 @@ function getCreateLicenseIptvSourceErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
+function getTestLicenseIptvSourceErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível testar a fonte IPTV da licença.';
+  }
+
+  const messages: Record<string, string> = {
+    INVALID_PAYLOAD: 'Fonte IPTV inválida para teste.',
+    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
+    FORBIDDEN: 'Você não tem permissão para testar esta fonte IPTV.',
+    LICENSE_IPTV_SOURCE_NOT_FOUND: 'Fonte IPTV não encontrada.',
+    LICENSE_NOT_FOUND: 'Licença não encontrada.',
+    TEST_LICENSE_IPTV_SOURCE_FAILED:
+      'Não foi possível testar a fonte IPTV da licença.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 function getUpdateLicenseDeviceStatusErrorMessage(error: unknown) {
   if (!(error instanceof Error)) {
     return 'Não foi possível atualizar o dispositivo.';
@@ -223,6 +244,32 @@ function getUpdateLicenseDeviceStatusErrorMessage(error: unknown) {
   };
 
   return messages[error.message] ?? error.message;
+}
+
+function formatDiagnosticBytes(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return 'Não informado';
+  }
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDiagnosticHttpStatus(diagnostic: LicenseIptvSourceDiagnostic) {
+  if (!diagnostic.responded || diagnostic.httpStatus === null) {
+    return 'Sem resposta';
+  }
+
+  return diagnostic.httpStatusText
+    ? `${diagnostic.httpStatus} ${diagnostic.httpStatusText}`
+    : String(diagnostic.httpStatus);
 }
 
 export function AdminLicensesPage() {
@@ -247,6 +294,10 @@ export function AdminLicensesPage() {
   const [sourceName, setSourceName] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [sourceType, setSourceType] = useState<LicenseIptvSource['type']>('m3u');
+  const [testingSourceId, setTestingSourceId] = useState<string | null>(null);
+  const [sourceDiagnostics, setSourceDiagnostics] = useState<
+    Record<string, LicenseIptvSourceDiagnostic>
+  >({});
   const [updatingLicenseStatusId, setUpdatingLicenseStatusId] = useState<string | null>(
     null,
   );
@@ -379,6 +430,31 @@ export function AdminLicensesPage() {
       setErrorMessage(getCreateLicenseIptvSourceErrorMessage(error));
     } finally {
       setIsCreatingSource(false);
+    }
+  }
+
+  async function handleTestLicenseIptvSource(source: LicenseIptvSource) {
+    try {
+      setTestingSourceId(source.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const diagnostic = await testAdminLicenseIptvSource(source.id);
+
+      setSourceDiagnostics((currentDiagnostics) => ({
+        ...currentDiagnostics,
+        [source.id]: diagnostic,
+      }));
+
+      setSuccessMessage(
+        diagnostic.success
+          ? 'Teste da fonte IPTV concluído com playlist válida.'
+          : 'Teste da fonte IPTV concluído com alerta.',
+      );
+    } catch (error) {
+      setErrorMessage(getTestLicenseIptvSourceErrorMessage(error));
+    } finally {
+      setTestingSourceId(null);
     }
   }
 
@@ -573,6 +649,7 @@ export function AdminLicensesPage() {
       setLicenseDevices([]);
       setLicenseSources([]);
       setPlaybackSessions([]);
+      setSourceDiagnostics({});
 
       await loadLicenses();
     } catch (error) {
@@ -969,21 +1046,114 @@ export function AdminLicensesPage() {
                     Nenhuma fonte IPTV vinculada.
                   </p>
                 ) : (
-                  licenseSources.map((source) => (
-                    <div
-                      key={source.id}
-                      className="rounded-xl border border-white/10 bg-black/20 p-3"
-                    >
-                      <p className="font-bold text-white">{source.name}</p>
-                      <p className="mt-1 truncate text-xs text-xf-muted">
-                        {source.source_url}
-                      </p>
-                      <p className="mt-2 text-xs font-bold text-white">
-                        {source.type.toUpperCase()} ·{' '}
-                        {source.is_active ? 'Ativa' : 'Inativa'}
-                      </p>
-                    </div>
-                  ))
+                  licenseSources.map((source) => {
+                    const diagnostic = sourceDiagnostics[source.id];
+                    const isTestingSource = testingSourceId === source.id;
+
+                    return (
+                      <div
+                        key={source.id}
+                        className="rounded-xl border border-white/10 bg-black/20 p-3"
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-bold text-white">{source.name}</p>
+                            <p className="mt-1 truncate text-xs text-xf-muted">
+                              {source.source_url}
+                            </p>
+                            <p className="mt-2 text-xs font-bold text-white">
+                              {source.type.toUpperCase()} ·{' '}
+                              {source.is_active ? 'Ativa' : 'Inativa'}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleTestLicenseIptvSource(source)}
+                            disabled={isTestingSource}
+                            className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isTestingSource ? 'Testando...' : 'Testar fonte'}
+                          </button>
+                        </div>
+
+                        {diagnostic ? (
+                          <div
+                            className={
+                              diagnostic.success
+                                ? 'mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3'
+                                : 'mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3'
+                            }
+                          >
+                            <div className="grid gap-3 text-xs sm:grid-cols-2">
+                              <div>
+                                <p className="font-black text-white">HTTP</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {formatDiagnosticHttpStatus(diagnostic)}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="font-black text-white">Content-Type</p>
+                                <p className="mt-1 break-words text-xf-muted">
+                                  {diagnostic.contentType || 'Não informado'}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="font-black text-white">Tamanho</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {formatDiagnosticBytes(
+                                    diagnostic.contentLength ?? diagnostic.bytesRead,
+                                  )}
+                                  {diagnostic.wasTruncated ? ' lido parcialmente' : ''}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="font-black text-white">Playlist</p>
+                                <p className="mt-1 text-xf-muted">
+                                  {diagnostic.looksLikeM3u ? 'M3U detectada' : 'Não detectada'} ·{' '}
+                                  {diagnostic.entryCount} entrada(s)
+                                </p>
+                              </div>
+                            </div>
+
+                            <p className="mt-3 text-xs text-xf-muted">
+                              EXTINF: {diagnostic.extinfLines} · URLs: {diagnostic.playableUrlLines}
+                            </p>
+
+                            {diagnostic.errorMessage ? (
+                              <p className="mt-3 rounded-lg bg-black/30 px-3 py-2 text-xs font-semibold text-amber-100">
+                                {diagnostic.errorMessage}
+                              </p>
+                            ) : null}
+
+                            {diagnostic.sampleGroups.length > 0 ? (
+                              <p className="mt-3 text-xs text-xf-muted">
+                                Grupos: {diagnostic.sampleGroups.join(', ')}
+                              </p>
+                            ) : null}
+
+                            {diagnostic.sampleChannels.length > 0 ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {diagnostic.sampleChannels.map((channel) => (
+                                  <span
+                                    key={`${channel.name}-${channel.groupTitle ?? 'sem-grupo'}`}
+                                    className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white"
+                                  >
+                                    {channel.groupTitle
+                                      ? `${channel.name} · ${channel.groupTitle}`
+                                      : channel.name}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </article>

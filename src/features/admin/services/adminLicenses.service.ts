@@ -87,6 +87,39 @@ export interface UpdateAdminLicenseIptvSourceResponse {
   details?: string;
 }
 
+export interface LicenseIptvSourceDiagnosticChannel {
+  name: string;
+  groupTitle: string | null;
+}
+
+export interface LicenseIptvSourceDiagnostic {
+  success: boolean;
+  responded: boolean;
+  httpStatus: number | null;
+  httpStatusText: string | null;
+  contentType: string | null;
+  contentLength: number | null;
+  bytesRead: number;
+  wasTruncated: boolean;
+  looksLikeM3u: boolean;
+  startsWithExtM3u: boolean;
+  extinfLines: number;
+  playableUrlLines: number;
+  entryCount: number;
+  sampleGroups: string[];
+  sampleChannels: LicenseIptvSourceDiagnosticChannel[];
+  firstNonEmptyLine: string | null;
+  errorMessage: string | null;
+  testedAt: string;
+}
+
+export interface TestAdminLicenseIptvSourceResponse {
+  ok: boolean;
+  diagnostic?: LicenseIptvSourceDiagnostic;
+  error?: string;
+  details?: string;
+}
+
 export interface UpdateAdminLicenseDeviceStatusInput {
   deviceId: string;
   isActive: boolean;
@@ -304,6 +337,30 @@ export async function updateAdminLicenseIptvSource(
   }
 
   return data.source;
+}
+
+export async function testAdminLicenseIptvSource(
+  sourceId: string,
+): Promise<LicenseIptvSourceDiagnostic> {
+  const { data, error } =
+    await supabase.functions.invoke<TestAdminLicenseIptvSourceResponse>(
+      'test-license-iptv-source',
+      {
+        body: {
+          sourceId,
+        },
+      },
+    );
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.ok || !data.diagnostic) {
+    throw new Error(data?.error ?? 'TEST_LICENSE_IPTV_SOURCE_FAILED');
+  }
+
+  return data.diagnostic;
 }
 
 export async function updateAdminLicenseDeviceStatus({
