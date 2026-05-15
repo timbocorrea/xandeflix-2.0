@@ -51,6 +51,18 @@ export type AdminLicenseChannelsCacheResult = {
   groups: string[];
 };
 
+export type UpdateAdminLicenseChannelStatusInput = {
+  channelId: string;
+  isActive: boolean;
+};
+
+export type UpdateAdminLicenseChannelStatusResponse = {
+  ok: boolean;
+  channel?: Pick<LicenseChannelCache, 'id' | 'name' | 'is_active' | 'updated_at'>;
+  error?: string;
+  details?: string;
+};
+
 export async function listAdminLicenseChannelsCache(
   input: ListAdminLicenseChannelsCacheInput = {},
 ): Promise<AdminLicenseChannelsCacheResult> {
@@ -78,4 +90,30 @@ export async function listAdminLicenseChannelsCache(
     totalPages: data.totalPages ?? 0,
     groups: data.groups ?? [],
   };
+}
+
+export async function updateAdminLicenseChannelStatus(
+  input: UpdateAdminLicenseChannelStatusInput,
+) {
+  const { data, error } =
+    await supabase.functions.invoke<UpdateAdminLicenseChannelStatusResponse>(
+      'update-license-channel-status',
+      {
+        body: input,
+      },
+    );
+
+  if (error) {
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+
+    throw error;
+  }
+
+  if (!data?.ok || !data.channel) {
+    throw new Error(data?.error ?? 'LICENSE_CHANNEL_STATUS_UPDATE_FAILED');
+  }
+
+  return data.channel;
 }

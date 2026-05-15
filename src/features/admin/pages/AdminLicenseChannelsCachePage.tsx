@@ -4,6 +4,7 @@ import { AdminLayout } from '../components/AdminLayout';
 
 import {
   listAdminLicenseChannelsCache,
+  updateAdminLicenseChannelStatus,
   type AdminLicenseChannelCacheItem,
 } from '../services';
 
@@ -57,6 +58,24 @@ function getListErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
+function getUpdateErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível atualizar o status do canal.';
+  }
+
+  const messages: Record<string, string> = {
+    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
+    FORBIDDEN: 'Você não tem permissão para gerenciar este canal.',
+    INVALID_PAYLOAD: 'Dados inválidos para atualizar o canal.',
+    LICENSE_CHANNEL_NOT_FOUND: 'Canal importado não localizado.',
+    LICENSE_NOT_FOUND: 'Licença vinculada ao canal não localizada.',
+    LICENSE_CHANNEL_STATUS_UPDATE_FAILED:
+      'Não foi possível atualizar o status do canal.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 export function AdminLicenseChannelsCachePage() {
   const [channels, setChannels] = useState<AdminLicenseChannelCacheItem[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
@@ -69,7 +88,9 @@ export function AdminLicenseChannelsCachePage() {
   const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [updatingChannelId, setUpdatingChannelId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
   const activeCount = useMemo(
@@ -97,6 +118,7 @@ export function AdminLicenseChannelsCachePage() {
       }
 
       setErrorMessage(null);
+      setSuccessMessage(null);
 
       const selectedPage = options?.nextPage ?? page;
       const selectedStatus =
@@ -131,6 +153,7 @@ export function AdminLicenseChannelsCachePage() {
 
   function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSuccessMessage(null);
     setPage(1);
     setSearch(searchInput.trim());
   }
@@ -140,6 +163,7 @@ export function AdminLicenseChannelsCachePage() {
     setSearch('');
     setGroupTitle('');
     setStatusFilter('all');
+    setSuccessMessage(null);
     setPage(1);
   }
 
@@ -149,7 +173,42 @@ export function AdminLicenseChannelsCachePage() {
     }
 
     setPage(nextPage);
+    setSuccessMessage(null);
     void loadChannels({ silent: true, nextPage });
+  }
+
+  async function handleUpdateChannelStatus(channel: AdminLicenseChannelCacheItem) {
+    const nextIsActive = !channel.is_active;
+    const actionLabel = nextIsActive ? 'ativar' : 'desativar';
+    const confirmed = window.confirm(
+      `Deseja ${actionLabel} o canal "${channel.name}"?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setUpdatingChannelId(channel.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      await updateAdminLicenseChannelStatus({
+        channelId: channel.id,
+        isActive: nextIsActive,
+      });
+
+      await loadChannels({ silent: true });
+      setSuccessMessage(
+        nextIsActive
+          ? `Canal "${channel.name}" ativado com sucesso.`
+          : `Canal "${channel.name}" desativado com sucesso.`,
+      );
+    } catch (error) {
+      setErrorMessage(getUpdateErrorMessage(error));
+    } finally {
+      setUpdatingChannelId(null);
+    }
   }
 
   return (
@@ -292,6 +351,12 @@ export function AdminLicenseChannelsCachePage() {
           </div>
         ) : null}
 
+        {successMessage ? (
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+            {successMessage}
+          </div>
+        ) : null}
+
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
           <div className="flex flex-col gap-2 border-b border-white/10 bg-black/20 px-5 py-4 md:flex-row md:items-center md:justify-between">
             <p className="text-sm font-bold text-white">
@@ -324,6 +389,7 @@ export function AdminLicenseChannelsCachePage() {
                     <th className="px-5 py-4 font-semibold">Status</th>
                     <th className="px-5 py-4 font-semibold">Importado em</th>
                     <th className="px-5 py-4 font-semibold">Atualizado em</th>
+                    <th className="px-5 py-4 font-semibold">Ações</th>
                   </tr>
                 </thead>
 
@@ -379,6 +445,27 @@ export function AdminLicenseChannelsCachePage() {
 
                         <td className="px-5 py-4 text-xf-muted">
                           {formatDateTime(channel.updated_at)}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <button
+                            type="button"
+                            onClick={() => void handleUpdateChannelStatus(channel)}
+                            disabled={
+                              isLoading ||
+                              isRefreshing ||
+                              updatingChannelId !== null
+                            }
+                            className="rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {updatingChannelId === channel.id
+                              ? channel.is_active
+                                ? 'Desativando...'
+                                : 'Ativando...'
+                              : channel.is_active
+                                ? 'Desativar'
+                                : 'Ativar'}
+                          </button>
                         </td>
                       </tr>
                     );
