@@ -17,6 +17,7 @@ const adminNavItems = [
 const superAdminNavItems = [
   { label: 'Instalações', to: '/admin/app-installations' },
   { label: 'Administradores', to: '/admin/admin-users' },
+  { label: 'Importações IPTV', to: '/admin/license-imports' },
   { label: 'Auditoria', to: '/admin/audit-logs' },
 ];
 

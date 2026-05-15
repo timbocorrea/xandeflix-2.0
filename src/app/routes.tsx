@@ -19,6 +19,7 @@ import { AdminPlaybackSessionsPage } from '../features/admin/pages/AdminPlayback
 import { AdminAppInstallationsPage } from '../features/admin/pages/AdminAppInstallationsPage';
 import { AdminAppInstallationDetailsPage } from '../features/admin/pages/AdminAppInstallationDetailsPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
+import { AdminLicenseImportsPage } from '../features/admin/pages/AdminLicenseImportsPage';
 import { AdminUsersPage } from '../features/admin/pages/AdminUsersPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { AdminLoginPage } from '../features/admin/pages/AdminLoginPage';
@@ -244,6 +245,17 @@ export function AppRoutes() {
                 <AdminRoute>
                   <SuperAdminOnly>
                     <AdminUsersPage />
+                  </SuperAdminOnly>
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/license-imports"
+              element={
+                <AdminRoute>
+                  <SuperAdminOnly>
+                    <AdminLicenseImportsPage />
                   </SuperAdminOnly>
                 </AdminRoute>
               }
