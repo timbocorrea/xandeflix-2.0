@@ -39,6 +39,7 @@ type ImportResult = {
   totalParsed: number;
   totalImported: number;
   totalUpdated: number;
+  totalReactivated: number;
   totalSkipped: number;
   totalFailed: number;
   totalDeactivatedMissing: number;
@@ -130,6 +131,7 @@ function createImportResult({
   totalParsed = 0,
   totalImported = 0,
   totalUpdated = 0,
+  totalReactivated = 0,
   totalSkipped = 0,
   totalFailed = 0,
   totalDeactivatedMissing = 0,
@@ -142,6 +144,7 @@ function createImportResult({
     totalParsed,
     totalImported,
     totalUpdated,
+    totalReactivated,
     totalSkipped,
     totalFailed,
     totalDeactivatedMissing,
@@ -601,6 +604,7 @@ async function insertImportAudit({
       totalParsed: result.totalParsed,
       totalImported: result.totalImported,
       totalUpdated: result.totalUpdated,
+      totalReactivated: result.totalReactivated,
       totalSkipped: result.totalSkipped,
       totalFailed: result.totalFailed,
       totalDeactivatedMissing: result.totalDeactivatedMissing,
@@ -918,6 +922,7 @@ Deno.serve(async (request) => {
     );
     const rowsToInsert: Record<string, unknown>[] = [];
     const rowsToUpdate: Record<string, unknown>[] = [];
+    const rowsToReactivate: Record<string, unknown>[] = [];
     const rowsToDeactivateMissing: Record<string, unknown>[] = [];
     let unchangedSkipped = 0;
 
@@ -957,6 +962,18 @@ Deno.serve(async (request) => {
         continue;
       }
 
+      if (!existingChannel.is_active) {
+        rowsToReactivate.push(
+          toCacheRow({
+            channel,
+            licenseId: typedLicense.id,
+            sourceId: typedSource.id,
+            nowIso,
+          }),
+        );
+        continue;
+      }
+
       if (hasCacheChanges(existingChannel, channel)) {
         rowsToUpdate.push(
           toCacheRow({
@@ -985,6 +1002,11 @@ Deno.serve(async (request) => {
       });
       await writeRowsInChunks({
         supabaseAdmin,
+        rows: rowsToReactivate,
+        mode: 'upsert',
+      });
+      await writeRowsInChunks({
+        supabaseAdmin,
         rows: rowsToDeactivateMissing,
         mode: 'upsert',
       });
@@ -999,6 +1021,7 @@ Deno.serve(async (request) => {
         totalFailed:
           rowsToInsert.length +
           rowsToUpdate.length +
+          rowsToReactivate.length +
           rowsToDeactivateMissing.length,
         wasLimited,
         limit: importLimit,
@@ -1033,6 +1056,7 @@ Deno.serve(async (request) => {
       totalParsed: parsedResult.totalParsed,
       totalImported: rowsToInsert.length,
       totalUpdated: rowsToUpdate.length,
+      totalReactivated: rowsToReactivate.length,
       totalSkipped: parsedResult.totalSkipped + unchangedSkipped,
       totalFailed: parsedResult.totalFailed,
       totalDeactivatedMissing: rowsToDeactivateMissing.length,
