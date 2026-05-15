@@ -41,6 +41,7 @@ type ImportResult = {
   totalUpdated: number;
   totalSkipped: number;
   totalFailed: number;
+  totalDeactivatedMissing: number;
   wasLimited: boolean;
   limit: number;
   sampleChannels: ImportSampleChannel[];
@@ -131,6 +132,7 @@ function createImportResult({
   totalUpdated = 0,
   totalSkipped = 0,
   totalFailed = 0,
+  totalDeactivatedMissing = 0,
   wasLimited = false,
   sampleChannels = [],
 }: Partial<ImportResult> & { limit: number; message: string }): ImportResult {
@@ -142,6 +144,7 @@ function createImportResult({
     totalUpdated,
     totalSkipped,
     totalFailed,
+    totalDeactivatedMissing,
     wasLimited,
     limit,
     sampleChannels,
@@ -600,6 +603,7 @@ async function insertImportAudit({
       totalUpdated: result.totalUpdated,
       totalSkipped: result.totalSkipped,
       totalFailed: result.totalFailed,
+      totalDeactivatedMissing: result.totalDeactivatedMissing,
       wasLimited: result.wasLimited,
       limit: result.limit,
       sampleChannels: result.sampleChannels,
@@ -901,16 +905,42 @@ Deno.serve(async (request) => {
       );
     }
 
+    const existingRows = (existingChannels ?? []) as CachedChannel[];
     const existingByStreamUrl = new Map<string, CachedChannel>();
 
-    for (const existingChannel of (existingChannels ?? []) as CachedChannel[]) {
+    for (const existingChannel of existingRows) {
       existingByStreamUrl.set(existingChannel.stream_url, existingChannel);
     }
 
     const nowIso = new Date().toISOString();
+    const parsedStreamUrls = new Set(
+      parsedResult.channels.map((channel) => channel.stream_url),
+    );
     const rowsToInsert: Record<string, unknown>[] = [];
     const rowsToUpdate: Record<string, unknown>[] = [];
+    const rowsToDeactivateMissing: Record<string, unknown>[] = [];
     let unchangedSkipped = 0;
+
+    for (const existingChannel of existingRows) {
+      if (
+        existingChannel.is_active &&
+        !parsedStreamUrls.has(existingChannel.stream_url)
+      ) {
+        rowsToDeactivateMissing.push({
+          id: existingChannel.id,
+          license_id: typedLicense.id,
+          license_iptv_source_id: typedSource.id,
+          name: existingChannel.name,
+          stream_url: existingChannel.stream_url,
+          logo_url: existingChannel.logo_url,
+          group_title: existingChannel.group_title,
+          tvg_id: existingChannel.tvg_id,
+          sort_order: existingChannel.sort_order,
+          is_active: false,
+          updated_at: nowIso,
+        });
+      }
+    }
 
     for (const channel of parsedResult.channels) {
       const existingChannel = existingByStreamUrl.get(channel.stream_url);
@@ -953,6 +983,11 @@ Deno.serve(async (request) => {
         rows: rowsToUpdate,
         mode: 'upsert',
       });
+      await writeRowsInChunks({
+        supabaseAdmin,
+        rows: rowsToDeactivateMissing,
+        mode: 'upsert',
+      });
     } catch (error) {
       const result = createImportResult({
         fetched: true,
@@ -961,7 +996,10 @@ Deno.serve(async (request) => {
         totalImported: 0,
         totalUpdated: 0,
         totalSkipped: parsedResult.totalSkipped + unchangedSkipped,
-        totalFailed: rowsToInsert.length + rowsToUpdate.length,
+        totalFailed:
+          rowsToInsert.length +
+          rowsToUpdate.length +
+          rowsToDeactivateMissing.length,
         wasLimited,
         limit: importLimit,
         sampleChannels: parsedResult.sampleChannels,
@@ -997,12 +1035,13 @@ Deno.serve(async (request) => {
       totalUpdated: rowsToUpdate.length,
       totalSkipped: parsedResult.totalSkipped + unchangedSkipped,
       totalFailed: parsedResult.totalFailed,
+      totalDeactivatedMissing: rowsToDeactivateMissing.length,
       wasLimited,
       limit: importLimit,
       sampleChannels: parsedResult.sampleChannels,
       message: wasLimited
-        ? 'Importacao concluida com limite operacional.'
-        : 'Importacao concluida.',
+        ? 'Importacao concluida com limite operacional. Canais ausentes foram inativados.'
+        : 'Importacao concluida. Canais ausentes foram inativados.',
     });
 
     await insertImportAudit({
