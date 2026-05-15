@@ -110,6 +110,26 @@ function resolvePageSize(value: unknown) {
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
 }
 
+function serializeErrorDetails(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Record<string, unknown>;
+
+    return JSON.stringify({
+      code: record.code,
+      message: record.message,
+      details: record.details,
+      hint: record.hint,
+      name: record.name,
+    });
+  }
+
+  return String(error);
+}
+
 function buildAccessibleLicenseQuery({
   supabaseAdmin,
   actorId,
@@ -344,7 +364,7 @@ Deno.serve(async (request) => {
       {
         ok: false,
         error: 'LIST_LICENSE_CHANNELS_CACHE_FAILED',
-        details: error instanceof Error ? error.message : String(error),
+        details: serializeErrorDetails(error),
       },
       500,
     );
