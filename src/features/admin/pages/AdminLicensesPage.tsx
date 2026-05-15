@@ -6,6 +6,7 @@ import {
   createAdminLicense,
   createAdminLicenseIptvSource,
   updateAdminLicenseDetails,
+  updateAdminLicenseDeviceStatus,
   updateAdminLicenseStatus,
   listAdminLicenseDevices,
   listAdminLicenseIptvSources,
@@ -204,6 +205,26 @@ function getCreateLicenseIptvSourceErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
+function getUpdateLicenseDeviceStatusErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return 'Não foi possível atualizar o dispositivo.';
+  }
+
+  const messages: Record<string, string> = {
+    INVALID_PAYLOAD: 'Dados inválidos para atualizar o dispositivo.',
+    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
+    FORBIDDEN: 'Você não tem permissão para alterar dispositivos desta licença.',
+    LICENSE_DEVICE_NOT_FOUND: 'Dispositivo não encontrado.',
+    LICENSE_NOT_FOUND: 'Licença não encontrada.',
+    LICENSE_DEVICE_STATUS_UPDATE_FAILED:
+      'Não foi possível atualizar o dispositivo.',
+    UPDATE_LICENSE_DEVICE_STATUS_FAILED:
+      'Não foi possível atualizar o dispositivo.',
+  };
+
+  return messages[error.message] ?? error.message;
+}
+
 export function AdminLicensesPage() {
   const [licenses, setLicenses] = useState<License[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -229,6 +250,9 @@ export function AdminLicensesPage() {
   const [updatingLicenseStatusId, setUpdatingLicenseStatusId] = useState<string | null>(
     null,
   );
+  const [updatingLicenseDeviceId, setUpdatingLicenseDeviceId] = useState<
+    string | null
+  >(null);
 
   const [editingLicense, setEditingLicense] = useState<License | null>(null);
   const [isUpdatingLicense, setIsUpdatingLicense] = useState(false);
@@ -463,6 +487,51 @@ export function AdminLicensesPage() {
       setErrorMessage(getUpdateLicenseStatusErrorMessage(error));
     } finally {
       setUpdatingLicenseStatusId(null);
+    }
+  }
+
+  async function handleUpdateLicenseDeviceStatus(
+    device: LicenseDevice,
+    nextIsActive: boolean,
+  ) {
+    if (!selectedLicense) {
+      return;
+    }
+
+    const actionVerb = nextIsActive ? 'ativar' : 'desativar';
+    const confirmed = window.confirm(
+      `Deseja ${actionVerb} o dispositivo ${device.device_identifier} da licença ${selectedLicense.license_code}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setUpdatingLicenseDeviceId(device.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const updatedDevice = await updateAdminLicenseDeviceStatus({
+        deviceId: device.id,
+        isActive: nextIsActive,
+      });
+
+      setLicenseDevices((currentDevices) =>
+        currentDevices.map((currentDevice) =>
+          currentDevice.id === updatedDevice.id ? updatedDevice : currentDevice,
+        ),
+      );
+
+      setSuccessMessage(
+        nextIsActive
+          ? 'Dispositivo ativado com sucesso.'
+          : 'Dispositivo desativado com sucesso.',
+      );
+    } catch (error) {
+      setErrorMessage(getUpdateLicenseDeviceStatusErrorMessage(error));
+    } finally {
+      setUpdatingLicenseDeviceId(null);
     }
   }
 
@@ -812,9 +881,39 @@ export function AdminLicensesPage() {
                         {device.platform || 'Plataforma não informada'} ·{' '}
                         {device.model || 'Modelo não informado'}
                       </p>
-                      <p className="mt-2 text-xs font-bold text-white">
-                        {device.is_active ? 'Ativo' : 'Inativo'}
-                      </p>
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                        <span
+                          className={
+                            device.is_active
+                              ? 'rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-200'
+                              : 'rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-xf-muted'
+                          }
+                        >
+                          {device.is_active ? 'Ativo' : 'Inativo'}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleUpdateLicenseDeviceStatus(
+                              device,
+                              !device.is_active,
+                            )
+                          }
+                          disabled={updatingLicenseDeviceId === device.id}
+                          className={
+                            device.is_active
+                              ? 'rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50'
+                              : 'rounded-xl bg-xf-red px-3 py-2 text-xs font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50'
+                          }
+                        >
+                          {updatingLicenseDeviceId === device.id
+                            ? 'Atualizando...'
+                            : device.is_active
+                              ? 'Desativar'
+                              : 'Ativar'}
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}

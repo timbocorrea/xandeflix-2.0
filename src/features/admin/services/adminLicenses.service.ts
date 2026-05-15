@@ -87,6 +87,18 @@ export interface UpdateAdminLicenseIptvSourceResponse {
   details?: string;
 }
 
+export interface UpdateAdminLicenseDeviceStatusInput {
+  deviceId: string;
+  isActive: boolean;
+}
+
+export interface UpdateAdminLicenseDeviceStatusResponse {
+  ok: boolean;
+  device?: LicenseDevice;
+  error?: string;
+  details?: string;
+}
+
 export async function listAdminLicenses(): Promise<License[]> {
   const { data, error } = await supabase
     .from('licenses')
@@ -292,4 +304,30 @@ export async function updateAdminLicenseIptvSource(
   }
 
   return data.source;
+}
+
+export async function updateAdminLicenseDeviceStatus({
+  deviceId,
+  isActive,
+}: UpdateAdminLicenseDeviceStatusInput): Promise<LicenseDevice> {
+  const { data, error } =
+    await supabase.functions.invoke<UpdateAdminLicenseDeviceStatusResponse>(
+      'update-license-device-status',
+      {
+        body: {
+          deviceId,
+          isActive,
+        },
+      },
+    );
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.ok || !data.device) {
+    throw new Error(data?.error ?? 'UPDATE_LICENSE_DEVICE_STATUS_FAILED');
+  }
+
+  return data.device;
 }
