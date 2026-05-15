@@ -14,6 +14,7 @@ import { AdminClientsPage } from '../features/admin/pages/AdminClientsPage';
 import { AdminDevicesPage } from '../features/admin/pages/AdminDevicesPage';
 import { AdminIptvSourcesPage } from '../features/admin/pages/AdminIptvSourcesPage';
 import { AdminLicensesPage } from '../features/admin/pages/AdminLicensesPage';
+import { AdminPlaybackSessionsPage } from '../features/admin/pages/AdminPlaybackSessionsPage';
 import { AdminAppInstallationsPage } from '../features/admin/pages/AdminAppInstallationsPage';
 import { AdminAppInstallationDetailsPage } from '../features/admin/pages/AdminAppInstallationDetailsPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
@@ -183,6 +184,15 @@ export function AppRoutes() {
               element={
                 <AdminRoute>
                   <AdminLicensesPage />
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/playback-sessions"
+              element={
+                <AdminRoute>
+                  <AdminPlaybackSessionsPage />
                 </AdminRoute>
               }
             />

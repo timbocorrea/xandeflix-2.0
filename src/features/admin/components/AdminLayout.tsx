@@ -9,6 +9,7 @@ const adminNavItems = [
   { label: 'Clientes', to: '/admin/clients' },
   { label: 'Dispositivos', to: '/admin/devices' },
   { label: 'Licenças', to: '/admin/licenses' },
+  { label: 'Sessões', to: '/admin/playback-sessions' },
   { label: 'Fontes IPTV', to: '/admin/iptv-sources' },
 ];
 
