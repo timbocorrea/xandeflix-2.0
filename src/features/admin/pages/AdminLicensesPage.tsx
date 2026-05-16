@@ -301,6 +301,41 @@ function getUpdateLicenseDeviceStatusErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
+function getLicenseActivationStatusLabel(devices: LicenseDevice[]) {
+  if (devices.length === 0) {
+    return 'Aguardando ativação';
+  }
+
+  const activeDevices = devices.filter((device) => device.is_active);
+
+  if (activeDevices.length === 0) {
+    return 'Dispositivos inativos';
+  }
+
+  return 'Ativada';
+}
+
+function getLicenseActivationStatusDescription(devices: LicenseDevice[]) {
+  if (devices.length === 0) {
+    return 'Nenhum aparelho ativou esta licença ainda. Informe o código ao cliente para ativar no app.';
+  }
+
+  const activeDevices = devices.filter((device) => device.is_active);
+
+  if (activeDevices.length === 0) {
+    return 'A licença possui aparelho(s) vinculados, mas nenhum ativo no momento.';
+  }
+
+  return activeDevices.length + ' aparelho(s) ativo(s) nesta licença.';
+}
+
+function getLicenseDevicesForLicense(
+  devicesByLicenseId: Record<string, LicenseDevice[]>,
+  licenseId: string,
+) {
+  return devicesByLicenseId[licenseId] ?? [];
+}
+
 function formatDiagnosticBytes(value: number | null) {
   if (value === null || !Number.isFinite(value)) {
     return 'Não informado';
@@ -348,6 +383,9 @@ export function AdminLicensesPage() {
   const [allowUserManageSources, setAllowUserManageSources] = useState(true);
   const [selectedLicense, setSelectedLicense] = useState<License | null>(null);
   const [licenseDevices, setLicenseDevices] = useState<LicenseDevice[]>([]);
+  const [devicesByLicenseId, setDevicesByLicenseId] = useState<
+    Record<string, LicenseDevice[]>
+  >({});
   const [licenseSources, setLicenseSources] = useState<LicenseIptvSource[]>([]);
   const [playbackSessions, setPlaybackSessions] = useState<PlaybackSession[]>([]);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -427,6 +465,20 @@ export function AdminLicensesPage() {
       const data = await listAdminLicenses();
 
       setLicenses(data);
+
+        const deviceEntries = await Promise.all(
+          data.map(async (license) => {
+            try {
+              const devices = await listAdminLicenseDevices(license.id);
+
+              return [license.id, devices] as const;
+            } catch {
+              return [license.id, []] as const;
+            }
+          }),
+        );
+
+        setDevicesByLicenseId(Object.fromEntries(deviceEntries));
     } catch {
       setErrorMessage('Não foi possível carregar as licenças.');
     } finally {
@@ -455,6 +507,10 @@ export function AdminLicensesPage() {
       ]);
 
       setLicenseDevices(devicesData);
+        setDevicesByLicenseId((current) => ({
+          ...current,
+          [license.id]: devicesData,
+        }));
       setLicenseSources(sourcesData);
       setPlaybackSessions(sessionsData);
     } catch {
@@ -1032,6 +1088,7 @@ export function AdminLicensesPage() {
                     <th className="px-5 py-4 font-semibold">Status</th>
                     <th className="px-5 py-4 font-semibold">Plano</th>
                     <th className="px-5 py-4 font-semibold">Vencimento</th>
+                    <th className="px-5 py-4 font-semibold">Ativação</th>
                     <th className="px-5 py-4 font-semibold">Dispositivos</th>
                     <th className="px-5 py-4 font-semibold">Telas</th>
                     <th className="px-5 py-4 font-semibold">Listas pelo usuário</th>
@@ -1040,7 +1097,13 @@ export function AdminLicensesPage() {
                 </thead>
 
                 <tbody>
-                  {licenses.map((license) => (
+                  {licenses.map((license) => {
+                    const licenseDeviceSummary = getLicenseDevicesForLicense(
+                      devicesByLicenseId,
+                      license.id,
+                    );
+
+                    return (
                     <tr
                       key={license.id}
                       className="border-b border-white/5 last:border-0"
@@ -1067,13 +1130,24 @@ export function AdminLicensesPage() {
                         {formatDateTime(license.expires_at)}
                       </td>
 
-                      <td className="px-5 py-4 text-xf-muted">
-                        {license.max_devices}
-                      </td>
+                      <td className="px-5 py-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white">
+                              {getLicenseActivationStatusLabel(licenseDeviceSummary)}
+                            </span>
+                            <span className="text-xs text-xf-muted">
+                              {licenseDeviceSummary.length} aparelho(s)
+                            </span>
+                          </div>
+                        </td>
 
-                      <td className="px-5 py-4 text-xf-muted">
-                        {license.max_concurrent_streams}
-                      </td>
+                        <td className="px-5 py-4 text-xf-muted">
+                          {licenseDeviceSummary.length}/{license.max_devices}
+                        </td>
+
+                        <td className="px-5 py-4 text-xf-muted">
+                          {license.max_concurrent_streams}
+                        </td>
 
                       <td className="px-5 py-4 text-xf-muted">
                         {license.allow_user_manage_sources ? 'Sim' : 'Não'}
@@ -1115,8 +1189,9 @@ export function AdminLicensesPage() {
                           </div>
                         </td>
                     </tr>
-                  ))}
-                </tbody>
+                    );
+                  })}
+                  </tbody>
               </table>
             </div>
           )}
@@ -1132,10 +1207,55 @@ export function AdminLicensesPage() {
                 {selectedLicense.license_code}
               </h2>
               <p className="mt-2 text-sm text-xf-muted">
-                {selectedLicense.label || 'Licença sem nome interno'}
-              </p>
+                  {selectedLicense.label || 'Licença sem nome interno'}
+                </p>
 
-              {isLoadingDetails ? (
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-xf-muted">
+                      Status de ativação
+                    </p>
+                    <p className="mt-2 text-lg font-black text-white">
+                      {getLicenseActivationStatusLabel(licenseDevices)}
+                    </p>
+                    <p className="mt-1 text-xs text-xf-muted">
+                      {getLicenseActivationStatusDescription(licenseDevices)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-xf-muted">
+                      Aparelhos
+                    </p>
+                    <p className="mt-2 text-lg font-black text-white">
+                      {licenseDevices.length}/{selectedLicense.max_devices}
+                    </p>
+                    <p className="mt-1 text-xs text-xf-muted">
+                      Inventário/vínculo técnico da licença.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-xf-muted">
+                      Telas simultâneas
+                    </p>
+                    <p className="mt-2 text-lg font-black text-white">
+                      {selectedLicense.max_concurrent_streams}
+                    </p>
+                    <p className="mt-1 text-xs text-xf-muted">
+                      Limite principal de reprodução.
+                    </p>
+                  </div>
+                </div>
+
+                {licenseDevices.length === 0 ? (
+                  <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+                    Próximo passo: informe o código <strong>{selectedLicense.license_code}</strong> ao cliente.
+                    O dispositivo aparecerá aqui após a ativação no app.
+                  </div>
+                ) : null}
+
+                {isLoadingDetails ? (
                 <p className="mt-4 text-sm text-xf-muted">
                   Carregando detalhes...
                 </p>
@@ -1151,7 +1271,7 @@ export function AdminLicensesPage() {
               <div className="mt-4 flex flex-col gap-3">
                 {licenseDevices.length === 0 ? (
                   <p className="text-sm text-xf-muted">
-                    Nenhum dispositivo ativado.
+                    Nenhum dispositivo ativado. Entregue o código da licença ao cliente para concluir a ativação no app.
                   </p>
                 ) : (
                   licenseDevices.map((device) => (
