@@ -6,6 +6,7 @@ import {
   createAdminLicense,
   createAdminLicenseIptvSource,
   importAdminLicenseIptvSourceChannels,
+  listAdminClients,
   testAdminLicenseIptvSource,
   updateAdminLicenseDetails,
   updateAdminLicenseDeviceStatus,
@@ -22,6 +23,7 @@ import type {
 } from '../services';
 
 import type {
+  Client,
   License,
   LicenseDevice,
   LicenseIptvSource,
@@ -88,6 +90,29 @@ function normalizeOptionalFormText(value: string) {
   const normalized = value.trim();
 
   return normalized ? normalized : null;
+}
+
+function createOperationalLicenseNotes(input: {
+  client: Client;
+  deviceIdentifier: string;
+  deviceName: string;
+  devicePlatform: string;
+}) {
+  const lines = [
+    'Cliente operacional: ' + input.client.name + ' (' + input.client.id + ')',
+    input.deviceIdentifier.trim()
+      ? 'ID do aparelho informado para ativação: ' + input.deviceIdentifier.trim()
+      : '',
+    input.deviceName.trim()
+      ? 'Nome do aparelho informado: ' + input.deviceName.trim()
+      : '',
+    input.devicePlatform.trim()
+      ? 'Plataforma informada: ' + input.devicePlatform.trim()
+      : '',
+    'Orientação: entregar o código da licença ao usuário para ativação no app.',
+  ].filter(Boolean);
+
+  return lines.join('\n');
 }
 
 function getLicenseStatusActions(status: LicenseStatus): LicenseStatusActionOption[] {
@@ -304,10 +329,16 @@ function formatDiagnosticHttpStatus(diagnostic: LicenseIptvSourceDiagnostic) {
 
 export function AdminLicensesPage() {
   const [licenses, setLicenses] = useState<License[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingClients, setIsLoadingClients] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [activationDeviceIdentifier, setActivationDeviceIdentifier] = useState('');
+  const [activationDeviceName, setActivationDeviceName] = useState('');
+  const [activationDevicePlatform, setActivationDevicePlatform] = useState('fire-tv');
   const [licenseCode, setLicenseCode] = useState('');
   const [label, setLabel] = useState('');
   const [planType, setPlanType] = useState<LicensePlanType>('monthly');
@@ -368,6 +399,26 @@ export function AdminLicensesPage() {
     [licenses],
   );
 
+  const selectedClient = useMemo(
+    () => clients.find((client) => client.id === selectedClientId) ?? null,
+    [clients, selectedClientId],
+  );
+
+  async function loadClients() {
+    try {
+      setIsLoadingClients(true);
+      setErrorMessage(null);
+
+      const data = await listAdminClients();
+
+      setClients(data);
+    } catch {
+      setErrorMessage('Não foi possível carregar os clientes para vincular licenças.');
+    } finally {
+      setIsLoadingClients(false);
+    }
+  }
+
   async function loadLicenses() {
     try {
       setIsLoading(true);
@@ -385,6 +436,7 @@ export function AdminLicensesPage() {
 
   useEffect(() => {
     void loadLicenses();
+    void loadClients();
   }, []);
 
   async function loadLicenseDetails(license: License, options?: { silent?: boolean }) {
@@ -677,6 +729,12 @@ export function AdminLicensesPage() {
     event.preventDefault();
 
     const normalizedCode = licenseCode.trim().toUpperCase();
+    const normalizedDeviceIdentifier = activationDeviceIdentifier.trim();
+
+    if (!selectedClient) {
+      setErrorMessage('Selecione o cliente que receberá esta licença.');
+      return;
+    }
 
     if (!normalizedCode) {
       setErrorMessage('Informe um código de licença.');
@@ -688,17 +746,32 @@ export function AdminLicensesPage() {
       setErrorMessage(null);
       setSuccessMessage(null);
 
-      await createAdminLicense({
+      const createdLicense = await createAdminLicense({
         license_code: normalizedCode,
-        label: label.trim() || null,
+        label: label.trim() || selectedClient.name,
         plan_type: planType,
         expires_at: normalizeExpirationDate(expiresAt),
         max_devices: maxDevices,
         max_concurrent_streams: maxConcurrentStreams,
         allow_user_manage_sources: allowUserManageSources,
+        notes: createOperationalLicenseNotes({
+          client: selectedClient,
+          deviceIdentifier: normalizedDeviceIdentifier,
+          deviceName: activationDeviceName,
+          devicePlatform: activationDevicePlatform,
+        }),
       });
 
-      setSuccessMessage('Licença criada com sucesso.');
+      setSuccessMessage(
+        'Licença criada para ' +
+          selectedClient.name +
+          '. Informe este código ao cliente para ativar no Fire Stick: ' +
+          createdLicense.license_code,
+      );
+      setSelectedClientId('');
+      setActivationDeviceIdentifier('');
+      setActivationDeviceName('');
+      setActivationDevicePlatform('fire-tv');
       setLicenseCode('');
       setLabel('');
       setPlanType('monthly');
@@ -734,8 +807,7 @@ export function AdminLicensesPage() {
           </h1>
 
           <p className="mt-3 max-w-3xl text-base text-xf-muted">
-            Gestão do novo modelo de licenciamento anônimo, com código
-            recuperável, limite de dispositivos e limite de telas simultâneas.
+            Gestão do novo modelo de licenciamento com cliente identificado,\n            código recuperável, limite de dispositivos e telas simultâneas.
           </p>
         </div>
 
@@ -758,7 +830,7 @@ export function AdminLicensesPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-xf-muted">
               Modelo
             </p>
-            <p className="mt-2 text-lg font-bold">Licenciamento anônimo</p>
+            <p className="mt-2 text-lg font-bold">Cliente → Licença → Ativação</p>
           </article>
         </div>
 
@@ -766,6 +838,37 @@ export function AdminLicensesPage() {
           onSubmit={handleCreateLicense}
           className="grid gap-4 rounded-2xl border border-white/10 bg-white/5 p-5 md:grid-cols-2 xl:grid-cols-4"
         >
+          <label className="flex flex-col gap-2 xl:col-span-2">
+            <span className="text-sm font-bold text-white">Cliente</span>
+            <select
+              value={selectedClientId}
+              onChange={(event) => {
+                const nextClientId = event.target.value;
+                const nextClient = clients.find((client) => client.id === nextClientId) ?? null;
+
+                setSelectedClientId(nextClientId);
+
+                if (nextClient && !label.trim()) {
+                  setLabel(nextClient.name);
+                }
+              }}
+              disabled={isLoadingClients}
+              className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+            >
+              <option value="">
+                {isLoadingClients ? 'Carregando clientes...' : 'Selecione o cliente'}
+              </option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name} {client.email ? '- ' + client.email : ''}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-xf-muted">
+              A licença ficará operacionalmente identificada para este cliente. O vínculo técnico do aparelho será concluído quando o usuário ativar o código no app.
+            </span>
+          </label>
+
           <label className="flex flex-col gap-2">
             <span className="text-sm font-bold text-white">Código</span>
             <input
@@ -840,6 +943,44 @@ export function AdminLicensesPage() {
             />
           </label>
 
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-bold text-white">ID do aparelho</span>
+            <input
+              value={activationDeviceIdentifier}
+              onChange={(event) => setActivationDeviceIdentifier(event.target.value)}
+              placeholder="ID exibido no Fire Stick"
+              className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+            />
+            <span className="text-xs text-xf-muted">
+              Este ID será registrado nas observações da licença. O vínculo técnico ocorre quando o cliente ativa o código no app.
+            </span>
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-bold text-white">Nome do aparelho</span>
+            <input
+              value={activationDeviceName}
+              onChange={(event) => setActivationDeviceName(event.target.value)}
+              placeholder="Fire Stick sala"
+              className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+            />
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-bold text-white">Plataforma</span>
+            <select
+              value={activationDevicePlatform}
+              onChange={(event) => setActivationDevicePlatform(event.target.value)}
+              className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+            >
+              <option value="fire-tv">Fire TV / Fire Stick</option>
+              <option value="android-tv">Android TV</option>
+              <option value="web">Web</option>
+              <option value="mobile">Mobile</option>
+              <option value="other">Outro</option>
+            </select>
+          </label>
+
           <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3 md:mt-7">
             <input
               type="checkbox"
@@ -856,7 +997,7 @@ export function AdminLicensesPage() {
             disabled={isCreating}
             className="rounded-xl bg-xf-red px-5 py-3 text-sm font-black text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 md:mt-7"
           >
-            {isCreating ? 'Criando...' : 'Criar licença'}
+            {isCreating ? 'Criando...' : 'Criar licença e liberar acesso'}
           </button>
         </form>
 
