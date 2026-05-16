@@ -26,6 +26,11 @@ type PlaylistRuntimeContextValue = {
   progress: PlaylistLoadProgress | null;
   error: string | null;
   loadFromSource: (source: PlaylistSource) => Promise<void>;
+  loadFromChannels: (input: {
+    source: PlaylistSource;
+    channels: IptvChannel[];
+    diagnostics?: PlaylistDiagnostics | null;
+  }) => void;
   selectChannel: (channel: IptvChannel) => void;
   clearRuntime: () => void;
 };
@@ -128,6 +133,28 @@ export function PlaylistRuntimeProvider({
     }
   }, []);
 
+  const loadFromChannels = useCallback(
+    ({
+      source: nextSource,
+      channels: nextChannels,
+      diagnostics: nextDiagnostics = null,
+    }: {
+      source: PlaylistSource;
+      channels: IptvChannel[];
+      diagnostics?: PlaylistDiagnostics | null;
+    }) => {
+      loadRequestIdRef.current += 1;
+      setError(null);
+      setSource(nextSource);
+      setChannels(nextChannels);
+      setSelectedChannel(null);
+      setDiagnostics(nextDiagnostics);
+      setStatus(nextChannels.length > 0 ? 'ready' : 'empty');
+      setProgress(null);
+    },
+    [],
+  );
+
   const selectChannel = useCallback((channel: IptvChannel) => {
     setSelectedChannel(channel);
   }, []);
@@ -153,6 +180,7 @@ export function PlaylistRuntimeProvider({
       progress,
       error,
       loadFromSource,
+      loadFromChannels,
       selectChannel,
       clearRuntime,
     }),
@@ -165,6 +193,7 @@ export function PlaylistRuntimeProvider({
       progress,
       error,
       loadFromSource,
+      loadFromChannels,
       selectChannel,
       clearRuntime,
     ],
