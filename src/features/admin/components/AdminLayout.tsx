@@ -43,7 +43,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   return (
     <main className="xf-app min-h-screen text-white">
       <div className="flex min-h-screen">
-        <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-black/30 px-5 py-6 lg:block">
+        <aside className="sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto border-r border-white/10 bg-black/30 px-5 py-6 lg:block">
           <Link to="/admin" className="block">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-xf-muted">
               Xandeflix
