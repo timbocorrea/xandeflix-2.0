@@ -147,6 +147,18 @@ export function AdminLicenseChannelsCachePage() {
   }
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSuccessMessage(null);
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [searchInput]);
+
+  useEffect(() => {
     void loadChannels({ nextPage: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, groupTitle, statusFilter]);
@@ -285,6 +297,7 @@ export function AdminLicenseChannelsCachePage() {
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
                 placeholder="Nome, TVG ID ou URL"
+                title="A busca é aplicada automaticamente enquanto você digita."
                 className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-xf-muted focus:border-white/30"
               />
             </label>
@@ -332,7 +345,7 @@ export function AdminLicenseChannelsCachePage() {
               type="submit"
               className="self-end rounded-xl bg-white px-5 py-3 text-sm font-black text-black transition hover:bg-zinc-200"
             >
-              Buscar
+              {isRefreshing ? 'Buscando...' : 'Buscar'}
             </button>
 
             <button
