@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
-import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
+import {
+  clearStoredLicenseActivation,
+  getStoredLicenseActivation,
+} from '@/features/licensing/lib/licenseActivationStorage';
 import { prepareHomePlaylist } from '../services/prepareHomePlaylist.service';
 
 const MIN_PREPARING_HOME_DELAY_MS = 1200;
@@ -21,6 +24,7 @@ export function PreparingHomePage() {
 
   const [step, setStep] = useState<PreparingStep>('loading');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const hasStartedPreparingRef = useRef(false);
 
   useEffect(() => {
@@ -71,7 +75,7 @@ export function PreparingHomePage() {
     return () => {
       isActive = false;
     };
-  }, [channels.length, loadFromSource, status]);
+  }, [channels.length, loadFromSource, retryKey, status]);
 
   useEffect(() => {
     if (status === 'ready' && channels.length > 0) {
@@ -90,6 +94,18 @@ export function PreparingHomePage() {
 
     return () => window.clearTimeout(timer);
   }, [navigate, step]);
+
+  function handleRetry() {
+    hasStartedPreparingRef.current = false;
+    setLocalError(null);
+    setStep('loading');
+    setRetryKey((current) => current + 1);
+  }
+
+  function handleChangeLicense() {
+    clearStoredLicenseActivation();
+    navigate('/login', { replace: true });
+  }
 
   const progressLabel = useMemo(() => {
     if (progress?.phase === 'downloading') {
@@ -136,10 +152,30 @@ export function PreparingHomePage() {
         </p>
 
         {step === 'error' && (
-          <p className="mt-4 rounded-xl bg-red-950/70 px-4 py-3 text-sm font-semibold text-red-100">
-            Verifique se este aparelho está autorizado e tente entrar novamente.
-          </p>
-        )}
+            <div className="mt-6 flex flex-col gap-4">
+              <p className="rounded-xl bg-red-950/70 px-4 py-3 text-sm font-semibold text-red-100">
+                Verifique se este aparelho está autorizado, se a licença possui uma lista IPTV ativa e tente novamente.
+              </p>
+
+              <div className="flex flex-col justify-center gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  className="rounded-xl bg-xf-red px-5 py-3 text-sm font-black text-white transition hover:bg-red-700"
+                >
+                  Tentar novamente
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleChangeLicense}
+                  className="rounded-xl bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
+                >
+                  Trocar licença
+                </button>
+              </div>
+            </div>
+          )}
       </section>
     </main>
   );
