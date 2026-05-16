@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { useAuth } from '../../../app/providers/AuthProvider';
 import { AppShell } from '../../../components/layout/AppShell';
 import { CatalogHero } from '../../../components/media/CatalogHero';
 import { MediaCard } from '../../../components/media/MediaCard';
 import { FocusableButton } from '../../../components/tv/FocusableButton';
 import { FocusableSection } from '../../../components/tv/FocusableSection';
 import { useDeviceType } from '../../../hooks/useDeviceType';
-import { useAuth } from '../../../app/providers/AuthProvider';
-import { useRouteInitialFocus } from '../../../hooks/useRouteInitialFocus';
 import { useCatalogGridNavigation } from '../../../hooks/useCatalogGridNavigation';
-import { catalogSections } from '../data/catalogSections';
+import { useRouteInitialFocus } from '../../../hooks/useRouteInitialFocus';
 import {
   getCategoryItemFocusKey,
   getCategorySectionFocusKey,
@@ -17,27 +16,15 @@ import {
 } from '../../../lib/spatial/categoryFocusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 
+import { catalogSections } from '../data/catalogSections';
+
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
+const SECTION_LOADING_CARD_COUNT = 4;
 
-function shouldShowSeeAll(section: unknown) {
-  return Boolean(
-    section &&
-      typeof section === 'object' &&
-      'showSeeAll' in section &&
-      (section as { showSeeAll?: unknown }).showSeeAll,
-  );
-}
-
-function getCatalogItemPosterUrl(item: unknown) {
-  if (!item || typeof item !== 'object' || !('posterUrl' in item)) {
-    return undefined;
-  }
-
-  const posterUrl = (item as { posterUrl?: unknown }).posterUrl;
-
-  return typeof posterUrl === 'string' ? posterUrl : undefined;
+function shouldShowSeeAll(section: { showSeeAll?: boolean }) {
+  return Boolean(section.showSeeAll);
 }
 
 export function CatalogPage() {
@@ -62,12 +49,15 @@ export function CatalogPage() {
     }, TV_REMAINING_SECTIONS_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [isTv]);
+  }, [isTv, resolvedCatalogSections.length]);
 
   const visibleCatalogSections = useMemo(
     () => resolvedCatalogSections.slice(0, visibleSectionCount),
     [resolvedCatalogSections, visibleSectionCount],
   );
+
+  const isProgressiveLoading =
+    isTv && visibleSectionCount < resolvedCatalogSections.length;
 
   useRouteInitialFocus();
 
@@ -83,97 +73,162 @@ export function CatalogPage() {
         onProfileArrowPress: spatialNavigation.handleHeaderProfileArrowPress,
         onLogoutArrowPress: spatialNavigation.handleHeaderLogoutArrowPress,
       }}
+      mainClassName="px-4 pb-28 md:px-8 md:pb-10 lg:px-10"
     >
-      <CatalogHero
-        onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
-        onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
-        onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
-      />
+      <section className="mx-auto w-full max-w-[1680px]">
+        <CatalogHero
+          onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
+          onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
+          onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
+        />
 
-      {visibleCatalogSections.map((section, categoryIndex) => {
-        const sectionItems =
-          isTv &&
-          visibleSectionCount < resolvedCatalogSections.length &&
-          categoryIndex === 0
-            ? section.items.slice(0, INITIAL_TV_VISIBLE_ITEMS_PER_SECTION)
-            : section.items;
+        <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 md:px-5">
+          <p className="text-[0.68rem] font-black uppercase tracking-[0.26em] text-zinc-300">
+            Home premium base
+          </p>
+          <p className="mt-1 text-sm text-zinc-400">
+            Conteudo organizado para leitura a distancia e navegacao previsivel
+            por controle remoto.
+          </p>
+        </div>
 
-        const eyebrow =
-          section.id === 'continue-watching'
-            ? isMobile
-              ? 'Mobile'
-              : isTv
-                ? 'TV Mode'
-                : 'Web'
-            : section.eyebrow;
+        {visibleCatalogSections.length === 0 ? (
+          <section className="rounded-2xl border border-white/10 bg-black/40 px-6 py-10 text-center">
+            <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
+              Catalogo indisponivel
+            </p>
+            <p className="mt-3 text-sm font-semibold text-zinc-300">
+              Nenhuma secao foi carregada para a Home neste momento.
+            </p>
+          </section>
+        ) : (
+          visibleCatalogSections.map((section, categoryIndex) => {
+            const sectionItems =
+              isTv &&
+              isProgressiveLoading &&
+              categoryIndex === 0
+                ? section.items.slice(0, INITIAL_TV_VISIBLE_ITEMS_PER_SECTION)
+                : section.items;
 
-        return (
-          <FocusableSection
-            key={section.id}
-            focusKey={getCategorySectionFocusKey(section.id)}
-            className="mb-12"
-            onArrowPress={(direction) =>
-              spatialNavigation.handleCategorySectionArrowPress(
-                direction,
-                categoryIndex,
-              )
-            }
-          >
-            <div className="mb-5 flex items-end justify-between">
-              <div>
-                <p className="text-sm font-bold uppercase tracking-[0.3em] text-xf-red">
-                  {eyebrow}
-                </p>
+            const sectionEyebrow =
+              section.id === 'continue-watching'
+                ? isMobile
+                  ? 'Mobile'
+                  : isTv
+                    ? 'TV mode'
+                    : 'Web'
+                : section.eyebrow;
 
-                <h2 className="mt-1 text-2xl font-black text-white md:text-4xl">
-                  {section.title}
-                </h2>
-              </div>
+            return (
+              <FocusableSection
+                key={section.id}
+                focusKey={getCategorySectionFocusKey(section.id)}
+                className="mb-10 rounded-2xl border border-white/10 bg-black/45 px-4 py-5 md:px-5 md:py-6"
+                onArrowPress={(direction) =>
+                  spatialNavigation.handleCategorySectionArrowPress(
+                    direction,
+                    categoryIndex,
+                  )
+                }
+              >
+                <div className="mb-5 flex items-end justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
+                      {sectionEyebrow}
+                    </p>
 
-              {shouldShowSeeAll(section) && !isMobile && !isTv && (
-                <FocusableButton
-                  focusKey={getCategorySeeAllFocusKey(section.id)}
-                  className="inline-flex rounded-full bg-xf-surface px-5 py-3 text-sm font-bold text-white"
-                  onEnterPress={() => {
-                    spatialDebug('catalog-grid', 'Ver tudo:', section.title);
-                  }}
-                  onArrowPress={(direction) =>
-                    spatialNavigation.handleCategorySeeAllArrowPress(
-                      direction,
-                      categoryIndex,
-                    )
-                  }
-                >
-                  Ver tudo
-                </FocusableButton>
+                    <h2 className="mt-2 text-2xl font-black text-white md:text-4xl">
+                      {section.title}
+                    </h2>
+
+                    <p className="mt-2 max-w-3xl text-sm text-zinc-400">
+                      {section.description ||
+                        'Selecao pronta para navegacao rapida na tela principal.'}
+                    </p>
+                  </div>
+
+                  <div className="hidden rounded-xl border border-white/15 bg-white/5 px-3 py-2 md:block">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-zinc-400">
+                      Itens visiveis
+                    </p>
+                    <p className="text-lg font-black text-white">
+                      {sectionItems.length}
+                    </p>
+                  </div>
+
+                  {shouldShowSeeAll(section) && !isMobile && !isTv && (
+                    <FocusableButton
+                      focusKey={getCategorySeeAllFocusKey(section.id)}
+                      className="inline-flex rounded-full border border-white/20 bg-xf-surface px-5 py-3 text-sm font-bold text-white"
+                      onEnterPress={() => {
+                        spatialDebug('catalog-grid', 'Ver tudo:', section.title);
+                      }}
+                      onArrowPress={(direction) =>
+                        spatialNavigation.handleCategorySeeAllArrowPress(
+                          direction,
+                          categoryIndex,
+                        )
+                      }
+                    >
+                      Ver tudo
+                    </FocusableButton>
+                  )}
+                </div>
+
+                {sectionItems.length > 0 ? (
+                  <div className="xf-carousel-row flex gap-4 overflow-x-auto overflow-y-visible pb-6 pr-8 scroll-smooth md:gap-5">
+                    {sectionItems.map((item, itemIndex) => (
+                      <MediaCard
+                        key={item.id}
+                        title={item.title}
+                        subtitle={item.subtitle}
+                        posterUrl={item.posterUrl}
+                        index={itemIndex}
+                        focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
+                        onEnterPress={() => {
+                          spatialDebug('catalog-grid', 'Abrir item:', item.title);
+                        }}
+                        onArrowPress={(direction) =>
+                          spatialNavigation.handleCategoryCardArrowPress(
+                            direction,
+                            categoryIndex,
+                            itemIndex,
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-white/10 bg-black/40 px-4 py-5">
+                    <p className="text-sm font-semibold text-zinc-300">
+                      Esta secao esta vazia no momento.
+                    </p>
+                  </div>
+                )}
+              </FocusableSection>
+            );
+          })
+        )}
+
+        {isProgressiveLoading ? (
+          <section className="mb-8 rounded-2xl border border-white/10 bg-black/35 px-4 py-5 md:px-5 md:py-6">
+            <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-zinc-300">
+              Carregando mais secoes
+            </p>
+
+            <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
+              {Array.from({ length: SECTION_LOADING_CARD_COUNT }).map(
+                (_, placeholderIndex) => (
+                  <div
+                    key={`catalog-loading-card-${placeholderIndex}`}
+                    className="h-[16rem] w-[11rem] shrink-0 animate-pulse rounded-2xl border border-white/10 bg-white/5"
+                  />
+                ),
               )}
             </div>
-
-            <div className="xf-carousel-row flex gap-4 overflow-x-auto overflow-y-visible pb-6 pr-8 scroll-smooth md:gap-5">
-              {sectionItems.map((item, itemIndex) => (
-                <MediaCard
-                  key={item.id}
-                  title={item.title}
-                  subtitle={item.subtitle}
-                  posterUrl={getCatalogItemPosterUrl(item)}
-                  index={itemIndex}
-                  focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
-                  onEnterPress={() => {
-                    spatialDebug('catalog-grid', 'Abrir item:', item.title);
-                  }}
-                  onArrowPress={(direction) =>
-                    spatialNavigation.handleCategoryCardArrowPress(
-                      direction,
-                      categoryIndex,
-                      itemIndex,
-                    )
-                  }
-                />
-              ))}
-            </div>
-          </FocusableSection>
-        );
-      })}
+          </section>
+        ) : null}
+      </section>
     </AppShell>
   );
 }
