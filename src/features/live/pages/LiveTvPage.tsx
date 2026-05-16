@@ -12,10 +12,13 @@ import {
   getAuthorizedIptvSource,
   mapAuthorizedIptvSourceToPlaylistSource,
 } from "@/features/playlists/services/authorizedIptvSource.service";
+import { listAuthorizedLicenseChannels } from "@/features/playlists/services/authorizedLicenseChannels.service";
 import { usePlaylistRuntime } from "@/features/playlists/providers/PlaylistRuntimeProvider";
 import type { IptvChannel } from "@/features/playlists/types/playlist";
 
 const MAX_VISIBLE_CHANNELS_PER_GROUP = 160;
+
+type ChannelSourceMode = "cache" | "playlist" | null;
 
 type ChannelGroup = {
   name: string;
@@ -71,6 +74,7 @@ export default function LiveTvPage() {
     progress,
     error,
     loadFromSource,
+    loadFromChannels,
     selectChannel,
   } = usePlaylistRuntime();
 
@@ -78,6 +82,11 @@ export default function LiveTvPage() {
     null,
   );
   const [sourceLoadError, setSourceLoadError] = useState<string | null>(null);
+  const [channelSourceMode, setChannelSourceMode] =
+    useState<ChannelSourceMode>(null);
+  const [cacheFallbackMessage, setCacheFallbackMessage] = useState<
+    string | null
+  >(null);
   const hasRequestedSourceRef = useRef(false);
 
   useEffect(() => {
@@ -114,16 +123,23 @@ export default function LiveTvPage() {
   }, [navigate]);
 
   useEffect(() => {
+    let isMounted = true;
+
     if (
       hasRequestedSourceRef.current ||
       status === "loading" ||
       status === "ready" ||
       channels.length > 0
     ) {
-      return;
+      return () => {
+        isMounted = false;
+      };
     }
 
     hasRequestedSourceRef.current = true;
+    setSourceLoadError(null);
+    setChannelSourceMode(null);
+    setCacheFallbackMessage(null);
 
     void (async () => {
       try {
@@ -135,18 +151,74 @@ export default function LiveTvPage() {
           licenseCode: storedActivation?.licenseCode,
         });
 
-        await loadFromSource(
-          mapAuthorizedIptvSourceToPlaylistSource(authorizedSource),
-        );
+        const playlistSource =
+          mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
+        const licenseId = authorizedSource.license?.id;
+
+        if (licenseId) {
+          try {
+            const cachedChannels = await listAuthorizedLicenseChannels({
+              licenseId,
+            });
+
+            if (!isMounted) {
+              return;
+            }
+
+            if (cachedChannels.length > 0) {
+              loadFromChannels({
+                source: {
+                  url: "license-cache:" + licenseId,
+                  name:
+                    "Canais autorizados da licença " +
+                    (authorizedSource.license?.code ?? ""),
+                },
+                channels: cachedChannels,
+              });
+              setChannelSourceMode("cache");
+              return;
+            }
+
+            setCacheFallbackMessage(
+              "Cache da licença sem canais ativos. Usando playlist direta autorizada.",
+            );
+          } catch (cacheError) {
+            if (!isMounted) {
+              return;
+            }
+
+            console.info("[XANDEFLIX_LICENSE_CHANNEL_CACHE_FALLBACK]", {
+              reason:
+                cacheError instanceof Error
+                  ? cacheError.message
+                  : "Erro desconhecido ao carregar cache de canais.",
+            });
+            setCacheFallbackMessage(
+              "Cache de canais indisponível. Usando playlist direta autorizada.",
+            );
+          }
+        }
+
+        await loadFromSource(playlistSource);
+
+        if (isMounted) {
+          setChannelSourceMode("playlist");
+        }
       } catch (loadError) {
-        setSourceLoadError(
-          loadError instanceof Error
+        if (isMounted) {
+          setSourceLoadError(
+            loadError instanceof Error
             ? loadError.message
             : "Não foi possível carregar os canais ao vivo.",
-        );
+          );
+        }
       }
     })();
-  }, [channels.length, loadFromSource, status]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [channels.length, loadFromChannels, loadFromSource, status]);
 
   const liveTvChannels = useMemo(() => {
     return channels.filter(isLiveTvChannel);
@@ -390,6 +462,18 @@ export default function LiveTvPage() {
                   <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
                     {getProgressLabel(progress.phase)} ·{" "}
                     {progress.channelsParsed} canais processados
+                  </p>
+                ) : null}
+
+                {channelSourceMode === "cache" ? (
+                  <p className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                    Canais autorizados carregados do cache da licença.
+                  </p>
+                ) : null}
+
+                {cacheFallbackMessage && channelSourceMode === "playlist" ? (
+                  <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
+                    {cacheFallbackMessage}
                   </p>
                 ) : null}
 
