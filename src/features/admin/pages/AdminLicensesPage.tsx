@@ -328,6 +328,9 @@ export function AdminLicensesPage() {
   const [sourceDiagnostics, setSourceDiagnostics] = useState<
     Record<string, LicenseIptvSourceDiagnostic>
   >({});
+  const [sourceTestErrors, setSourceTestErrors] = useState<Record<string, string>>(
+    {},
+  );
   const [importingSourceId, setImportingSourceId] = useState<string | null>(null);
   const [sourceImportResults, setSourceImportResults] = useState<
     Record<string, ImportLicenseIptvSourceChannelsResult>
@@ -472,6 +475,11 @@ export function AdminLicensesPage() {
       setTestingSourceId(source.id);
       setErrorMessage(null);
       setSuccessMessage(null);
+      setSourceTestErrors((currentErrors) => {
+        const nextErrors = { ...currentErrors };
+        delete nextErrors[source.id];
+        return nextErrors;
+      });
 
       const diagnostic = await testAdminLicenseIptvSource(source.id);
 
@@ -480,13 +488,11 @@ export function AdminLicensesPage() {
         [source.id]: diagnostic,
       }));
 
-      setSuccessMessage(
-        diagnostic.success
-          ? 'Teste da fonte IPTV concluído com playlist válida.'
-          : 'Teste da fonte IPTV concluído com alerta.',
-      );
     } catch (error) {
-      setErrorMessage(getTestLicenseIptvSourceErrorMessage(error));
+      setSourceTestErrors((currentErrors) => ({
+        ...currentErrors,
+        [source.id]: getTestLicenseIptvSourceErrorMessage(error),
+      }));
     } finally {
       setTestingSourceId(null);
     }
@@ -1104,6 +1110,7 @@ export function AdminLicensesPage() {
                 ) : (
                   licenseSources.map((source) => {
                     const diagnostic = sourceDiagnostics[source.id];
+                    const sourceTestError = sourceTestErrors[source.id];
                     const importResult = sourceImportResults[source.id];
                     const isTestingSource = testingSourceId === source.id;
                     const isImportingSource = importingSourceId === source.id;
@@ -1149,6 +1156,34 @@ export function AdminLicensesPage() {
                             </button>
                           </div>
                         </div>
+
+                        {sourceTestError ? (
+                          <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-100">
+                            {sourceTestError}
+                          </p>
+                        ) : null}
+
+                        {isTestingSource ? (
+                          <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-xf-muted">
+                            Testando a fonte IPTV...
+                          </p>
+                        ) : diagnostic ? (
+                          <p
+                            className={
+                              diagnostic.success
+                                ? 'mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100'
+                                : 'mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100'
+                            }
+                          >
+                            {diagnostic.success
+                              ? 'Teste concluído com sucesso'
+                              : 'Teste concluído com alerta'}
+                            {' · '}
+                            {formatDiagnosticHttpStatus(diagnostic)}
+                            {' · '}
+                            {diagnostic.entryCount} entrada(s)
+                          </p>
+                        ) : null}
 
                         {diagnostic ? (
                           <div
