@@ -20,7 +20,11 @@ import {
   getCatalogOverview,
   getCatalogPosterUrl,
 } from '@/features/catalog/lib/catalogVisuals';
-import type { CatalogItem } from '@/features/catalog/types';
+import { buildCatalogSectionsFromIptvChannels } from '@/features/catalog/lib/iptvChannelsToCatalog';
+import { prepareHomePlaylist } from '@/features/catalog/services/prepareHomePlaylist.service';
+import { enrichCatalogSectionsWithTmdb } from '@/features/catalog/services/tmdbCatalog.service';
+import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
+import type { CatalogItem, CatalogSection } from '@/features/catalog/types';
 
 import { catalogSections } from '../data/catalogSections';
 
@@ -41,14 +45,133 @@ function getFirstFeaturedItem(items: CatalogItem[]) {
   );
 }
 
+function hasCatalogVisual(item: CatalogItem) {
+  return Boolean(getCatalogBackdropUrl(item) || getCatalogPosterUrl(item));
+}
+
+function keepSectionsWithVisualItems(sections: CatalogSection[]) {
+  return sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(hasCatalogVisual),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+function findCatalogItemById(sections: CatalogSection[], itemId: string | null) {
+  if (!itemId) {
+    return null;
+  }
+
+  for (const section of sections) {
+    const item = section.items.find((sectionItem) => sectionItem.id === itemId);
+
+    if (item) {
+      return item;
+    }
+  }
+
+  return null;
+}
+
 export function CatalogPage() {
   const { signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
-  const resolvedCatalogSections = catalogSections;
+  const {
+    channels,
+    status: playlistStatus,
+    loadFromSource,
+    loadFromChannels,
+  } = usePlaylistRuntime();
+  const [tmdbCatalogSections, setTmdbCatalogSections] = useState<
+    CatalogSection[]
+  >([]);
+  const [tmdbStatus, setTmdbStatus] = useState<'idle' | 'loading' | 'ready'>(
+    'idle',
+  );
+  const [featuredItemId, setFeaturedItemId] = useState<string | null>(null);
+  const [homePlaylistFailed, setHomePlaylistFailed] = useState(false);
+
+  const rawCatalogSections = useMemo(
+    () => buildCatalogSectionsFromIptvChannels(channels),
+    [channels],
+  );
+  const isPlaylistSettled =
+    playlistStatus === 'ready' ||
+    playlistStatus === 'empty' ||
+    playlistStatus === 'error';
+  const enrichedCatalogSections =
+    tmdbCatalogSections.length > 0 ? tmdbCatalogSections : rawCatalogSections;
+  const visualCatalogSections = useMemo(
+    () => keepSectionsWithVisualItems(enrichedCatalogSections),
+    [enrichedCatalogSections],
+  );
+  const realCatalogSections =
+    isPlaylistSettled && tmdbStatus !== 'loading' ? visualCatalogSections : [];
+
+  const hasRealCatalogSections = realCatalogSections.length > 0;
+  const isPlaylistRuntimeLoading = playlistStatus === 'loading';
+  const isPlaylistRuntimeEmpty = channels.length === 0 && !hasRealCatalogSections;
+  const shouldUseDemoCatalogSections =
+    !hasRealCatalogSections &&
+    !isPlaylistRuntimeLoading &&
+    (playlistStatus === 'error' || homePlaylistFailed);
+
+  const resolvedCatalogSections = shouldUseDemoCatalogSections
+    ? catalogSections
+    : realCatalogSections;
 
   const [visibleSectionCount, setVisibleSectionCount] = useState(
     isTv ? INITIAL_TV_VISIBLE_SECTIONS : resolvedCatalogSections.length,
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (rawCatalogSections.length === 0) {
+      setTmdbCatalogSections([]);
+      setTmdbStatus('idle');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!isPlaylistSettled) {
+      setTmdbStatus('loading');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setTmdbStatus('loading');
+
+    void enrichCatalogSectionsWithTmdb(rawCatalogSections)
+      .then((enrichedSections) => {
+        if (cancelled) {
+          return;
+        }
+
+        setTmdbCatalogSections(enrichedSections);
+        setTmdbStatus('ready');
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        spatialDebug(
+          'catalog-grid',
+          'Falha ao enriquecer catalogo com TMDB:',
+          error instanceof Error ? error.message : error,
+        );
+        setTmdbCatalogSections(rawCatalogSections);
+        setTmdbStatus('ready');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPlaylistSettled, rawCatalogSections]);
 
   useEffect(() => {
     if (!isTv) {
@@ -65,6 +188,41 @@ export function CatalogPage() {
     return () => window.clearTimeout(timer);
   }, [isTv, resolvedCatalogSections.length]);
 
+  useEffect(() => {
+    if (homePlaylistFailed) {
+      return;
+    }
+
+    if (channels.length > 0) {
+      return;
+    }
+
+    if (playlistStatus === 'loading' || playlistStatus === 'ready') {
+      return;
+    }
+
+    void prepareHomePlaylist({
+      currentChannelsCount: channels.length,
+      currentStatus: playlistStatus,
+      loadFromSource,
+      loadFromChannels,
+      allowDirectFallback: false,
+    }).catch((error) => {
+      setHomePlaylistFailed(true);
+      spatialDebug(
+        'catalog-grid',
+        'Falha ao carregar lista autorizada para a Home:',
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }, [
+    channels.length,
+    homePlaylistFailed,
+    playlistStatus,
+    loadFromChannels,
+    loadFromSource,
+  ]);
+
   const visibleCatalogSections = useMemo(
     () => resolvedCatalogSections.slice(0, visibleSectionCount),
     [resolvedCatalogSections, visibleSectionCount],
@@ -73,9 +231,31 @@ export function CatalogPage() {
     () => resolvedCatalogSections.find((section) => section.items.length > 0) ?? null,
     [resolvedCatalogSections],
   );
-  const featuredItem = useMemo(
+  const firstFeaturedItem = useMemo(
     () => (featuredSection ? getFirstFeaturedItem(featuredSection.items) : null),
     [featuredSection],
+  );
+
+  useEffect(() => {
+    if (!firstFeaturedItem) {
+      setFeaturedItemId(null);
+      return;
+    }
+
+    setFeaturedItemId((currentItemId) => {
+      if (findCatalogItemById(resolvedCatalogSections, currentItemId)) {
+        return currentItemId;
+      }
+
+      return firstFeaturedItem.id;
+    });
+  }, [firstFeaturedItem, resolvedCatalogSections]);
+
+  const featuredItem = useMemo(
+    () =>
+      findCatalogItemById(resolvedCatalogSections, featuredItemId) ??
+      firstFeaturedItem,
+    [featuredItemId, firstFeaturedItem, resolvedCatalogSections],
   );
   const totalVisibleItems = useMemo(
     () =>
@@ -124,8 +304,20 @@ export function CatalogPage() {
               value: String(totalVisibleItems),
             },
             {
-              label: 'Experiencia',
-              value: isTv ? 'TV pronta' : 'Navegacao fluida',
+              label: 'Origem',
+              value: hasRealCatalogSections
+                ? 'Lista IPTV'
+                : shouldUseDemoCatalogSections
+                  ? 'Demo local'
+                  : 'Carregando',
+            },
+            {
+              label: 'Status',
+              value: hasRealCatalogSections
+                ? tmdbStatus === 'loading'
+                  ? 'Buscando TMDB'
+                  : 'Conteudo real'
+                : playlistStatus,
             },
           ]}
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
@@ -135,20 +327,32 @@ export function CatalogPage() {
 
         <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 md:px-5">
           <p className="text-[0.68rem] font-black uppercase tracking-[0.26em] text-zinc-300">
-            Catalogo premium
+            {hasRealCatalogSections
+              ? 'Catalogo da sua lista'
+              : shouldUseDemoCatalogSections
+                ? 'Catalogo premium'
+                : 'Atualizando sua lista'}
           </p>
           <p className="mt-1 text-sm text-zinc-400">
-            Vitrine com imagens, metadados e destaque visual para leitura a distancia.
+            {shouldUseDemoCatalogSections
+              ? 'Nao foi possivel carregar sua lista agora. Exibindo vitrine local temporaria.'
+              : hasRealCatalogSections
+                ? 'Conteudo carregado da lista IPTV autorizada para esta licenca.'
+                : 'Carregando conteudos da sua lista IPTV autorizada...'}
           </p>
         </div>
 
         {visibleCatalogSections.length === 0 ? (
           <section className="rounded-2xl border border-white/10 bg-black/40 px-6 py-10 text-center">
             <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
-              Catalogo indisponivel
+              {isPlaylistRuntimeLoading || isPlaylistRuntimeEmpty
+                ? 'Carregando sua lista'
+                : 'Catalogo indisponivel'}
             </p>
             <p className="mt-3 text-sm font-semibold text-zinc-300">
-              Nenhuma secao foi carregada para a Home neste momento.
+              {isPlaylistRuntimeLoading || isPlaylistRuntimeEmpty
+                ? 'A Home esta buscando conteudos reais da sua lista autorizada.'
+                : 'Nenhuma secao foi carregada para a Home neste momento.'}
             </p>
           </section>
         ) : (

@@ -51,6 +51,18 @@ function getFirstExistingFocusKey(focusKeys: string[]) {
   return focusKeys.find((focusKey) => focusKeyExists(focusKey)) ?? focusKeys[0];
 }
 
+function getFirstCatalogItemFocusKeyFromDom() {
+  if (!canUseDom()) {
+    return null;
+  }
+
+  const firstCatalogItem = document.querySelector<HTMLElement>(
+    '[data-nav-id^="catalog-section-"][data-nav-id*="-item-"]',
+  );
+
+  return firstCatalogItem?.dataset.navId ?? null;
+}
+
 export function setFocusAndScroll({
   focusKey,
   scrollTargetFocusKey = focusKey,
@@ -143,8 +155,10 @@ export function focusHeroInfoButton() {
 }
 
 export function focusFirstMediaCard() {
+  const firstCatalogItemFocusKey = getFirstCatalogItemFocusKeyFromDom();
+
   return setFocusAndScroll({
-    focusKey: FOCUS_KEYS.FIRST_MEDIA_CARD,
+    focusKey: firstCatalogItemFocusKey ?? FOCUS_KEYS.FIRST_MEDIA_CARD,
     scrollOptions: CARD_SCROLL_OPTIONS,
   });
 }

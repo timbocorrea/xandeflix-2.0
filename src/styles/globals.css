@@ -264,7 +264,7 @@ button {
 
 .xf-app[data-device-form-factor="tv"] .xf-carousel-row > .media-card:focus-visible,
 .xf-app[data-device-form-factor="tv"] .xf-carousel-row > .media-card[data-focused="true"] {
-  transform: scale(1.06);
+  transform: scale(1.025);
 }
 
 /* Respiro lateral do carrossel: evita corte do foco no primeiro card. */

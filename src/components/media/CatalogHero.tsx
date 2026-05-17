@@ -82,20 +82,20 @@ export function CatalogHero({
       focusScrollOptions={HERO_SCROLL_OPTIONS}
       onArrowPress={onSectionArrowPress}
       data-xf-hero="catalog"
-      className="relative mb-8 box-border flex w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-xf-surface p-[var(--xf-shell-inline-padding)] ring-0 ring-inset ring-transparent transition-[box-shadow,border-color] duration-200 data-[has-focused-child=true]:border-xf-red/50 data-[has-focused-child=true]:ring-2 data-[has-focused-child=true]:ring-inset data-[has-focused-child=true]:ring-xf-red"
+      className="relative mb-10 box-border flex min-h-[34rem] w-full max-w-full min-w-0 overflow-hidden rounded-[2rem] border border-white/10 bg-black p-[var(--xf-shell-inline-padding)] shadow-[0_0_80px_rgba(0,0,0,0.55)] ring-0 ring-inset ring-transparent transition-[box-shadow,border-color] duration-200 data-[has-focused-child=true]:border-xf-red/50 data-[has-focused-child=true]:ring-2 data-[has-focused-child=true]:ring-inset data-[has-focused-child=true]:ring-xf-red"
     >
       {heroBackgroundUrl && (
         <img
           src={heroBackgroundUrl}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-35"
+          className="absolute inset-0 h-full w-full object-cover opacity-70 scale-[1.02]"
           loading="eager"
           decoding="async"
         />
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20" />
-      <div className="absolute inset-0 bg-gradient-to-br from-xf-red/25 via-transparent to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/55 to-black/10" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
 
       <div className="relative z-10 grid w-full gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(13rem,17rem)]">
         <div className="flex max-w-3xl flex-1 flex-col justify-end self-stretch pb-[clamp(0.5rem,1.2vh,1rem)]">

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
-import type { CatalogSection } from '../features/catalog/data/catalogSections';
+import type { CatalogSection } from '../features/catalog/types';
 import {
   CARD_SCROLL_OPTIONS,
   focusFirstMediaCard,
@@ -107,6 +107,15 @@ export function useCatalogGridNavigation({
 
       return focusCategoryItemByIndexes(nextCategoryIndex, targetItemIndex);
     }
+    function focusFirstAvailableMediaCard() {
+      const firstCategoryIndex = getNextNonEmptyCategoryIndex(-1);
+
+      if (firstCategoryIndex < 0) {
+        return focusFirstMediaCard();
+      }
+
+      return focusCategoryItemByIndexes(firstCategoryIndex, 0);
+    }
 
     function handleCategoryCardArrowPress(
       direction: string,
@@ -169,7 +178,7 @@ export function useCatalogGridNavigation({
     return {
       handleHeroSectionArrowPress(direction: string) {
         if (direction === 'down') {
-          return focusFirstMediaCard();
+          return focusFirstAvailableMediaCard();
         }
 
         return true;
@@ -181,7 +190,7 @@ export function useCatalogGridNavigation({
         }
 
         if (direction === 'down') {
-          return focusFirstMediaCard();
+          return focusFirstAvailableMediaCard();
         }
 
         return true;
@@ -193,7 +202,7 @@ export function useCatalogGridNavigation({
         }
 
         if (direction === 'down') {
-          return focusFirstMediaCard();
+          return focusFirstAvailableMediaCard();
         }
 
         return true;

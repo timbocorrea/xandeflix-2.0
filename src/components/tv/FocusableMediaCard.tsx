@@ -2,11 +2,7 @@ import { useMemo, useState } from 'react';
 import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 
 import { rememberLastCatalogFocusKey } from '@/lib/spatial/focusNavigation';
-import {
-  getCatalogMediaTypeLabel,
-  getCatalogRatingLabel,
-  getCatalogYearLabel,
-} from '@/features/catalog/lib/catalogVisuals';
+
 import type { CatalogMediaType } from '@/features/catalog/types';
 
 interface FocusableMediaCardProps {
@@ -46,12 +42,7 @@ function getFallbackPalette(title: string) {
 
 export function FocusableMediaCard({
   title,
-  subtitle,
   posterUrl,
-  year,
-  rating,
-  genres = [],
-  mediaType,
   focusKey,
   onEnterPress,
   onArrowPress,
@@ -60,14 +51,6 @@ export function FocusableMediaCard({
   const shouldShowPoster = Boolean(posterUrl) && !hasPosterError;
 
   const fallbackPalette = useMemo(() => getFallbackPalette(title), [title]);
-  const yearLabel = getCatalogYearLabel(year);
-  const ratingLabel = getCatalogRatingLabel(rating);
-  const mediaTypeLabel = getCatalogMediaTypeLabel(mediaType);
-  const tags = [mediaTypeLabel, yearLabel, ...genres.slice(0, 1)].filter(
-    Boolean,
-  ) as string[];
-  const cardBadge = mediaTypeLabel || 'Destaque';
-
   const { ref, focused } = useFocusable({
     focusKey,
     onEnterPress,
@@ -79,7 +62,7 @@ export function FocusableMediaCard({
 
       ref.current?.scrollIntoView({
         behavior: 'auto',
-        block: 'center',
+        block: 'nearest',
         inline: 'nearest',
       });
     },
@@ -88,7 +71,7 @@ export function FocusableMediaCard({
   return (
     <button
       ref={ref}
-      className="media-card tv-focusable relative aspect-[2/3] overflow-hidden rounded-2xl border border-white/10 bg-xf-surface-soft text-left"
+      className="media-card tv-focusable group relative aspect-[2/3] overflow-hidden rounded-[1.4rem] border border-white/10 bg-black text-left transition-[border-color,box-shadow,opacity] duration-100"
       style={
         shouldShowPoster
           ? undefined
@@ -105,58 +88,20 @@ export function FocusableMediaCard({
         <img
           src={posterUrl}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-data-[focused=true]:scale-[1.04]"
           loading="lazy"
           decoding="async"
           onError={() => setHasPosterError(true)}
         />
       )}
 
-      {!shouldShowPoster && (
-        <div className="absolute inset-0 z-[1] flex items-start justify-between px-4 pt-4">
-          <div className="rounded-xl border border-white/25 bg-black/45 px-3 py-1 text-[0.65rem] font-black uppercase tracking-[0.2em] text-zinc-100">
-            {cardBadge}
-          </div>
-          <div className="rounded-full border border-white/20 bg-black/55 px-3 py-1 text-xs font-semibold text-zinc-200">
-            {title.charAt(0).toUpperCase()}
-          </div>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-transparent" />
+
+      {!shouldShowPoster ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center px-4 text-center">
+          <div className="h-16 w-10 rounded-md border border-white/15 bg-white/10" />
         </div>
-      )}
-
-      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-
-      <div className="absolute right-3 top-3 z-10 rounded-full border border-white/20 bg-black/65 px-2.5 py-1 text-[0.62rem] font-black uppercase tracking-[0.14em] text-white">
-        {cardBadge}
-      </div>
-
-      <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 to-black/45 px-4 pb-4 pt-8">
-        <p className="line-clamp-2 text-base font-black leading-tight text-white md:text-lg">
-          {title}
-        </p>
-
-        {tags.length > 0 ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.65rem] uppercase tracking-[0.16em] text-zinc-200">
-            {tags.map((tag) => (
-              <span
-                key={`${focusKey}-${tag}`}
-                className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        <p className="mt-2 line-clamp-2 text-xs font-medium leading-relaxed text-zinc-300">
-          {subtitle || 'Disponivel agora'}
-        </p>
-
-        {ratingLabel ? (
-          <p className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-zinc-200">
-            {ratingLabel}
-          </p>
-        ) : null}
-      </div>
+      ) : null}
     </button>
   );
 }
