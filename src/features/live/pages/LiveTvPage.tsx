@@ -154,11 +154,14 @@ export default function LiveTvPage() {
         const playlistSource =
           mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
         const licenseId = authorizedSource.license?.id;
+        const licenseCode =
+          authorizedSource.license?.code ?? storedActivation?.licenseCode;
 
-        if (licenseId) {
+        if (licenseId && licenseCode) {
           try {
             const cachedChannels = await listAuthorizedLicenseChannels({
-              licenseId,
+              licenseCode,
+              deviceIdentifier,
             });
 
             if (!isMounted) {

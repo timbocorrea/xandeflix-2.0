@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase/supabaseClient';
 
 import type { IptvChannel } from '../types/playlist';
 
-const DEFAULT_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 200;
 const DEFAULT_MAX_PAGES = 10;
 
 type LicenseChannelCacheItem = {
@@ -16,7 +16,7 @@ type LicenseChannelCacheItem = {
   is_active: boolean;
 };
 
-type ListLicenseChannelsCacheResponse = {
+type GetClientLicenseChannelsResponse = {
   ok?: boolean;
   channels?: LicenseChannelCacheItem[];
   totalPages?: number;
@@ -25,7 +25,8 @@ type ListLicenseChannelsCacheResponse = {
 };
 
 export type ListAuthorizedLicenseChannelsInput = {
-  licenseId: string;
+  licenseCode: string;
+  deviceIdentifier: string;
   pageSize?: number;
   maxPages?: number;
 };
@@ -77,23 +78,25 @@ function mapLicenseChannelToIptvChannel(
 }
 
 async function fetchLicenseChannelsPage({
-  licenseId,
+  licenseCode,
+  deviceIdentifier,
   page,
   pageSize,
 }: {
-  licenseId: string;
+  licenseCode: string;
+  deviceIdentifier: string;
   page: number;
   pageSize: number;
 }) {
   const { data, error } =
-    await supabase.functions.invoke<ListLicenseChannelsCacheResponse>(
-      'list-license-channels-cache',
+    await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
+      'get-client-license-channels',
       {
         body: {
-          licenseId,
+          licenseCode,
+          deviceIdentifier,
           page,
           pageSize,
-          isActive: true,
         },
       },
     );
@@ -103,7 +106,7 @@ async function fetchLicenseChannelsPage({
   }
 
   if (!data?.ok) {
-    throw new Error(data?.details ?? data?.error ?? 'LICENSE_CHANNEL_CACHE_FAILED');
+    throw new Error(data?.details ?? data?.error ?? 'CLIENT_LICENSE_CHANNELS_FAILED');
   }
 
   return {
@@ -113,18 +116,21 @@ async function fetchLicenseChannelsPage({
 }
 
 export async function listAuthorizedLicenseChannels({
-  licenseId,
+  licenseCode,
+  deviceIdentifier,
   pageSize = DEFAULT_PAGE_SIZE,
   maxPages = DEFAULT_MAX_PAGES,
 }: ListAuthorizedLicenseChannelsInput): Promise<IptvChannel[]> {
-  const normalizedLicenseId = licenseId.trim();
+  const normalizedLicenseCode = licenseCode.trim().toUpperCase();
+  const normalizedDeviceIdentifier = deviceIdentifier.trim();
 
-  if (!normalizedLicenseId) {
+  if (!normalizedLicenseCode || !normalizedDeviceIdentifier) {
     return [];
   }
 
   const firstPage = await fetchLicenseChannelsPage({
-    licenseId: normalizedLicenseId,
+    licenseCode: normalizedLicenseCode,
+    deviceIdentifier: normalizedDeviceIdentifier,
     page: 1,
     pageSize,
   });
@@ -134,7 +140,8 @@ export async function listAuthorizedLicenseChannels({
 
   for (let page = 2; page <= totalPages; page += 1) {
     const nextPage = await fetchLicenseChannelsPage({
-      licenseId: normalizedLicenseId,
+      licenseCode: normalizedLicenseCode,
+      deviceIdentifier: normalizedDeviceIdentifier,
       page,
       pageSize,
     });
