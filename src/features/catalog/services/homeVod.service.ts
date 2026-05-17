@@ -30,12 +30,29 @@ export type LoadHomeVodInput = {
 };
 
 const DEFAULT_LIMIT_PER_SECTION = 20;
+const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
+
+function createTmdbImageUrl(
+  path: string | null | undefined,
+  size: 'w342' | 'w780' | 'original',
+) {
+  if (!path) {
+    return undefined;
+  }
+
+  if (path.startsWith('http')) {
+    return path;
+  }
+
+  return `${TMDB_IMAGE_BASE_URL}/${size}${path}`;
+}
 
 function inferVodKind(channel: IptvChannel): HomeVodKind {
   const groupTitle = channel.groupTitle?.toLowerCase() ?? '';
   const name = channel.name.toLowerCase();
 
   if (
+    channel.contentKind === 'series' ||
     groupTitle.includes('serie') ||
     groupTitle.includes('série') ||
     groupTitle.includes('series') ||
@@ -47,6 +64,7 @@ function inferVodKind(channel: IptvChannel): HomeVodKind {
   }
 
   if (
+    channel.contentKind === 'movie' ||
     groupTitle.includes('filme') ||
     groupTitle.includes('movie') ||
     groupTitle.includes('cinema') ||
@@ -58,13 +76,24 @@ function inferVodKind(channel: IptvChannel): HomeVodKind {
   return 'unknown';
 }
 
+function createSubtitle(channel: IptvChannel) {
+  const metadata = [
+    channel.tmdbReleaseYear ? String(channel.tmdbReleaseYear) : null,
+    channel.tmdbRating ? `Nota ${channel.tmdbRating.toFixed(1)}` : null,
+  ].filter(Boolean);
+
+  return metadata.length > 0 ? metadata.join(' • ') : channel.groupTitle;
+}
+
 function mapChannelToHomeVodItem(channel: IptvChannel): HomeVodItem {
   const kind = inferVodKind(channel);
 
   return {
     id: channel.id,
-    title: channel.name,
-    subtitle: channel.groupTitle,
+    title: channel.tmdbTitle ?? channel.name,
+    subtitle: createSubtitle(channel),
+    posterUrl: createTmdbImageUrl(channel.tmdbPosterPath, 'w342'),
+    backdropUrl: createTmdbImageUrl(channel.tmdbBackdropPath, 'w780'),
     streamUrl: channel.url,
     groupTitle: channel.groupTitle,
     kind,
@@ -111,9 +140,7 @@ export async function loadHomeVodSections({
     deviceIdentifier,
   });
 
-  const vodItems = channels
-    .filter(isVodChannel)
-    .map(mapChannelToHomeVodItem);
+  const vodItems = channels.filter(isVodChannel).map(mapChannelToHomeVodItem);
 
   const movieItems = vodItems.filter((item) => item.kind === 'movie');
   const seriesItems = vodItems.filter((item) => item.kind === 'series');

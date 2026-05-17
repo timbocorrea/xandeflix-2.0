@@ -211,7 +211,9 @@ Deno.serve(async (request) => {
 
     const { data: channels, error: channelsError, count } = await supabaseAdmin
       .from('license_channels_cache')
-      .select('id, name, stream_url, logo_url, group_title, tvg_id, sort_order, is_active', {
+      .select(
+        'id, name, stream_url, logo_url, group_title, tvg_id, sort_order, is_active, content_kind, tmdb_id, tmdb_media_type, tmdb_match_status, tmdb_match_score, tmdb_title, tmdb_original_title, tmdb_overview, tmdb_poster_path, tmdb_backdrop_path, tmdb_release_year, tmdb_rating, tmdb_genres, tmdb_last_enriched_at',
+        {
         count: 'exact',
       })
       .eq('license_id', licenseRecord.id)

@@ -5,6 +5,16 @@ import type { IptvChannel } from '../types/playlist';
 const DEFAULT_PAGE_SIZE = 200;
 const DEFAULT_MAX_PAGES = 10;
 
+type LicenseChannelContentKind = 'live' | 'movie' | 'series' | 'unknown';
+type LicenseChannelTmdbMediaType = 'movie' | 'tv';
+type LicenseChannelTmdbMatchStatus =
+  | 'pending'
+  | 'matched'
+  | 'not_found'
+  | 'ambiguous'
+  | 'skipped'
+  | 'error';
+
 type LicenseChannelCacheItem = {
   id: string;
   name: string;
@@ -14,6 +24,20 @@ type LicenseChannelCacheItem = {
   tvg_id: string | null;
   sort_order?: number | null;
   is_active: boolean;
+  content_kind?: LicenseChannelContentKind | null;
+  tmdb_id?: number | null;
+  tmdb_media_type?: LicenseChannelTmdbMediaType | null;
+  tmdb_match_status?: LicenseChannelTmdbMatchStatus | null;
+  tmdb_match_score?: number | null;
+  tmdb_title?: string | null;
+  tmdb_original_title?: string | null;
+  tmdb_overview?: string | null;
+  tmdb_poster_path?: string | null;
+  tmdb_backdrop_path?: string | null;
+  tmdb_release_year?: number | null;
+  tmdb_rating?: number | null;
+  tmdb_genres?: string[] | null;
+  tmdb_last_enriched_at?: string | null;
 };
 
 type GetClientLicenseChannelsResponse = {
@@ -74,6 +98,20 @@ function mapLicenseChannelToIptvChannel(
     groupTitle: channel.group_title ?? undefined,
     tvgId: channel.tvg_id ?? undefined,
     tvgName: channel.name,
+    contentKind: channel.content_kind ?? null,
+    tmdbId: channel.tmdb_id ?? null,
+    tmdbMediaType: channel.tmdb_media_type ?? null,
+    tmdbMatchStatus: channel.tmdb_match_status ?? null,
+    tmdbMatchScore: channel.tmdb_match_score ?? null,
+    tmdbTitle: channel.tmdb_title ?? null,
+    tmdbOriginalTitle: channel.tmdb_original_title ?? null,
+    tmdbOverview: channel.tmdb_overview ?? null,
+    tmdbPosterPath: channel.tmdb_poster_path ?? null,
+    tmdbBackdropPath: channel.tmdb_backdrop_path ?? null,
+    tmdbReleaseYear: channel.tmdb_release_year ?? null,
+    tmdbRating: channel.tmdb_rating ?? null,
+    tmdbGenres: channel.tmdb_genres ?? null,
+    tmdbLastEnrichedAt: channel.tmdb_last_enriched_at ?? null,
   };
 }
 
@@ -106,7 +144,9 @@ async function fetchLicenseChannelsPage({
   }
 
   if (!data?.ok) {
-    throw new Error(data?.details ?? data?.error ?? 'CLIENT_LICENSE_CHANNELS_FAILED');
+    throw new Error(
+      data?.details ?? data?.error ?? 'CLIENT_LICENSE_CHANNELS_FAILED',
+    );
   }
 
   return {
