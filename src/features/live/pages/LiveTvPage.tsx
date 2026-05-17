@@ -7,6 +7,10 @@ import { useAuth } from "@/app/providers/AuthProvider";
 import { AppShell } from "@/components/layout/AppShell";
 import { FocusableButton } from "@/components/tv/FocusableButton";
 import { getStoredLicenseActivation } from "@/features/licensing/lib/licenseActivationStorage";
+import {
+  getChannelDisplayGroup,
+  isLiveChannel,
+} from "@/features/playlists/lib/channelClassification";
 import { getOrCreateDeviceIdentifier } from "@/features/playlists/lib/deviceIdentifier";
 import {
   getAuthorizedIptvSource,
@@ -26,35 +30,11 @@ type ChannelGroup = {
 };
 
 function getChannelGroupName(channel: IptvChannel) {
-  const groupTitle = channel.groupTitle?.trim();
-
-  if (!groupTitle) {
-    return "Sem grupo";
-  }
-
-  return groupTitle.replace(/^canais\s*\|\s*/i, "").trim() || groupTitle;
+  return getChannelDisplayGroup(channel);
 }
 
 function getChannelKey(channel: IptvChannel) {
   return `${channel.id}:${channel.url}`;
-}
-
-function isLiveTvChannel(channel: IptvChannel) {
-  const groupName = getChannelGroupName(channel).toLowerCase();
-
-  return ![
-    "filmes",
-    "filme",
-    "movies",
-    "movie",
-    "series",
-    "séries",
-    "serie",
-    "série",
-    "novelas",
-    "documentarios",
-    "documentários",
-  ].some((blockedTerm) => groupName.includes(blockedTerm));
 }
 
 function getProgressLabel(phase?: string) {
@@ -224,7 +204,7 @@ export default function LiveTvPage() {
   }, [channels.length, loadFromChannels, loadFromSource, status]);
 
   const liveTvChannels = useMemo(() => {
-    return channels.filter(isLiveTvChannel);
+    return channels.filter(isLiveChannel);
   }, [channels]);
 
   const groups = useMemo<ChannelGroup[]>(() => {
