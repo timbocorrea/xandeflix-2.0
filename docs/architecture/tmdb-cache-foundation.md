@@ -68,3 +68,33 @@ A próxima fase deve criar uma Edge Function ou rotina backend para enriquecer l
 4. persistir metadados;
 5. retornar resumo da execução.
 
+## Fase 4.11-C3B — Enriquecimento TMDB em batch
+
+A Edge Function `enrich-license-channels-tmdb` deve ser executada por usuário admin autenticado.
+
+Entrada esperada:
+
+```json
+{
+  "licenseId": "uuid-da-licenca",
+  "limit": 10,
+  "force": false
+}
+```
+
+Variável de ambiente necessária no Supabase:
+
+```text
+TMDB_API_KEY
+```
+
+Regras:
+
+- processar lotes pequenos;
+- usar apenas backend;
+- nunca expor `TMDB_API_KEY` no frontend;
+- enriquecer somente `content_kind in ('movie', 'series')`;
+- ignorar canais `live`;
+- respeitar owner-aware;
+- manter Home/Fire Stick livres de chamadas TMDB em runtime.
+
