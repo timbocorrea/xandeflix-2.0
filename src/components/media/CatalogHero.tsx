@@ -51,19 +51,19 @@ export function CatalogHero({
       focusScrollOptions={HERO_SCROLL_OPTIONS}
       onArrowPress={onSectionArrowPress}
       data-xf-hero="catalog"
-      className="relative mb-8 box-border flex w-full max-w-full min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-xf-surface p-[var(--xf-shell-inline-padding)] ring-0 ring-inset ring-transparent transition-[box-shadow,border-color] duration-200 data-[has-focused-child=true]:border-xf-red/50 data-[has-focused-child=true]:ring-2 data-[has-focused-child=true]:ring-inset data-[has-focused-child=true]:ring-xf-red"
+      className="relative mb-7 box-border flex min-h-[21rem] w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-white/10 bg-black px-5 py-6 ring-0 ring-inset ring-transparent transition-[box-shadow,border-color] duration-200 data-[has-focused-child=true]:border-white/35 data-[has-focused-child=true]:ring-2 data-[has-focused-child=true]:ring-inset data-[has-focused-child=true]:ring-white/80 md:min-h-[24rem] md:px-7 md:py-7 lg:min-h-[28rem] xl:min-h-[31rem]"
     >
       {posterUrl && (
         <img
           src={posterUrl}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-35"
+          className="absolute inset-0 h-full w-full object-cover opacity-70"
           loading="eager"
           decoding="async"
         />
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-black/10" />
       <div className="absolute inset-0 bg-gradient-to-br from-xf-red/25 via-transparent to-transparent" />
 
       <div className="relative z-10 grid w-full gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(13rem,17rem)]">
@@ -111,7 +111,7 @@ export function CatalogHero({
           </p>
         </div>
 
-        <div className="hidden rounded-2xl border border-white/10 bg-black/45 p-4 lg:block">
+        <div className="hidden">
           <p className="text-[0.65rem] font-black uppercase tracking-[0.24em] text-xf-red">
             Panorama rapido
           </p>

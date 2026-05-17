@@ -18,12 +18,12 @@ type CardPalette = {
 };
 
 const CARD_PALETTES: CardPalette[] = [
-  { background: '#0f172a', accent: '#dc2626' },
-  { background: '#111827', accent: '#f97316' },
-  { background: '#172554', accent: '#ef4444' },
-  { background: '#1f2937', accent: '#fb7185' },
-  { background: '#18181b', accent: '#f59e0b' },
-  { background: '#0b1324', accent: '#e11d48' },
+  { background: '#111111', accent: '#dc2626' },
+  { background: '#141414', accent: '#ef4444' },
+  { background: '#181818', accent: '#f97316' },
+  { background: '#101010', accent: '#e11d48' },
+  { background: '#171717', accent: '#f59e0b' },
+  { background: '#0b0b0b', accent: '#b91c1c' },
 ];
 
 function getFallbackPalette(title: string) {
@@ -58,8 +58,8 @@ export function FocusableMediaCard({
 
       ref.current?.scrollIntoView({
         behavior: 'auto',
-        block: 'center',
-        inline: 'nearest',
+        block: 'nearest',
+        inline: 'center',
       });
     },
   });
@@ -67,20 +67,21 @@ export function FocusableMediaCard({
   return (
     <button
       ref={ref}
-      className="media-card tv-focusable relative aspect-[2/3] overflow-hidden rounded-2xl border border-white/10 bg-xf-surface-soft text-left"
+      className="media-card tv-focusable group relative aspect-[2/3] w-[8.9rem] shrink-0 overflow-hidden rounded-md bg-[#141414] text-left shadow-none outline-none transition-[transform,box-shadow,filter] duration-200 data-[focused=true]:z-20 data-[focused=true]:scale-[1.07] data-[focused=true]:shadow-[0_0_0_3px_rgba(255,255,255,0.92),0_18px_42px_rgba(0,0,0,0.72)] md:w-[10.2rem] lg:w-[11.2rem] xl:w-[12rem]"
       style={
         shouldShowPoster
           ? undefined
           : {
-              backgroundImage: `linear-gradient(165deg, ${fallbackPalette.accent}22 0%, ${fallbackPalette.background} 46%, #050505 100%)`,
+              backgroundImage: `linear-gradient(165deg, ${fallbackPalette.accent}33 0%, ${fallbackPalette.background} 48%, #050505 100%)`,
             }
       }
       type="button"
       data-focused={focused ? 'true' : undefined}
       data-nav-id={focusKey}
       onClick={onEnterPress}
+      aria-label={subtitle ? `${title}. ${subtitle}` : title}
     >
-      {shouldShowPoster && (
+      {shouldShowPoster ? (
         <img
           src={posterUrl}
           alt=""
@@ -89,25 +90,26 @@ export function FocusableMediaCard({
           decoding="async"
           onError={() => setHasPosterError(true)}
         />
+      ) : (
+        <div className="absolute inset-0 flex items-end bg-gradient-to-br from-white/10 via-transparent to-black px-3 pb-4">
+          <p className="line-clamp-4 text-lg font-black leading-tight text-white">
+            {title}
+          </p>
+        </div>
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 transition-opacity duration-200 group-data-[focused=true]:opacity-100" />
 
-      <div className="absolute right-3 top-3 z-10 rounded-full border border-white/20 bg-black/65 px-2.5 py-1 text-[0.62rem] font-black uppercase tracking-[0.14em] text-white">
-        HD
-      </div>
-
-      <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 to-black/45 px-4 pb-4 pt-8">
-        <p className="line-clamp-2 text-base font-black leading-tight text-white md:text-lg">
+      <div className="absolute inset-x-0 bottom-0 z-10 translate-y-4 px-3 pb-3 opacity-0 transition-all duration-200 group-data-[focused=true]:translate-y-0 group-data-[focused=true]:opacity-100">
+        <p className="line-clamp-1 text-sm font-black leading-tight text-white">
           {title}
         </p>
 
-        <div className="mt-2 flex items-center gap-2 text-[0.7rem] uppercase tracking-[0.18em] text-zinc-300">
-          <span className="rounded-full border border-white/20 bg-white/10 px-2 py-0.5">
-            Catalogo
-          </span>
-          <span className="truncate">{subtitle || 'Disponivel agora'}</span>
-        </div>
+        {subtitle ? (
+          <p className="mt-1 line-clamp-1 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-zinc-300">
+            {subtitle}
+          </p>
+        ) : null}
       </div>
     </button>
   );

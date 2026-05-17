@@ -217,7 +217,7 @@ export function CatalogPage() {
               <FocusableSection
                 key={section.id}
                 focusKey={getCategorySectionFocusKey(section.id)}
-                className="mb-10 rounded-2xl border border-white/10 bg-black/45 px-4 py-5 md:px-5 md:py-6"
+                className="mb-8 border-0 bg-transparent px-0 py-0"
                 onArrowPress={(direction) =>
                   spatialNavigation.handleCategorySectionArrowPress(
                     direction,
@@ -225,7 +225,7 @@ export function CatalogPage() {
                   )
                 }
               >
-                <div className="mb-5 flex items-end justify-between gap-4">
+                <div className="mb-3 flex items-end justify-between gap-4 px-1">
                   <div className="min-w-0">
                     <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
                       {sectionEyebrow}
@@ -270,7 +270,7 @@ export function CatalogPage() {
                 </div>
 
                 {sectionItems.length > 0 ? (
-                  <div className="xf-carousel-row flex gap-4 overflow-x-auto overflow-y-visible pb-6 pr-8 scroll-smooth md:gap-5">
+                  <div className="xf-carousel-row flex gap-2.5 overflow-x-auto overflow-y-visible pb-7 pr-10 scroll-smooth md:gap-3 lg:gap-3.5">
                     {sectionItems.map((item, itemIndex) => (
                       <MediaCard
                         key={item.id}
