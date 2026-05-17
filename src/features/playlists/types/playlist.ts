@@ -6,6 +6,27 @@ export type IptvChannel = {
   groupTitle?: string;
   tvgId?: string;
   tvgName?: string;
+  contentKind?: 'live' | 'movie' | 'series' | 'unknown' | null;
+  tmdbId?: number | null;
+  tmdbMediaType?: 'movie' | 'tv' | null;
+  tmdbMatchStatus?:
+    | 'pending'
+    | 'matched'
+    | 'not_found'
+    | 'ambiguous'
+    | 'skipped'
+    | 'error'
+    | null;
+  tmdbMatchScore?: number | null;
+  tmdbTitle?: string | null;
+  tmdbOriginalTitle?: string | null;
+  tmdbOverview?: string | null;
+  tmdbPosterPath?: string | null;
+  tmdbBackdropPath?: string | null;
+  tmdbReleaseYear?: number | null;
+  tmdbRating?: number | null;
+  tmdbGenres?: string[] | null;
+  tmdbLastEnrichedAt?: string | null;
 };
 
 export type PlaylistDiagnostics = {
