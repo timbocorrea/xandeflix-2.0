@@ -15,26 +15,115 @@ import {
   getCategorySeeAllFocusKey,
 } from '../../../lib/spatial/categoryFocusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
+import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
 
 import { catalogSections } from '../data/catalogSections';
+import {
+  loadHomeVodSections,
+  type HomeVodSection,
+} from '../services/homeVod.service';
 
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 const SECTION_LOADING_CARD_COUNT = 4;
 
+type CatalogPageSection = (typeof catalogSections)[number];
+
 function shouldShowSeeAll(section: { showSeeAll?: boolean }) {
   return Boolean(section.showSeeAll);
+}
+
+function mapHomeVodSectionsToCatalogSections(
+  sections: HomeVodSection[],
+): CatalogPageSection[] {
+  return sections.map((section) => ({
+    id: section.id,
+    title: section.title,
+    eyebrow: section.eyebrow,
+    description: section.description,
+    showSeeAll: false,
+    items: section.items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      subtitle: item.subtitle,
+      posterUrl: item.posterUrl,
+    })),
+  }));
 }
 
 export function CatalogPage() {
   const { signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
-  const resolvedCatalogSections = catalogSections;
+  const [realCatalogSections, setRealCatalogSections] = useState<
+    CatalogPageSection[] | null
+  >(null);
+  const [isRealCatalogLoading, setIsRealCatalogLoading] = useState(true);
+
+  const resolvedCatalogSections = realCatalogSections?.length
+    ? realCatalogSections
+    : catalogSections;
 
   const [visibleSectionCount, setVisibleSectionCount] = useState(
     isTv ? INITIAL_TV_VISIBLE_SECTIONS : resolvedCatalogSections.length,
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRealCatalog() {
+      setIsRealCatalogLoading(true);
+
+      try {
+        const storedActivation = getStoredLicenseActivation();
+        const licenseCode = storedActivation?.licenseCode?.trim();
+
+        if (!licenseCode) {
+          setRealCatalogSections(null);
+          return;
+        }
+
+        const deviceIdentifier =
+          storedActivation?.deviceIdentifier || getOrCreateDeviceIdentifier();
+
+        const homeVodSections = await loadHomeVodSections({
+          licenseCode,
+          deviceIdentifier,
+          limitPerSection: isTv ? 12 : 20,
+        });
+
+        if (!isMounted) {
+          return;
+        }
+
+        const nextSections =
+          mapHomeVodSectionsToCatalogSections(homeVodSections);
+
+        setRealCatalogSections(nextSections.length > 0 ? nextSections : null);
+      } catch (error) {
+        spatialDebug(
+          'catalog-grid',
+          'Falha ao carregar Home VOD real:',
+          error instanceof Error ? error.message : String(error),
+        );
+
+        if (isMounted) {
+          setRealCatalogSections(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsRealCatalogLoading(false);
+        }
+      }
+    }
+
+    void loadRealCatalog();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isTv]);
 
   useEffect(() => {
     if (!isTv) {
@@ -84,11 +173,16 @@ export function CatalogPage() {
 
         <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 md:px-5">
           <p className="text-[0.68rem] font-black uppercase tracking-[0.26em] text-zinc-300">
-            Home premium base
+            {realCatalogSections?.length
+              ? 'Home premium real'
+              : 'Home premium base'}
           </p>
           <p className="mt-1 text-sm text-zinc-400">
-            Conteudo organizado para leitura a distancia e navegacao previsivel
-            por controle remoto.
+            {isRealCatalogLoading
+              ? 'Carregando conteúdos autorizados da sua licença...'
+              : realCatalogSections?.length
+                ? 'Conteúdos reais autorizados para esta licença, preparados para navegação por controle remoto.'
+                : 'Conteúdo organizado para leitura a distância e navegação previsível por controle remoto.'}
           </p>
         </div>
 
