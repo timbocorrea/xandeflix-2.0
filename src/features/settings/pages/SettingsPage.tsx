@@ -6,6 +6,7 @@ import { FocusableButton } from '@/components/tv/FocusableButton';
 import { FocusableSection } from '@/components/tv/FocusableSection';
 import { FocusableInput } from '@/components/tv/FocusableInput';
 import { TvKeyboardModal } from '@/components/tv/keyboard/TvKeyboardModal';
+import { useRouteInitialFocus } from '@/hooks/useRouteInitialFocus';
 import { useAuth } from '@/app/providers/AuthProvider';
 import { getStoredLicenseActivation, saveStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
 import { activateLicense } from '@/features/licensing/services/licenseActivation.service';
@@ -14,6 +15,8 @@ import { maskStreamUrl } from '@/lib/security/maskStreamUrl';
 
 export default function SettingsPage() {
   const { signOut } = useAuth();
+
+  useRouteInitialFocus();
 
   const [deviceIdentifier, setDeviceIdentifier] = useState('');
   const [licenseCode, setLicenseCode] = useState('');

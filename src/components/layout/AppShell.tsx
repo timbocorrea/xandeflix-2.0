@@ -15,6 +15,24 @@ interface AppShellProps {
   mainClassName?: string;
 }
 
+function getTvPlatform() {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  const userAgent = window.navigator.userAgent.toLowerCase();
+
+  if (
+    userAgent.includes('aft') ||
+    userAgent.includes('fire tv') ||
+    userAgent.includes('firetv')
+  ) {
+    return 'fire-tv';
+  }
+
+  return undefined;
+}
+
 export function AppShell({
   children,
   onSignOut,
@@ -26,6 +44,7 @@ export function AppShell({
   const { isTv: legacyIsTv, isMobile } = useDeviceType();
   const isTv = deviceProfile.formFactor === 'tv' || legacyIsTv;
   const shouldShowHeader = !(isTv && hideHeaderOnTv);
+  const tvPlatform = isTv ? getTvPlatform() : undefined;
 
   return (
     <div
@@ -33,6 +52,7 @@ export function AppShell({
       data-device-runtime={deviceProfile.runtime}
       data-device-form-factor={deviceProfile.formFactor}
       data-device-input={deviceProfile.inputMode}
+      data-device-tv-platform={tvPlatform}
       data-viewport-width={deviceProfile.viewportWidth}
       data-viewport-height={deviceProfile.viewportHeight}
       data-device-pixel-ratio={deviceProfile.devicePixelRatio}
@@ -49,6 +69,7 @@ export function AppShell({
         ) : null}
 
         <main
+          data-xf-main-content="true"
           className={cn(
             'px-4 pb-28 md:px-8 md:pb-10 lg:px-10',
             shouldShowHeader ? (isTv ? 'pt-6' : 'pt-2') : 'pt-3 md:pt-4',

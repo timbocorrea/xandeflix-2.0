@@ -1,6 +1,7 @@
 // src/features/tv-focus/focusKeys.ts
 
 import { FOCUS_KEYS as SPATIAL_FOCUS_KEYS } from '@/lib/spatial/focusKeys';
+import { getFirstMountedCatalogItemFocusKey } from '@/lib/spatial/focusNavigation';
 
 export const FOCUS_KEYS = {
   LOGIN_TEST: SPATIAL_FOCUS_KEYS.LOGIN_TEST_BUTTON,
@@ -61,13 +62,50 @@ export const DIRECT_SOURCE_FOCUS_FALLBACKS: string[] = [
   FOCUS_KEYS.SIDEBAR_HOME,
 ];
 
+export const LIVE_FOCUS_FALLBACKS: string[] = [
+  'live-group-0',
+  'live-channel-0',
+  'sidebar-channels',
+  FOCUS_KEYS.SIDEBAR_HOME,
+];
+
+export const SETTINGS_FOCUS_FALLBACKS: string[] = [
+  'settings-device-id-card',
+  'settings-license-code-input',
+  'settings-activate-license-button',
+  'settings-source-url-input',
+  'sidebar-settings',
+  FOCUS_KEYS.SIDEBAR_HOME,
+];
+
 export function getFocusFallbacksForPathname(pathname: string): string[] {
   if (pathname === '/login') {
     return LOGIN_FOCUS_FALLBACKS;
   }
 
+  if (pathname === '/') {
+    const firstCatalogFocusKey = getFirstMountedCatalogItemFocusKey();
+
+    return [
+      FOCUS_KEYS.HERO_PLAY,
+      FOCUS_KEYS.HERO_INFO,
+      ...(firstCatalogFocusKey ? [firstCatalogFocusKey] : []),
+      FOCUS_KEYS.SIDEBAR_HOME,
+      FOCUS_KEYS.HEADER_SEARCH,
+      FOCUS_KEYS.MOBILE_HOME,
+    ];
+  }
+
   if (pathname.startsWith('/player')) {
     return PLAYER_FOCUS_FALLBACKS;
+  }
+
+  if (pathname.startsWith('/live')) {
+    return LIVE_FOCUS_FALLBACKS;
+  }
+
+  if (pathname.startsWith('/settings')) {
+    return SETTINGS_FOCUS_FALLBACKS;
   }
 
   if (pathname.startsWith('/playlists/direct-source')) {

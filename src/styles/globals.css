@@ -13,7 +13,7 @@
 
   --radius-card: 0.75rem;
 
-  --shadow-tv-focus: 0 0 0 2px #E50914;
+  --shadow-tv-focus: 0 0 0 1px rgba(229, 9, 20, 0.72);
 }
 
 :root {
@@ -86,9 +86,9 @@ button {
 
 .tv-focusable:focus-visible,
 .tv-focusable[data-focused="true"] {
-  outline: 2px solid #E50914;
-  outline-offset: 1px;
-  transform: scale(1.08);
+  outline: 1px solid rgba(229, 9, 20, 0.72);
+  outline-offset: 0;
+  transform: scale(1.04);
 }
 
 .media-card {
@@ -102,9 +102,9 @@ button {
 
 .media-card:focus-visible,
 .media-card[data-focused="true"] {
-  outline: 4px solid #E50914;
-  outline-offset: 2px;
-  transform: translateY(-10px) scale(1.08);
+  outline: 2px solid rgba(229, 9, 20, 0.72);
+  outline-offset: 1px;
+  transform: translateY(-6px) scale(1.04);
 }
 
 .hero-gradient {
@@ -202,6 +202,33 @@ button {
 }
 
 /* Equalização final: Fire Stick/TV usa a mesma proporção visual do tablet no Hero. */
+.xf-app[data-device-tv-platform="fire-tv"] {
+  --xf-action-height: clamp(3.2rem, 5.4vh, 4.4rem);
+  --xf-action-inline-padding: clamp(1.2rem, 2vw, 2.25rem);
+  --xf-shell-inline-padding: clamp(1.1rem, 1.6vw, 2rem);
+}
+
+.xf-app[data-device-tv-platform="fire-tv"] [data-xf-hero-eyebrow="true"] {
+  font-size: clamp(0.56rem, 0.7vw, 0.7rem);
+}
+
+.xf-app[data-device-tv-platform="fire-tv"] [data-xf-hero-title="true"] {
+  font-size: clamp(1.95rem, 3.2vw, 3.35rem);
+}
+
+.xf-app[data-device-tv-platform="fire-tv"] [data-xf-hero-description="true"] {
+  max-width: 40%;
+  font-size: clamp(0.75rem, 0.95vw, 0.9rem);
+}
+
+.xf-app[data-device-tv-platform="fire-tv"] [data-xf-home-section-eyebrow="true"] {
+  font-size: 0.62rem;
+}
+
+.xf-app[data-device-tv-platform="fire-tv"] [data-xf-home-section-title="true"] {
+  font-size: clamp(1.48rem, 2.16vw, 2.4rem);
+}
+
 .xf-app[data-device-form-factor="tv"] [data-xf-hero="catalog"],
 .xf-app[data-device-form-factor="tablet"] [data-xf-hero="catalog"] {
   width: 100%;
@@ -231,6 +258,18 @@ button {
   flex-basis: clamp(8.75rem, 13vw, 11.5rem);
 }
 
+.xf-app[data-device-tv-platform="fire-tv"] .xf-carousel-row {
+  gap: 0.7rem;
+  padding-top: 0.55rem;
+  padding-bottom: 1.75rem;
+  scroll-padding-inline: 1.5rem;
+}
+
+.xf-app[data-device-tv-platform="fire-tv"] .xf-carousel-row > .media-card {
+  width: clamp(7.1rem, 10.8vw, 9.25rem);
+  flex-basis: clamp(7.1rem, 10.8vw, 9.25rem);
+}
+
 .xf-app[data-device-form-factor="tablet"] .xf-carousel-row > .media-card {
   width: clamp(10rem, 14vw, 12.75rem);
   flex-basis: clamp(10rem, 14vw, 12.75rem);
@@ -258,13 +297,13 @@ button {
 .xf-carousel-row > .media-card:focus-visible,
 .xf-carousel-row > .media-card[data-focused="true"] {
   z-index: 5;
-  transform: scale(1.06);
-  outline-offset: 4px;
+  transform: scale(1.04);
+  outline-offset: 2px;
 }
 
 .xf-app[data-device-form-factor="tv"] .xf-carousel-row > .media-card:focus-visible,
 .xf-app[data-device-form-factor="tv"] .xf-carousel-row > .media-card[data-focused="true"] {
-  transform: scale(1.06);
+  transform: scale(1.04);
 }
 
 /* Respiro lateral do carrossel: evita corte do foco no primeiro card. */

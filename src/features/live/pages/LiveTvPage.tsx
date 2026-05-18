@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { AppShell } from "@/components/layout/AppShell";
 import { FocusableButton } from "@/components/tv/FocusableButton";
+import { useRouteInitialFocus } from "@/hooks/useRouteInitialFocus";
 import { getStoredLicenseActivation } from "@/features/licensing/lib/licenseActivationStorage";
 import {
   getChannelDisplayGroup,
@@ -68,6 +69,8 @@ export default function LiveTvPage() {
     string | null
   >(null);
   const hasRequestedSourceRef = useRef(false);
+
+  useRouteInitialFocus();
 
   useEffect(() => {
     let isActive = true;

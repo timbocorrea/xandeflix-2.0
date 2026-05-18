@@ -150,7 +150,7 @@ export async function loadHomeVodSections({
     createSection({
       id: 'home-vod-movies',
       title: 'Filmes da sua lista',
-      eyebrow: 'VOD autorizado',
+      eyebrow: '',
       description: 'Conteúdos de filme liberados para esta licença.',
       items: movieItems,
       limit: limitPerSection,
@@ -158,7 +158,7 @@ export async function loadHomeVodSections({
     createSection({
       id: 'home-vod-series',
       title: 'Séries da sua lista',
-      eyebrow: 'VOD autorizado',
+      eyebrow: '',
       description: 'Séries liberadas para esta licença.',
       items: seriesItems,
       limit: limitPerSection,
@@ -166,7 +166,7 @@ export async function loadHomeVodSections({
     createSection({
       id: 'home-vod-other',
       title: 'Outros conteúdos VOD',
-      eyebrow: 'VOD autorizado',
+      eyebrow: '',
       description: 'Conteúdos sob demanda ainda sem categoria final.',
       items: unknownVodItems,
       limit: limitPerSection,

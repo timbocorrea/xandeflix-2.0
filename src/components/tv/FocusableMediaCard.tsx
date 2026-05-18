@@ -59,7 +59,7 @@ export function FocusableMediaCard({
       ref.current?.scrollIntoView({
         behavior: 'auto',
         block: 'nearest',
-        inline: 'center',
+        inline: 'nearest',
       });
     },
   });
@@ -67,7 +67,7 @@ export function FocusableMediaCard({
   return (
     <button
       ref={ref}
-      className="media-card tv-focusable group relative aspect-[2/3] w-[8.9rem] shrink-0 overflow-hidden rounded-md bg-[#141414] text-left shadow-none outline-none transition-[transform,box-shadow,filter] duration-200 data-[focused=true]:z-20 data-[focused=true]:scale-[1.07] data-[focused=true]:shadow-[0_0_0_3px_rgba(255,255,255,0.92),0_18px_42px_rgba(0,0,0,0.72)] md:w-[10.2rem] lg:w-[11.2rem] xl:w-[12rem]"
+      className="media-card tv-focusable group relative aspect-[2/3] w-[8.9rem] shrink-0 overflow-hidden rounded-md bg-[#141414] text-left shadow-none outline-none transition-[box-shadow,filter,border-color] duration-150 data-[focused=true]:z-10 data-[focused=true]:ring-1 data-[focused=true]:ring-white/80 data-[focused=true]:shadow-[0_8px_20px_rgba(0,0,0,0.42)] md:w-[10.2rem] lg:w-[11.2rem] xl:w-[12rem]"
       style={
         shouldShowPoster
           ? undefined
@@ -91,26 +91,10 @@ export function FocusableMediaCard({
           onError={() => setHasPosterError(true)}
         />
       ) : (
-        <div className="absolute inset-0 flex items-end bg-gradient-to-br from-white/10 via-transparent to-black px-3 pb-4">
-          <p className="line-clamp-4 text-lg font-black leading-tight text-white">
-            {title}
-          </p>
-        </div>
+        <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black" />
       )}
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 transition-opacity duration-200 group-data-[focused=true]:opacity-100" />
-
-      <div className="absolute inset-x-0 bottom-0 z-10 translate-y-4 px-3 pb-3 opacity-0 transition-all duration-200 group-data-[focused=true]:translate-y-0 group-data-[focused=true]:opacity-100">
-        <p className="line-clamp-1 text-sm font-black leading-tight text-white">
-          {title}
-        </p>
-
-        {subtitle ? (
-          <p className="mt-1 line-clamp-1 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-zinc-300">
-            {subtitle}
-          </p>
-        ) : null}
-      </div>
     </button>
   );
 }
