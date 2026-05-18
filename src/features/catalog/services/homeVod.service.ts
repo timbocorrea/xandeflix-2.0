@@ -85,6 +85,14 @@ function createSubtitle(channel: IptvChannel) {
   return metadata.length > 0 ? metadata.join(' • ') : channel.groupTitle;
 }
 
+function hasRenderableTmdbPoster(channel: IptvChannel) {
+  return Boolean(
+    channel.tmdbMatchStatus === 'matched' &&
+      channel.tmdbPosterPath &&
+      channel.tmdbTitle
+  );
+}
+
 function mapChannelToHomeVodItem(channel: IptvChannel): HomeVodItem {
   const kind = inferVodKind(channel);
 
@@ -140,13 +148,38 @@ export async function loadHomeVodSections({
     deviceIdentifier,
   });
 
-  const vodItems = channels.filter(isVodChannel).map(mapChannelToHomeVodItem);
+  const vodItems = channels
+    .filter(isVodChannel)
+    .filter(hasRenderableTmdbPoster)
+    .map(mapChannelToHomeVodItem);
 
   const movieItems = vodItems.filter((item) => item.kind === 'movie');
   const seriesItems = vodItems.filter((item) => item.kind === 'series');
   const unknownVodItems = vodItems.filter((item) => item.kind === 'unknown');
 
-  return [
+  
+
+const tmdbDiag = {
+  totalChannels: channels.length,
+  totalVodItems: vodItems.length,
+  withTmdb: channels.filter((item) => item.tmdbId || item.tmdbTitle || item.tmdbPosterPath).length,
+  withPoster: channels.filter((item) => item.tmdbPosterPath).length,
+  firstChannel: channels[0] ?? null,
+  firstVodItem: vodItems[0] ?? null,
+};
+
+(globalThis as any).__XANDEFLIX_TMDB_DIAG__ = tmdbDiag;
+
+console.log('[TMDB_TRACE_HOME] DIAG', JSON.stringify(tmdbDiag, null, 2));
+console.log('[TMDB_TRACE_HOME] TOTAL_VOD_ITEMS', vodItems.length);
+
+console.log(
+  '[TMDB_TRACE_HOME] FIRST_VOD_ITEM',
+  JSON.stringify(vodItems[0] ?? null, null, 2),
+);
+
+return [
+
     createSection({
       id: 'home-vod-movies',
       title: 'Filmes da sua lista',

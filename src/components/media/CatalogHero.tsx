@@ -4,7 +4,6 @@ import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { cn } from '@/utils/cn';
 
 import { FOCUS_KEYS } from '../../lib/spatial/focusKeys';
-import { HERO_SCROLL_OPTIONS } from '../../lib/spatial/focusNavigation';
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 
@@ -51,36 +50,35 @@ export function CatalogHero({
   return (
     <FocusableSection
       focusKey={FOCUS_KEYS.CATALOG_HERO_SECTION}
-      focusScrollOptions={HERO_SCROLL_OPTIONS}
       onArrowPress={onSectionArrowPress}
       data-xf-hero="catalog"
       data-compact-tv-hero={isCompactTvHero ? 'true' : undefined}
       style={
         isCompactTvHero
-          ? { height: 'clamp(22rem, 46vh, 24rem)' }
+          ? { height: 'clamp(18.75rem, 41vh, 22rem)' }
           : undefined
       }
       className={cn(
-        'relative mb-7 box-border flex min-h-[21rem] w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-white/10 bg-black px-5 py-6 ring-0 ring-inset ring-transparent transition-[box-shadow,border-color] duration-200 data-[has-focused-child=true]:border-white/25 data-[has-focused-child=true]:ring-1 data-[has-focused-child=true]:ring-inset data-[has-focused-child=true]:ring-white/60 md:min-h-[24rem] md:px-7 md:py-7 lg:min-h-[28rem] xl:min-h-[31rem]',
+        'relative mb-6 box-border flex min-h-[18.75rem] w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black px-5 py-5 ring-0 ring-inset ring-transparent  data-[has-focused-child=true]:border-white/30 data-[has-focused-child=true]:border-white/30 md:min-h-[22rem] md:px-7 md:py-6 lg:min-h-[25.5rem] xl:min-h-[28.5rem]',
         isCompactTvHero &&
-          'min-h-[17rem] md:min-h-[18rem] md:py-5 lg:min-h-[19rem] xl:min-h-[20rem]',
+          'min-h-[16.5rem] md:min-h-[17.5rem] md:py-4 lg:min-h-[18.5rem] xl:min-h-[19.5rem]',
       )}
     >
       {posterUrl && (
         <img
           src={posterUrl}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-70"
+          className="absolute inset-0 h-full w-full object-cover opacity-75"
           loading="eager"
           decoding="async"
         />
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-black/10" />
-      <div className="absolute inset-0 bg-gradient-to-br from-xf-red/25 via-transparent to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/50 to-black/10" />
+      <div className="absolute inset-0 bg-gradient-to-br from-xf-red/14 via-transparent to-transparent" />
 
-      <div className="relative z-10 grid w-full gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(13rem,17rem)]">
-        <div className="flex max-w-3xl flex-1 flex-col justify-end self-stretch pb-[clamp(0.5rem,1.2vh,1rem)]">
+      <div className="relative z-10 grid w-full gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,15rem)]">
+        <div className="flex max-w-[54rem] flex-1 flex-col justify-end self-stretch pb-[clamp(0.35rem,0.9vh,0.85rem)]">
           <p
             data-xf-hero-eyebrow="true"
             className="mb-3 text-[clamp(0.625rem,0.84vw,0.8rem)] font-black uppercase tracking-[0.35em] text-xf-red"
@@ -90,23 +88,22 @@ export function CatalogHero({
 
           <h1
             data-xf-hero-title="true"
-            className="font-display text-[clamp(2.2rem,4.2vw,4.4rem)] font-black leading-[0.95] text-white"
+            className="font-display text-[clamp(2rem,3.75vw,4.05rem)] font-black leading-[0.94] text-white drop-shadow-[0_3px_18px_rgba(0,0,0,0.72)]"
           >
             {title}
           </h1>
 
           <p
             data-xf-hero-description="true"
-            className="mt-4 max-w-2xl text-[clamp(0.8rem,1.15vw,1rem)] leading-[1.5] text-zinc-200"
+            className="mt-3 max-w-2xl text-[clamp(0.78rem,1.02vw,0.96rem)] leading-[1.45] text-zinc-200"
           >
             {description}
           </p>
 
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <FocusableButton
               focusKey={FOCUS_KEYS.HERO_PLAY_BUTTON}
               focusScrollTarget="closest-section"
-              focusScrollOptions={HERO_SCROLL_OPTIONS}
               className="inline-flex min-h-[calc(var(--xf-action-height)*0.5)] items-center justify-center gap-1.5 rounded-lg bg-xf-red px-[calc(var(--xf-action-inline-padding)*0.5)] text-[clamp(0.68rem,0.9vw,0.82rem)] font-black text-white"
               onEnterPress={handlePlay}
               onArrowPress={onPlayArrowPress}
@@ -118,7 +115,6 @@ export function CatalogHero({
             <FocusableButton
               focusKey={FOCUS_KEYS.HERO_INFO_BUTTON}
               focusScrollTarget="closest-section"
-              focusScrollOptions={HERO_SCROLL_OPTIONS}
               className="inline-flex min-h-[calc(var(--xf-action-height)*0.5)] items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.5)] text-[clamp(0.68rem,0.9vw,0.82rem)] font-black text-white"
               onEnterPress={handleMoreInfo}
               onArrowPress={onInfoArrowPress}

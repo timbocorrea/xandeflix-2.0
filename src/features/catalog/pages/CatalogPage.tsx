@@ -41,7 +41,6 @@ function isFireStickUserAgent() {
   }
 
   const userAgent = window.navigator.userAgent.toLowerCase();
-
   return (
     userAgent.includes('aft') ||
     userAgent.includes('fire tv') ||
@@ -172,6 +171,13 @@ export function CatalogPage() {
     sections: resolvedCatalogSections,
   });
 
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
   return (
     <AppShell
       onSignOut={() => void signOut()}
@@ -180,9 +186,10 @@ export function CatalogPage() {
         onProfileArrowPress: spatialNavigation.handleHeaderProfileArrowPress,
         onLogoutArrowPress: spatialNavigation.handleHeaderLogoutArrowPress,
       }}
-      mainClassName="px-4 pb-28 md:px-8 md:pb-10 lg:px-10"
+      mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
-      <section className="mx-auto w-full max-w-[1680px]">
+      <section className="mx-auto w-full max-w-[1920px]">
+
         <CatalogHero
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
@@ -224,7 +231,7 @@ export function CatalogPage() {
               <FocusableSection
                 key={section.id}
                 focusKey={getCategorySectionFocusKey(section.id)}
-                className="mb-8 border-0 bg-transparent px-0 py-0"
+                className="mb-6 border-0 bg-transparent px-0 py-0"
                 onArrowPress={(direction) =>
                   spatialNavigation.handleCategorySectionArrowPress(
                     direction,
@@ -232,7 +239,7 @@ export function CatalogPage() {
                   )
                 }
               >
-                <div className="mb-2 flex items-end justify-between gap-4 px-1">
+                <div className="mb-2 flex items-end justify-between gap-4 px-0.5">
                   <div className="min-w-0">
                     {shouldShowSectionEyebrow ? (
                       <p
@@ -245,7 +252,7 @@ export function CatalogPage() {
 
                     <h2
                       data-xf-home-section-title="true"
-                      className={`${shouldShowSectionEyebrow ? 'mt-2 ' : ''}text-[1.2rem] font-black text-white md:text-[1.8rem]`}
+                      className={`${shouldShowSectionEyebrow ? 'mt-2 ' : ''}text-[1.05rem] font-black tracking-[-0.02em] text-white md:text-[1.55rem] lg:text-[1.7rem]`}
                     >
                       {section.title}
                     </h2>
@@ -272,7 +279,7 @@ export function CatalogPage() {
                 </div>
 
                 {sectionItems.length > 0 ? (
-                  <div className="xf-carousel-row flex gap-2.5 overflow-x-auto overflow-y-visible pb-7 pr-10 scroll-smooth md:gap-3 lg:gap-3.5">
+                  <div className="xf-carousel-row flex gap-2 overflow-x-auto overflow-y-visible pb-6 pr-10 scroll-auto md:gap-2.5 lg:gap-3">
                     {sectionItems.map((item, itemIndex) => (
                       <MediaCard
                         key={item.id}
@@ -317,7 +324,7 @@ export function CatalogPage() {
                 (_, placeholderIndex) => (
                   <div
                     key={`catalog-loading-card-${placeholderIndex}`}
-                    className="h-[16rem] w-[11rem] shrink-0 animate-pulse rounded-2xl border border-white/10 bg-white/5"
+                    className="h-[14.5rem] w-[9.7rem] shrink-0 animate-pulse rounded-md border border-white/10 bg-white/5"
                   />
                 ),
               )}

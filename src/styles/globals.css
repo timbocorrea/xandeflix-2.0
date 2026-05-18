@@ -448,3 +448,61 @@ button {
   outline-offset: -1px;
   box-shadow: 0 0 0 2px rgba(229, 9, 20, 0.95);
 }
+
+
+/* Xandeflix TV safe area + streaming polish */
+.xf-tv-safe-main {
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+}
+
+.xf-carousel-row {
+  -webkit-overflow-scrolling: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  contain: layout paint;
+}
+
+.xf-carousel-row::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .xf-tv-safe-main {
+    padding-left: clamp(1.5rem, 3vw, 3rem);
+    padding-right: clamp(1.5rem, 3vw, 3rem);
+  }
+
+  [data-xf-hero='catalog'] {
+    transform: translateZ(0);
+    contain: layout paint;
+  }
+
+  .media-card {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    contain: layout paint;
+  }
+}
+
+@media (min-width: 1600px) {
+  .xf-tv-safe-main {
+    padding-left: clamp(2rem, 3.4vw, 4rem);
+    padding-right: clamp(2rem, 3.4vw, 4rem);
+  }
+}
+
+@media (max-width: 900px) {
+  .xf-tv-safe-main {
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
+
+  [data-xf-hero-title='true'] {
+    max-width: 11ch;
+  }
+
+  [data-xf-hero-description='true'] {
+    max-width: 26rem;
+  }
+}

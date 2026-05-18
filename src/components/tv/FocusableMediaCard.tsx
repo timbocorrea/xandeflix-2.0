@@ -67,7 +67,7 @@ export function FocusableMediaCard({
   return (
     <button
       ref={ref}
-      className="media-card tv-focusable group relative aspect-[2/3] w-[8.9rem] shrink-0 overflow-hidden rounded-md bg-[#141414] text-left shadow-none outline-none transition-[box-shadow,filter,border-color] duration-150 data-[focused=true]:z-10 data-[focused=true]:ring-1 data-[focused=true]:ring-white/80 data-[focused=true]:shadow-[0_8px_20px_rgba(0,0,0,0.42)] md:w-[10.2rem] lg:w-[11.2rem] xl:w-[12rem]"
+      className="media-card tv-focusable group relative aspect-[2/3] w-[8.65rem] shrink-0 overflow-hidden rounded-[0.32rem] bg-[#141414] text-left shadow-none outline-none transition-[box-shadow,filter,border-color] duration-100 data-[focused=true]:z-10 data-[focused=true]:ring-2 data-[focused=true]:ring-white/90 data-[focused=true]:shadow-[0_0_0_1px_rgba(229,9,20,0.72),0_0_22px_rgba(229,9,20,0.32),0_10px_24px_rgba(0,0,0,0.58)] md:w-[9.85rem] lg:w-[10.85rem] xl:w-[11.65rem]"
       style={
         shouldShowPoster
           ? undefined
@@ -94,7 +94,7 @@ export function FocusableMediaCard({
         <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black" />
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 transition-opacity duration-200 group-data-[focused=true]:opacity-100" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/62 via-black/5 to-transparent opacity-0 transition-opacity duration-150 group-data-[focused=true]:opacity-100" />
     </button>
   );
 }

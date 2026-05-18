@@ -29,6 +29,25 @@ type LicenseChannelCacheRecord = {
   tvg_id: string | null;
   sort_order: number | null;
   is_active: boolean;
+
+  content_kind?: string | null;
+
+  tmdb_id?: number | null;
+  tmdb_media_type?: string | null;
+  tmdb_match_status?: string | null;
+  tmdb_match_score?: number | null;
+
+  tmdb_title?: string | null;
+  tmdb_original_title?: string | null;
+  tmdb_overview?: string | null;
+
+  tmdb_poster_path?: string | null;
+  tmdb_backdrop_path?: string | null;
+
+  tmdb_release_year?: number | null;
+  tmdb_rating?: number | null;
+  tmdb_genres?: string[] | null;
+  tmdb_last_enriched_at?: string | null;
 };
 
 const DEFAULT_PAGE = 1;
@@ -115,6 +134,25 @@ function serializeChannel(channel: LicenseChannelCacheRecord) {
     tvg_id: channel.tvg_id,
     sort_order: channel.sort_order ?? 0,
     is_active: channel.is_active,
+
+    content_kind: channel.content_kind ?? null,
+
+    tmdb_id: channel.tmdb_id ?? null,
+    tmdb_media_type: channel.tmdb_media_type ?? null,
+    tmdb_match_status: channel.tmdb_match_status ?? null,
+    tmdb_match_score: channel.tmdb_match_score ?? null,
+
+    tmdb_title: channel.tmdb_title ?? null,
+    tmdb_original_title: channel.tmdb_original_title ?? null,
+    tmdb_overview: channel.tmdb_overview ?? null,
+
+    tmdb_poster_path: channel.tmdb_poster_path ?? null,
+    tmdb_backdrop_path: channel.tmdb_backdrop_path ?? null,
+
+    tmdb_release_year: channel.tmdb_release_year ?? null,
+    tmdb_rating: channel.tmdb_rating ?? null,
+    tmdb_genres: channel.tmdb_genres ?? null,
+    tmdb_last_enriched_at: channel.tmdb_last_enriched_at ?? null,
   };
 }
 

@@ -99,6 +99,12 @@ function normalizeText(value?: string | null) {
   return normalized ? normalized : null;
 }
 
+const LINEAR_CHANNEL_NAME_PATTERN =
+  /^(a&e|amc|animal planet|arte 1|axn|band|bis|canal brasil|canal sony|cartoon|cinemax|cnn|combate|discovery|disney|espn|fox|fx|gloob|globo|hbo|max|megapix|mtv|multishow|nat geo|nick|paramount|premiere|record|sony|space|sportv|star|syfy|telecine|tnt|tooncast|universal|warner)(\s|$)/i;
+
+const LINEAR_QUALITY_SUFFIX_PATTERN =
+  /\b(sd|hd|fhd|uhd|4k|h265|hevc)\b/i;
+
 function isLikelyLinearChannel(channel: Pick<ChannelRecord, 'name' | 'group_title'>) {
   const normalizedName = channel.name.trim().toLowerCase();
   const normalizedGroup = (channel.group_title ?? '').trim().toLowerCase();
@@ -159,6 +165,22 @@ function canManageLicense({
   }
 
   return ownerId === actorId;
+}
+
+function clearTmdbMetadata(update: Record<string, unknown>) {
+  return {
+    ...update,
+    tmdb_id: null,
+    tmdb_match_score: null,
+    tmdb_title: null,
+    tmdb_original_title: null,
+    tmdb_overview: null,
+    tmdb_poster_path: null,
+    tmdb_backdrop_path: null,
+    tmdb_release_year: null,
+    tmdb_rating: null,
+    tmdb_genres: null,
+  };
 }
 
 function resolveMediaType(contentKind: ContentKind | null): TmdbMediaType | null {
@@ -295,10 +317,27 @@ async function enrichChannel({
         status: 'skipped',
         reason: 'UNSUPPORTED_CONTENT_KIND',
       },
-      update: {
+      update: clearTmdbMetadata({
         tmdb_match_status: 'skipped',
         tmdb_last_enriched_at: new Date().toISOString(),
+      }),
+    };
+  }
+
+  if (isLikelyLinearChannel(channel)) {
+    return {
+      result: {
+        channelId: channel.id,
+        name: channel.name,
+        status: 'skipped',
+        mediaType,
+        reason: 'LIKELY_LINEAR_CHANNEL',
       },
+      update: clearTmdbMetadata({
+        tmdb_media_type: mediaType,
+        tmdb_match_status: 'skipped',
+        tmdb_last_enriched_at: new Date().toISOString(),
+      }),
     };
   }
 
@@ -313,11 +352,11 @@ async function enrichChannel({
         mediaType,
         reason: 'EMPTY_QUERY',
       },
-      update: {
+      update: clearTmdbMetadata({
         tmdb_media_type: mediaType,
         tmdb_match_status: 'skipped',
         tmdb_last_enriched_at: new Date().toISOString(),
-      },
+      }),
     };
   }
 
@@ -334,11 +373,11 @@ async function enrichChannel({
           mediaType,
           reason: query,
         },
-        update: {
+        update: clearTmdbMetadata({
           tmdb_media_type: mediaType,
           tmdb_match_status: 'not_found',
           tmdb_last_enriched_at: new Date().toISOString(),
-        },
+        }),
       };
     }
 
@@ -381,11 +420,11 @@ async function enrichChannel({
         mediaType,
         reason: error instanceof Error ? error.message : String(error),
       },
-      update: {
+      update: clearTmdbMetadata({
         tmdb_media_type: mediaType,
         tmdb_match_status: 'error',
         tmdb_last_enriched_at: new Date().toISOString(),
-      },
+      }),
     };
   }
 }
@@ -542,11 +581,13 @@ Deno.serve(async (request) => {
 
     for (const channel of channelRows) {
       const enrichment = await enrichChannel({ channel, apiKey: tmdbApiKey });
-      const { error: updateError } = await supabaseAdmin
+      const { data: persistedChannel, error: updateError } = await supabaseAdmin
         .from('license_channels_cache')
         .update(enrichment.update)
         .eq('id', channel.id)
-        .eq('license_id', licenseId);
+        .eq('license_id', licenseId)
+        .select('id, tmdb_id, tmdb_match_status, tmdb_title, tmdb_poster_path')
+        .maybeSingle();
 
       if (updateError) {
         results.push({
@@ -556,7 +597,14 @@ Deno.serve(async (request) => {
           reason: updateError.message,
         });
       } else {
-        results.push(enrichment.result);
+        results.push({
+          ...enrichment.result,
+          persisted: Boolean(persistedChannel),
+          persistedStatus: persistedChannel?.tmdb_match_status ?? null,
+          persistedTmdbId: persistedChannel?.tmdb_id ?? null,
+          persistedTitle: persistedChannel?.tmdb_title ?? null,
+          persistedPosterPath: persistedChannel?.tmdb_poster_path ?? null,
+        });
       }
     }
 
