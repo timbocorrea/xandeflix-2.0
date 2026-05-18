@@ -9,6 +9,7 @@ import {
   focusHeroInfoButton,
   focusHeroPlayButton,
   focusSidebarSearch,
+  getElementByFocusKey,
   setFocusAndScroll,
 } from '../lib/spatial/focusNavigation';
 import { getCategoryItemFocusKey } from '../lib/spatial/categoryFocusKeys';
@@ -66,7 +67,75 @@ export function useCatalogGridNavigation({
       });
     }
 
-    function focusPreviousCategorySameIndex(
+    function getCategoryItemHorizontalCenter(
+      categoryIndex: number,
+      itemIndex: number,
+    ) {
+      const section = sections[categoryIndex];
+
+      if (!section || !section.items[itemIndex]) {
+        return null;
+      }
+
+      const focusKey = getCategoryItemFocusKey(section.id, itemIndex);
+      const element = getElementByFocusKey(focusKey);
+
+      if (!element) {
+        return null;
+      }
+
+      const rect = element.getBoundingClientRect();
+
+      return rect.left + rect.width / 2;
+    }
+
+    function getClosestCategoryItemIndexByHorizontalCenter(
+      categoryIndex: number,
+      horizontalCenter: number | null,
+    ) {
+      const section = sections[categoryIndex];
+
+      if (!section?.items.length) {
+        return -1;
+      }
+
+      if (horizontalCenter === null) {
+        return 0;
+      }
+
+      let closestItemIndex = 0;
+      let closestDistance = Number.POSITIVE_INFINITY;
+
+      section.items.forEach((_, candidateItemIndex) => {
+        const focusKey = getCategoryItemFocusKey(
+          section.id,
+          candidateItemIndex,
+        );
+        const element = getElementByFocusKey(focusKey);
+
+        if (!element) {
+          return;
+        }
+
+        const rect = element.getBoundingClientRect();
+
+        if (rect.width <= 0 || rect.height <= 0) {
+          return;
+        }
+
+        const candidateCenter = rect.left + rect.width / 2;
+        const distance = Math.abs(candidateCenter - horizontalCenter);
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestItemIndex = candidateItemIndex;
+        }
+      });
+
+      return closestItemIndex;
+    }
+
+    function focusPreviousCategoryNearestColumn(
       categoryIndex: number,
       itemIndex: number,
     ) {
@@ -77,10 +146,9 @@ export function useCatalogGridNavigation({
         return focusHeroPlayButton();
       }
 
-      const previousSection = sections[previousCategoryIndex];
-      const targetItemIndex = Math.min(
-        itemIndex,
-        previousSection.items.length - 1,
+      const targetItemIndex = getClosestCategoryItemIndexByHorizontalCenter(
+        previousCategoryIndex,
+        getCategoryItemHorizontalCenter(categoryIndex, itemIndex),
       );
 
       return focusCategoryItemByIndexes(
@@ -89,7 +157,7 @@ export function useCatalogGridNavigation({
       );
     }
 
-    function focusNextCategorySameIndex(
+    function focusNextCategoryNearestColumn(
       categoryIndex: number,
       itemIndex: number,
     ) {
@@ -99,10 +167,9 @@ export function useCatalogGridNavigation({
         return false;
       }
 
-      const nextSection = sections[nextCategoryIndex];
-      const targetItemIndex = Math.min(
-        itemIndex,
-        nextSection.items.length - 1,
+      const targetItemIndex = getClosestCategoryItemIndexByHorizontalCenter(
+        nextCategoryIndex,
+        getCategoryItemHorizontalCenter(categoryIndex, itemIndex),
       );
 
       return focusCategoryItemByIndexes(nextCategoryIndex, targetItemIndex);
@@ -120,11 +187,11 @@ export function useCatalogGridNavigation({
       }
 
       if (direction === 'up') {
-        return focusPreviousCategorySameIndex(categoryIndex, itemIndex);
+        return focusPreviousCategoryNearestColumn(categoryIndex, itemIndex);
       }
 
       if (direction === 'down') {
-        return focusNextCategorySameIndex(categoryIndex, itemIndex);
+        return focusNextCategoryNearestColumn(categoryIndex, itemIndex);
       }
 
       return true;
@@ -135,7 +202,7 @@ export function useCatalogGridNavigation({
       categoryIndex: number,
     ) {
       if (direction === 'up') {
-        return focusPreviousCategorySameIndex(categoryIndex, 0);
+        return focusPreviousCategoryNearestColumn(categoryIndex, 0);
       }
 
       if (direction === 'down') {
@@ -145,7 +212,7 @@ export function useCatalogGridNavigation({
           return focusCategoryItemByIndexes(categoryIndex, 0);
         }
 
-        return focusNextCategorySameIndex(categoryIndex, 0);
+        return focusNextCategoryNearestColumn(categoryIndex, 0);
       }
 
       return true;
@@ -156,7 +223,7 @@ export function useCatalogGridNavigation({
       categoryIndex: number,
     ) {
       if (direction === 'up') {
-        return focusPreviousCategorySameIndex(categoryIndex, 0);
+        return focusPreviousCategoryNearestColumn(categoryIndex, 0);
       }
 
       if (direction === 'down') {
