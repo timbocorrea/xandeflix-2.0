@@ -170,14 +170,6 @@ export function CatalogPage() {
   const spatialNavigation = useCatalogGridNavigation({
     sections: resolvedCatalogSections,
   });
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-    }, 500);
-
-    return () => window.clearInterval(interval);
-  }, []);
-
   return (
     <AppShell
       onSignOut={() => void signOut()}

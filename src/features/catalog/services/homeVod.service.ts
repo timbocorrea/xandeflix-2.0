@@ -157,29 +157,7 @@ export async function loadHomeVodSections({
   const seriesItems = vodItems.filter((item) => item.kind === 'series');
   const unknownVodItems = vodItems.filter((item) => item.kind === 'unknown');
 
-  
-
-const tmdbDiag = {
-  totalChannels: channels.length,
-  totalVodItems: vodItems.length,
-  withTmdb: channels.filter((item) => item.tmdbId || item.tmdbTitle || item.tmdbPosterPath).length,
-  withPoster: channels.filter((item) => item.tmdbPosterPath).length,
-  firstChannel: channels[0] ?? null,
-  firstVodItem: vodItems[0] ?? null,
-};
-
-(globalThis as any).__XANDEFLIX_TMDB_DIAG__ = tmdbDiag;
-
-console.log('[TMDB_TRACE_HOME] DIAG', JSON.stringify(tmdbDiag, null, 2));
-console.log('[TMDB_TRACE_HOME] TOTAL_VOD_ITEMS', vodItems.length);
-
-console.log(
-  '[TMDB_TRACE_HOME] FIRST_VOD_ITEM',
-  JSON.stringify(vodItems[0] ?? null, null, 2),
-);
-
-return [
-
+  return [
     createSection({
       id: 'home-vod-movies',
       title: 'Filmes da sua lista',
