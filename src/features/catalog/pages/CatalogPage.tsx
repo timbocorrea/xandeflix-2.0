@@ -223,6 +223,11 @@ export function CatalogPage() {
               <FocusableSection
                 key={section.id}
                 focusKey={getCategorySectionFocusKey(section.id)}
+                focusScrollOptions={{
+                  block: 'center',
+                  inline: 'nearest',
+                  behavior: 'auto',
+                }}
                 className="mb-6 border-0 bg-transparent px-0 py-0"
                 onArrowPress={(direction) =>
                   spatialNavigation.handleCategorySectionArrowPress(
