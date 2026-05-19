@@ -28,6 +28,7 @@ export type LoadHomeVodInput = {
   licenseCode: string;
   deviceIdentifier: string;
   limitPerSection?: number;
+  launchesLimit?: number;
 };
 
 const DEFAULT_LIMIT_PER_SECTION = 20;
@@ -75,6 +76,40 @@ function inferVodKind(channel: IptvChannel): HomeVodKind {
   }
 
   return 'unknown';
+}
+
+function normalizeCatalogText(value?: string | null) {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function isLaunchGroup(item: Pick<HomeVodItem, 'groupTitle'>) {
+  const groupTitle = normalizeCatalogText(item.groupTitle);
+
+  return (
+    groupTitle.includes('lancamento') ||
+    groupTitle.includes('lancamentos')
+  );
+}
+
+function sortMostRecentHomeItems(current: HomeVodItem, next: HomeVodItem) {
+  const currentYear = Number(
+    current.subtitle?.match(/\b(19|20)\d{2}\b/)?.[0] ?? 0,
+  );
+  const nextYear = Number(
+    next.subtitle?.match(/\b(19|20)\d{2}\b/)?.[0] ?? 0,
+  );
+
+  if (currentYear !== nextYear) {
+    return nextYear - currentYear;
+  }
+
+  return current.title.localeCompare(next.title, 'pt-BR', {
+    sensitivity: 'base',
+  });
 }
 
 function createSubtitle(channel: IptvChannel) {
@@ -144,10 +179,13 @@ export async function loadHomeVodSections({
   licenseCode,
   deviceIdentifier,
   limitPerSection = DEFAULT_LIMIT_PER_SECTION,
+  launchesLimit = 20,
 }: LoadHomeVodInput): Promise<HomeVodSection[]> {
   const channels = await listAuthorizedLicenseChannels({
     licenseCode,
     deviceIdentifier,
+    requireTmdbMatched: true,
+    requireTmdbPoster: true,
   });
 
   const vodItems = channels
@@ -156,12 +194,16 @@ export async function loadHomeVodSections({
     .map(mapChannelToHomeVodItem);
 
   const movieItems = vodItems.filter((item) => item.kind === 'movie');
+  const launchItems = movieItems
+    .filter(isLaunchGroup)
+    .sort(sortMostRecentHomeItems);
+  const regularMovieItems = movieItems.filter((item) => !isLaunchGroup(item));
   const seriesItems = vodItems.filter((item) => item.kind === 'series');
   const unknownVodItems = vodItems.filter((item) => item.kind === 'unknown');
 
   const movieSections: HomeVodSection[] = [];
 
-  for (let index = 0; index < movieItems.length; index += limitPerSection) {
+  for (let index = 0; index < regularMovieItems.length; index += limitPerSection) {
     const railIndex = Math.floor(index / limitPerSection);
     const section = createSection({
       id:
@@ -174,7 +216,7 @@ export async function loadHomeVodSections({
           : `Filmes da sua lista ${railIndex + 1}`,
       eyebrow: '',
       description: 'Conteúdos de filme liberados para esta licença.',
-      items: movieItems.slice(index, index + limitPerSection),
+      items: regularMovieItems.slice(index, index + limitPerSection),
       limit: limitPerSection,
     });
 
@@ -184,6 +226,14 @@ export async function loadHomeVodSections({
   }
 
   return [
+    createSection({
+      id: 'home-vod-launches',
+      title: 'Lançamentos',
+      eyebrow: '',
+      description: 'Os 20 conteúdos mais atuais da categoria Lançamentos.',
+      items: launchItems,
+      limit: launchesLimit,
+    }),
     ...movieSections,
     createSection({
       id: 'home-vod-series',

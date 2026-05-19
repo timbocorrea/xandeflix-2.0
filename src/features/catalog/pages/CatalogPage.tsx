@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 
 import { useAuth } from '../../../app/providers/AuthProvider';
 import { AppShell } from '../../../components/layout/AppShell';
@@ -56,7 +58,7 @@ function mapHomeVodSectionsToCatalogSections(
     title: section.title,
     eyebrow: section.eyebrow,
     description: section.description,
-    showSeeAll: false,
+    showSeeAll: section.id === 'home-vod-launches',
     items: section.items.map((item) => ({
       id: item.id,
       title: item.title,
@@ -69,6 +71,7 @@ function mapHomeVodSectionsToCatalogSections(
 }
 
 export function CatalogPage() {
+  const navigate = useNavigate();
   const { signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
   const [realCatalogSections, setRealCatalogSections] = useState<
@@ -270,7 +273,7 @@ export function CatalogPage() {
         />
 
         {visibleCatalogSections.length === 0 ? (
-          <section className="rounded-2xl border border-white/10 bg-black/40 px-6 py-10 text-center">
+          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
             <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
               Catalogo indisponivel
             </p>
@@ -336,12 +339,23 @@ export function CatalogPage() {
 
                   </div>
 
-                  {shouldShowSeeAll(section) && !isMobile && !isTv && (
+                  {shouldShowSeeAll(section) && !isMobile && (!isTv || section.id === 'home-vod-launches') && (
                     <FocusableButton
                       focusKey={getCategorySeeAllFocusKey(section.id)}
                       className="inline-flex rounded-full border border-white/20 bg-xf-surface px-5 py-3 text-sm font-bold text-white"
+                      onClick={() => {
+                        spatialDebug('catalog-grid', 'Ver tudo:', section.title);
+
+                        if (section.id === 'home-vod-launches') {
+                          navigate('/launches');
+                        }
+                      }}
                       onEnterPress={() => {
                         spatialDebug('catalog-grid', 'Ver tudo:', section.title);
+
+                        if (section.id === 'home-vod-launches') {
+                          navigate('/launches');
+                        }
                       }}
                       onArrowPress={(direction) =>
                         spatialNavigation.handleCategorySeeAllArrowPress(
@@ -369,18 +383,37 @@ export function CatalogPage() {
                         onEnterPress={() => {
                           spatialDebug('catalog-grid', 'Abrir item:', item.title);
                         }}
-                        onArrowPress={(direction) =>
-                          spatialNavigation.handleCategoryCardArrowPress(
+                        onArrowPress={(direction) => {
+                          const isLaunchesSection =
+                            section.id === 'home-vod-launches';
+                          const isLastVisibleLaunchCard =
+                            itemIndex === sectionItems.length - 1;
+
+                          if (
+                            isLaunchesSection &&
+                            direction === 'right' &&
+                            isLastVisibleLaunchCard
+                          ) {
+                            setFocus(getCategorySeeAllFocusKey(section.id));
+                            return false;
+                          }
+
+                          if (isLaunchesSection && direction === 'up') {
+                            setFocus(getCategorySeeAllFocusKey(section.id));
+                            return false;
+                          }
+
+                          return spatialNavigation.handleCategoryCardArrowPress(
                             direction,
                             categoryIndex,
                             itemIndex,
-                          )
-                        }
+                          );
+                        }}
                       />
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-white/10 bg-black/40 px-4 py-5">
+                  <div className="rounded-[0.18rem] border border-white/10 bg-black/40 px-4 py-5">
                     <p className="text-sm font-semibold text-zinc-300">
                       Esta secao esta vazia no momento.
                     </p>
@@ -392,7 +425,7 @@ export function CatalogPage() {
         )}
 
         {isProgressiveLoading ? (
-          <section className="mb-8 rounded-2xl border border-white/10 bg-black/35 px-4 py-5 md:px-5 md:py-6">
+          <section className="mb-8 rounded-[0.18rem] border border-white/10 bg-black/35 px-4 py-5 md:px-5 md:py-6">
             <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-zinc-300">
               Carregando mais secoes
             </p>
@@ -402,7 +435,7 @@ export function CatalogPage() {
                 (_, placeholderIndex) => (
                   <div
                     key={`catalog-loading-card-${placeholderIndex}`}
-                    className="h-[14.5rem] w-[9.7rem] shrink-0 animate-pulse rounded-md border border-white/10 bg-white/5"
+                    className="h-[14.5rem] w-[9.7rem] shrink-0 animate-pulse rounded-[0.18rem] border border-white/10 bg-white/5"
                   />
                 ),
               )}

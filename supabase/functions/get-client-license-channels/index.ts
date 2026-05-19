@@ -5,6 +5,8 @@ type GetClientLicenseChannelsRequest = {
   deviceIdentifier?: string;
   page?: number;
   pageSize?: number;
+  requireTmdbMatched?: boolean;
+  requireTmdbPoster?: boolean;
 };
 
 type LicenseRecord = {
@@ -185,6 +187,8 @@ Deno.serve(async (request) => {
     const deviceIdentifier = normalizeText(payload.deviceIdentifier);
     const page = resolvePage(payload.page);
     const pageSize = resolvePageSize(payload.pageSize);
+    const requireTmdbMatched = payload.requireTmdbMatched === true;
+    const requireTmdbPoster = payload.requireTmdbPoster === true;
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
@@ -247,15 +251,28 @@ Deno.serve(async (request) => {
       return jsonResponse({ ok: false, error: 'DEVICE_INACTIVE' }, 403);
     }
 
-    const { data: channels, error: channelsError, count } = await supabaseAdmin
+    let channelsQuery = supabaseAdmin
       .from('license_channels_cache')
       .select(
         'id, name, stream_url, logo_url, group_title, tvg_id, sort_order, is_active, content_kind, tmdb_id, tmdb_media_type, tmdb_match_status, tmdb_match_score, tmdb_title, tmdb_original_title, tmdb_overview, tmdb_poster_path, tmdb_backdrop_path, tmdb_release_year, tmdb_rating, tmdb_genres, tmdb_last_enriched_at',
         {
-        count: 'exact',
-      })
+          count: 'exact',
+        },
+      )
       .eq('license_id', licenseRecord.id)
-      .eq('is_active', true)
+      .eq('is_active', true);
+
+    if (requireTmdbMatched) {
+      channelsQuery = channelsQuery
+        .eq('tmdb_match_status', 'matched')
+        .not('tmdb_title', 'is', null);
+    }
+
+    if (requireTmdbPoster) {
+      channelsQuery = channelsQuery.not('tmdb_poster_path', 'is', null);
+    }
+
+    const { data: channels, error: channelsError, count } = await channelsQuery
       .order('group_title', { ascending: true, nullsFirst: false })
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true })

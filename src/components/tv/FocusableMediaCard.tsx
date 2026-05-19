@@ -11,6 +11,7 @@ interface FocusableMediaCardProps {
   focusKey: string;
   onEnterPress?: () => void;
   onArrowPress?: (direction: string) => boolean;
+  focusScrollOptions?: ScrollIntoViewOptions;
 }
 
 type CardPalette = {
@@ -18,13 +19,13 @@ type CardPalette = {
   accent: string;
 };
 
+const CARD_RADIUS = '0.12rem';
+
 const CARD_PALETTES: CardPalette[] = [
-  { background: '#111111', accent: '#dc2626' },
-  { background: '#141414', accent: '#ef4444' },
-  { background: '#181818', accent: '#f97316' },
-  { background: '#101010', accent: '#e11d48' },
-  { background: '#171717', accent: '#f59e0b' },
-  { background: '#0b0b0b', accent: '#b91c1c' },
+  { background: '#141414', accent: '#e50914' },
+  { background: '#111827', accent: '#f97316' },
+  { background: '#18181b', accent: '#38bdf8' },
+  { background: '#0f172a', accent: '#a855f7' },
 ];
 
 function getFallbackPalette(title: string) {
@@ -43,6 +44,7 @@ export function FocusableMediaCard({
   focusKey,
   onEnterPress,
   onArrowPress,
+  focusScrollOptions,
 }: FocusableMediaCardProps) {
   const [hasPosterError, setHasPosterError] = useState(false);
   const shouldShowPoster = Boolean(posterUrl) && !hasPosterError;
@@ -58,22 +60,25 @@ export function FocusableMediaCard({
         rememberLastCatalogFocusKey(focusKey);
       }
 
-      ref.current?.scrollIntoView({
-        behavior: 'auto',
-        block: 'nearest',
-        inline: 'nearest',
-      });
+      ref.current?.scrollIntoView(
+        focusScrollOptions ?? {
+          behavior: 'auto',
+          block: 'nearest',
+          inline: 'nearest',
+        },
+      );
     },
   });
 
   return (
     <button
       ref={ref}
-      className="media-card tv-focusable group relative aspect-[2/3] w-[8.65rem] shrink-0 overflow-hidden rounded-[0.32rem] bg-[#141414] text-left shadow-none outline-none transition-[box-shadow,filter,border-color] duration-100 data-[focused=true]:z-10 data-[focused=true]:ring-2 data-[focused=true]:ring-white/90 data-[focused=true]:shadow-[0_0_0_1px_rgba(229,9,20,0.72),0_0_22px_rgba(229,9,20,0.32),0_10px_24px_rgba(0,0,0,0.58)] md:w-[9.85rem] lg:w-[10.85rem] xl:w-[11.65rem]"
+      className="media-card tv-focusable group relative aspect-[2/3] w-[8.65rem] shrink-0 overflow-hidden rounded-[0.12rem] border border-transparent bg-[#141414] text-left shadow-none outline-none transition-[border-color,box-shadow,filter] duration-100 data-[focused=true]:z-10 data-[focused=true]:border-[#e50914] data-[focused=true]:ring-2 data-[focused=true]:ring-inset data-[focused=true]:ring-[#e50914] data-[focused=true]:shadow-none md:w-[9.85rem] lg:w-[10.85rem] xl:w-[11.65rem]"
       style={
         shouldShowPoster
-          ? undefined
+          ? { borderRadius: CARD_RADIUS }
           : {
+              borderRadius: CARD_RADIUS,
               backgroundImage: `linear-gradient(165deg, ${fallbackPalette.accent}33 0%, ${fallbackPalette.background} 48%, #050505 100%)`,
             }
       }
@@ -88,16 +93,23 @@ export function FocusableMediaCard({
           src={posterUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
+          style={{ borderRadius: 'inherit' }}
           loading={eagerLoad ? 'eager' : 'lazy'}
           decoding="async"
           fetchPriority={eagerLoad ? 'high' : 'auto'}
           onError={() => setHasPosterError(true)}
         />
       ) : (
-        <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black" />
+        <div
+          className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black"
+          style={{ borderRadius: 'inherit' }}
+        />
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-t from-black/62 via-black/5 to-transparent opacity-0 transition-opacity duration-150 group-data-[focused=true]:opacity-100" />
+      <div
+        className="absolute inset-0 bg-gradient-to-t from-black/62 via-black/5 to-transparent opacity-0 transition-opacity duration-150 group-data-[focused=true]:opacity-100"
+        style={{ borderRadius: 'inherit' }}
+      />
     </button>
   );
 }

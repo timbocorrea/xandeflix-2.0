@@ -9,6 +9,7 @@ interface MediaCardProps {
   focusKey?: string;
   onEnterPress?: () => void;
   onArrowPress?: (direction: string) => boolean;
+  focusScrollOptions?: ScrollIntoViewOptions;
 }
 
 export function MediaCard({
@@ -20,6 +21,7 @@ export function MediaCard({
   focusKey,
   onEnterPress,
   onArrowPress,
+  focusScrollOptions,
 }: MediaCardProps) {
   return (
     <FocusableMediaCard
@@ -30,6 +32,7 @@ export function MediaCard({
       focusKey={focusKey ?? `media-card-${index + 1}`}
       onEnterPress={onEnterPress}
       onArrowPress={onArrowPress}
+      focusScrollOptions={focusScrollOptions}
     />
   );
 }

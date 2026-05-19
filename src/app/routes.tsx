@@ -27,6 +27,7 @@ import { SuperAdminOnly } from '../features/admin/components/SuperAdminOnly';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { getStoredLicenseActivation } from '../features/licensing/lib/licenseActivationStorage';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
+import { CatalogLaunchesPage } from '../features/catalog/pages/CatalogLaunchesPage';
 import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
 
@@ -153,6 +154,17 @@ export function AppRoutes() {
                 </LicenseRoute>
               }
             />
+
+            <Route
+              path="/launches"
+              element={
+                <LicenseRoute>
+                  <CatalogLaunchesPage />
+                </LicenseRoute>
+              }
+            />
+
+
 
             <Route
               path="/admin"

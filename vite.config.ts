@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  cacheDir: 'C:/Users/Alexandre-Janaina/AppData/Local/Temp/xandeflix-vite-cache',
   base: './',
   plugins: [react(), tailwindcss()],
   server: {

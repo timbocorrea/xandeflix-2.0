@@ -15,6 +15,7 @@ type CatalogHeroStat = {
 interface CatalogHeroProps {
   title?: string;
   description?: string;
+  metadata?: string;
   posterUrl?: string;
   eyebrow?: string;
   stats?: CatalogHeroStat[];
@@ -31,6 +32,7 @@ interface CatalogHeroProps {
 export function CatalogHero({
   title = 'Sua noite comecou',
   description = 'Explore recomendacoes, retome o que voce ja assiste e navegue rapido com controle remoto em uma experiencia pensada para TV.',
+  metadata,
   posterUrl,
   eyebrow,
   stats = [
@@ -160,6 +162,19 @@ export function CatalogHero({
           >
             {title}
           </h1>
+
+            {metadata ? (
+              <p
+                key={`hero-metadata-${heroIndex}-${metadata}`}
+                data-xf-hero-metadata="true"
+                className="mt-1.5 max-w-xl text-[clamp(0.5rem,0.66vw,0.62rem)] font-bold uppercase tracking-[0.16em] text-white/90"
+                style={{
+                  animation: 'xfHeroFadeIn 380ms ease-out both',
+                }}
+              >
+                {metadata}
+              </p>
+            ) : null}
 
           <p
             key={`hero-description-${heroIndex}-${description}`}

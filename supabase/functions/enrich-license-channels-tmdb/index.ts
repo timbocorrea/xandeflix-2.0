@@ -14,6 +14,7 @@ type EnrichLicenseChannelsTmdbRequest = {
   licenseId?: string;
   limit?: number;
   force?: boolean;
+  groupTitle?: string;
 };
 
 type LicenseRecord = {
@@ -60,8 +61,8 @@ type EnrichmentResult = {
   reason?: string;
 };
 
-const DEFAULT_LIMIT = 10;
-const MAX_LIMIT = 25;
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 250;
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_GENRES_BY_ID = new Map<number, string>();
 
@@ -508,6 +509,7 @@ Deno.serve(async (request) => {
     const licenseId = normalizeText(payload.licenseId);
     const limit = resolveLimit(payload.limit);
     const force = payload.force === true;
+    const groupTitle = normalizeText(payload.groupTitle);
 
     if (!licenseId) {
       return jsonResponse({ ok: false, error: 'INVALID_PAYLOAD' }, 400);
@@ -556,7 +558,13 @@ Deno.serve(async (request) => {
         'id, license_id, name, group_title, tvg_id, content_kind, tmdb_match_status',
       )
       .eq('license_id', licenseId)
-      .in('content_kind', ['movie', 'series'])
+      .in('content_kind', ['movie', 'series']);
+
+    if (groupTitle) {
+      query = query.eq('group_title', groupTitle);
+    }
+
+    query = query
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true })
       .limit(limit);
@@ -613,6 +621,7 @@ Deno.serve(async (request) => {
       licenseId,
       limit,
       force,
+      groupTitle,
       processed: results.length,
       results,
     });

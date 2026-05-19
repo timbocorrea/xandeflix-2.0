@@ -8,6 +8,8 @@ type ImportLicenseIptvSourceChannelsRequest = {
   limit?: number;
 };
 
+type ChannelContentKind = 'live' | 'movie' | 'series' | 'unknown';
+
 type ParsedChannel = {
   name: string;
   stream_url: string;
@@ -15,6 +17,7 @@ type ParsedChannel = {
   group_title: string | null;
   tvg_id: string | null;
   sort_order: number;
+  content_kind: ChannelContentKind;
 };
 
 type ImportSampleChannel = {
@@ -86,6 +89,124 @@ function normalizeText(value?: string | null) {
 
 function normalizeNullableText(value?: string | null) {
   return normalizeText(value) ?? null;
+}
+
+function normalizeClassificationText(value?: string | null) {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function includesAnyTerm(value: string, terms: string[]) {
+  return terms.some((term) => value.includes(term));
+}
+
+const MOVIE_GROUP_TERMS = [
+  'filme',
+  'filmes',
+  'movie',
+  'movies',
+  'cinema',
+  'vod',
+  'lancamento',
+  'lancamentos',
+  'estreia',
+  'estreias',
+];
+
+const SERIES_GROUP_TERMS = [
+  'serie',
+  'series',
+  'temporada',
+  'temporadas',
+  'episodio',
+  'episodios',
+  'novela',
+  'novelas',
+];
+
+const LIVE_GROUP_TERMS = [
+  'canal',
+  'canais',
+  'ao vivo',
+  'live',
+  'tv',
+  'news',
+  'noticias',
+  'jornal',
+  'esporte',
+  'esportes',
+  'sport',
+  'sports',
+  'radio',
+];
+
+const LINEAR_CHANNEL_NAME_PATTERN =
+  /^(a&e|amc|animal planet|arte 1|axn|band|bis|canal brasil|cartoon|cinemax|cnn|combate|discovery|disney|espn|fox|fx|gloob|globo|hbo|max|megapix|mtv|multishow|nat geo|nick|paramount|premiere|record|sony|space|sportv|star|syfy|telecine|tnt|tooncast|universal|warner)(\s|$)/i;
+
+const LINEAR_QUALITY_SUFFIX_PATTERN =
+  /\b(sd|hd|fhd|uhd|4k|h265|hevc)\b/i;
+
+const SERIES_NAME_PATTERNS = [
+  /\bs\d{1,2}\s*e\d{1,3}\b/i,
+  /\b\d{1,2}x\d{1,3}\b/i,
+  /\btemporada\s+\d{1,2}\b/i,
+  /\bt\d{1,2}\s*e\d{1,3}\b/i,
+];
+
+const MOVIE_YEAR_PATTERN = /\b(19|20)\d{2}\b/;
+
+function classifyChannelContentKind({
+  name,
+  groupTitle,
+}: {
+  name: string;
+  groupTitle: string | null;
+}): ChannelContentKind {
+  const normalizedGroup = normalizeClassificationText(groupTitle);
+  const normalizedName = normalizeClassificationText(name);
+
+  if (!normalizedGroup && !normalizedName) {
+    return 'unknown';
+  }
+
+  if (LINEAR_CHANNEL_NAME_PATTERN.test(normalizedName)) {
+    return 'live';
+  }
+
+  if (
+    includesAnyTerm(normalizedGroup, LIVE_GROUP_TERMS) &&
+    LINEAR_QUALITY_SUFFIX_PATTERN.test(normalizedName)
+  ) {
+    return 'live';
+  }
+
+  if (includesAnyTerm(normalizedGroup, SERIES_GROUP_TERMS)) {
+    return 'series';
+  }
+
+  if (SERIES_NAME_PATTERNS.some((pattern) => pattern.test(name))) {
+    return 'series';
+  }
+
+  if (includesAnyTerm(normalizedGroup, MOVIE_GROUP_TERMS)) {
+    return 'movie';
+  }
+
+  if (
+    MOVIE_YEAR_PATTERN.test(name) &&
+    !includesAnyTerm(normalizedGroup, LIVE_GROUP_TERMS)
+  ) {
+    return 'movie';
+  }
+
+  if (includesAnyTerm(normalizedGroup, LIVE_GROUP_TERMS)) {
+    return 'live';
+  }
+
+  return 'unknown';
 }
 
 function getBearerToken(request: Request) {
@@ -382,6 +503,7 @@ function toCacheRow({
     group_title: channel.group_title,
     tvg_id: channel.tvg_id,
     sort_order: channel.sort_order,
+    content_kind: channel.content_kind,
     is_active: true,
     last_imported_at: nowIso,
     updated_at: nowIso,
@@ -533,6 +655,10 @@ async function parseAndWriteM3uStream({
       group_title: pendingMetadata.groupTitle,
       tvg_id: pendingMetadata.tvgId,
       sort_order: stats.sortOrder,
+      content_kind: classifyChannelContentKind({
+        name: channelName,
+        groupTitle: pendingMetadata.groupTitle,
+      }),
     };
 
     stats.sortOrder += 1;

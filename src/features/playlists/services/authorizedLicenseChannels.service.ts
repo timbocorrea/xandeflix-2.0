@@ -53,6 +53,8 @@ export type ListAuthorizedLicenseChannelsInput = {
   deviceIdentifier: string;
   pageSize?: number;
   maxPages?: number;
+  requireTmdbMatched?: boolean;
+  requireTmdbPoster?: boolean;
 };
 
 function compareNullableText(current: string | null, next: string | null) {
@@ -120,11 +122,15 @@ async function fetchLicenseChannelsPage({
   deviceIdentifier,
   page,
   pageSize,
+  requireTmdbMatched,
+  requireTmdbPoster,
 }: {
   licenseCode: string;
   deviceIdentifier: string;
   page: number;
   pageSize: number;
+  requireTmdbMatched?: boolean;
+  requireTmdbPoster?: boolean;
 }) {
   const { data, error } =
     await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
@@ -135,6 +141,8 @@ async function fetchLicenseChannelsPage({
           deviceIdentifier,
           page,
           pageSize,
+          ...(requireTmdbMatched === undefined ? {} : { requireTmdbMatched }),
+          ...(requireTmdbPoster === undefined ? {} : { requireTmdbPoster }),
         },
       },
     );
@@ -160,6 +168,8 @@ export async function listAuthorizedLicenseChannels({
   deviceIdentifier,
   pageSize = DEFAULT_PAGE_SIZE,
   maxPages = DEFAULT_MAX_PAGES,
+  requireTmdbMatched,
+  requireTmdbPoster,
 }: ListAuthorizedLicenseChannelsInput): Promise<IptvChannel[]> {
   const normalizedLicenseCode = licenseCode.trim().toUpperCase();
   const normalizedDeviceIdentifier = deviceIdentifier.trim();
@@ -173,6 +183,8 @@ export async function listAuthorizedLicenseChannels({
     deviceIdentifier: normalizedDeviceIdentifier,
     page: 1,
     pageSize,
+    requireTmdbMatched,
+    requireTmdbPoster,
   });
 
   const channelRows = [...firstPage.channels];
@@ -184,6 +196,8 @@ export async function listAuthorizedLicenseChannels({
       deviceIdentifier: normalizedDeviceIdentifier,
       page,
       pageSize,
+      requireTmdbMatched,
+      requireTmdbPoster,
     });
 
     channelRows.push(...nextPage.channels);
