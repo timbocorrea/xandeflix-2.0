@@ -32,7 +32,6 @@ import { CatalogCategoryPage } from '../features/catalog/pages/CatalogCategoryPa
 import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
 // Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
-// // Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
 // import { startCatalogVodWarmup } from '../features/catalog/services/catalogWarmup.service';
 
 const UniversalPlayerPage = lazy(

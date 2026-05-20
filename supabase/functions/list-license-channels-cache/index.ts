@@ -375,10 +375,10 @@ Deno.serve(async (request) => {
       source: sourcesById.get(channel.license_iptv_source_id) ?? null,
     }));
 
-      const groups = await listAllChannelGroups({
-        supabaseAdmin,
-        licenseIds: licenseId ? [licenseId] : accessibleLicenseIds,
-      });
+    const groups = await listAllChannelGroups({
+      supabaseAdmin,
+      licenseIds: licenseId ? [licenseId] : accessibleLicenseIds,
+    });
 
     return jsonResponse({
       ok: true,

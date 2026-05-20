@@ -308,7 +308,9 @@ export async function loadHomeVodSections({
     if (section) {
       movieSections.push(section);
     }
-  }  const sections = [
+  }
+
+  const sections = [
     createSection({
       id: 'home-vod-launches',
       title: 'Lançamentos',
