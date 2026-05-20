@@ -349,11 +349,24 @@ export default function LiveTvPage() {
                 );
               })
             ) : (
-              <p className="text-sm text-xf-muted">
-                {isLoading
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-sm font-semibold text-xf-muted">
+                  {isLoading
                     ? "Carregando lista autorizada de canais. Aguarde alguns instantes..."
                     : "Nenhum grupo carregado."}
-              </p>
+                </p>
+
+                {isLoading ? (
+                  <div className="mt-4 space-y-2">
+                    {Array.from({ length: 5 }).map((_, placeholderIndex) => (
+                      <div
+                        key={`live-group-loading-${placeholderIndex}`}
+                        className="h-10 rounded-2xl border border-white/5 bg-white/[0.06]"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         </aside>
@@ -417,11 +430,24 @@ export default function LiveTvPage() {
                 );
               })
             ) : (
-              <p className="text-sm text-xf-muted">
-                {isLoading
-                  ? "Carregando canais..."
-                  : "Nenhum canal neste grupo."}
-              </p>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-sm font-semibold text-xf-muted">
+                  {isLoading
+                    ? "Carregando canais..."
+                    : "Nenhum canal neste grupo."}
+                </p>
+
+                {isLoading ? (
+                  <div className="mt-4 space-y-2">
+                    {Array.from({ length: 8 }).map((_, placeholderIndex) => (
+                      <div
+                        key={`live-channel-loading-${placeholderIndex}`}
+                        className="h-12 rounded-2xl border border-white/5 bg-white/[0.06]"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         </aside>

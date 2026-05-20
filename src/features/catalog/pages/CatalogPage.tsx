@@ -119,7 +119,7 @@ export function CatalogPage() {
   const [realCatalogSections, setRealCatalogSections] = useState<
     CatalogPageSection[] | null
   >(initialHomeCatalogState.sections);
-  const [, setIsRealCatalogLoading] = useState(true);
+  const [isRealCatalogLoading, setIsRealCatalogLoading] = useState(true);
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const homeVodLimitPerSection = getHomeVodLimitPerSection(isTv);
   const wasInitialCatalogHydratedFromCache =
@@ -221,6 +221,11 @@ export function CatalogPage() {
 
   const isProgressiveLoading =
     isTv && visibleSectionCount < resolvedCatalogSections.length;
+
+  const shouldShowInitialCatalogLoading =
+    isRealCatalogLoading &&
+    !wasInitialCatalogHydratedFromCache &&
+    !realCatalogSections?.length;
   const isCompactFireStickHero = useMemo(
     () => isTv && isFireStickUserAgent(),
     [isTv],
@@ -327,7 +332,27 @@ export function CatalogPage() {
           onNextHeroItem={handleNextHeroItem}
         />
 
-        {visibleCatalogSections.length === 0 ? (
+        {shouldShowInitialCatalogLoading ? (
+          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-8">
+            <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
+              Carregando catalogo
+            </p>
+            <p className="mt-3 text-sm font-semibold text-zinc-300">
+              Preparando filmes e series autorizados para a Home.
+            </p>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+              {Array.from({ length: SECTION_LOADING_CARD_COUNT }).map(
+                (_, placeholderIndex) => (
+                  <div
+                    key={`initial-catalog-loading-${placeholderIndex}`}
+                    className="h-32 rounded-[0.18rem] border border-white/5 bg-white/[0.06]"
+                  />
+                ),
+              )}
+            </div>
+          </section>
+        ) : visibleCatalogSections.length === 0 ? (
           <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
             <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
               Catalogo indisponivel
