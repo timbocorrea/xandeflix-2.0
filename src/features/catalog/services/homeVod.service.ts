@@ -31,7 +31,15 @@ export type LoadHomeVodInput = {
   launchesLimit?: number;
 };
 
+export type LoadHomeVodCategoryInput = {
+  licenseCode: string;
+  deviceIdentifier: string;
+  groupTitles: string[];
+  limit?: number;
+};
+
 const DEFAULT_LIMIT_PER_SECTION = 20;
+const DEFAULT_CATEGORY_ITEMS_LIMIT = 800;
 const HOME_VOD_CACHE_TTL_MS = 5 * 60 * 1000;
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
 
@@ -137,6 +145,20 @@ function isLaunchGroup(item: Pick<HomeVodItem, 'groupTitle'>) {
   return (
     groupTitle.includes('lancamento') ||
     groupTitle.includes('lancamentos')
+  );
+}
+
+function matchesAnyGroupTitle(
+  item: Pick<HomeVodItem, 'groupTitle'>,
+  groupTitles: string[],
+) {
+  const itemGroupTitle = normalizeCatalogText(item.groupTitle);
+
+  return Boolean(
+    itemGroupTitle &&
+      groupTitles.some(
+        (groupTitle) => normalizeCatalogText(groupTitle) === itemGroupTitle,
+      ),
   );
 }
 
@@ -320,4 +342,43 @@ export async function loadHomeVodSections({
   });
 
   return sections;
+}
+
+export async function loadHomeVodCategoryItems({
+  licenseCode,
+  deviceIdentifier,
+  groupTitles,
+  limit = DEFAULT_CATEGORY_ITEMS_LIMIT,
+}: LoadHomeVodCategoryInput): Promise<HomeVodItem[]> {
+  const normalizedGroupTitles = groupTitles.filter((groupTitle) =>
+    Boolean(normalizeCatalogText(groupTitle)),
+  );
+
+  if (normalizedGroupTitles.length === 0) {
+    return [];
+  }
+
+  const channels = await listAuthorizedLicenseChannels({
+    licenseCode,
+    deviceIdentifier,
+    pageSize: 500,
+    maxPages: 20,
+    requireTmdbMatched: true,
+    requireTmdbPoster: true,
+  });
+
+  const items = channels
+    .filter(isVodChannel)
+    .filter(hasRenderableTmdbPoster)
+    .map(mapChannelToHomeVodItem)
+    .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
+
+  const shouldSortMostRecent = normalizedGroupTitles.some((groupTitle) =>
+    normalizeCatalogText(groupTitle).includes('lancamento'),
+  );
+  const orderedItems = shouldSortMostRecent
+    ? [...items].sort(sortMostRecentHomeItems)
+    : items;
+
+  return orderedItems.slice(0, limit);
 }
