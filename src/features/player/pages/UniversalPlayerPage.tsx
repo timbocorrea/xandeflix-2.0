@@ -6,6 +6,7 @@ import {
   useState,
 } from 'react';
 import { App } from '@capacitor/app';
+import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { FocusableButton } from '@/components/tv/FocusableButton';
@@ -58,7 +59,35 @@ function createPlayerEvent(
 
 function normalizePlaybackError(error: unknown) {
   if (error instanceof Error) {
-    return error.message;
+    return error.message || error.name || 'Erro sem mensagem.';
+  }
+
+  if (error && typeof error === 'object') {
+    const maybeError = error as {
+      code?: unknown;
+      message?: unknown;
+      name?: unknown;
+      nativeCode?: unknown;
+      nativeMessage?: unknown;
+    };
+
+    const details = [
+      typeof maybeError.name === 'string' ? maybeError.name : null,
+      typeof maybeError.message === 'string' ? maybeError.message : null,
+      typeof maybeError.nativeMessage === 'string' ? maybeError.nativeMessage : null,
+      typeof maybeError.code !== 'undefined' ? `code=${String(maybeError.code)}` : null,
+      typeof maybeError.nativeCode !== 'undefined'
+        ? `nativeCode=${String(maybeError.nativeCode)}`
+        : null,
+    ].filter(Boolean);
+
+    if (details.length > 0) {
+      return details.join(' · ');
+    }
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
   }
 
   return 'Erro desconhecido de reprodução.';
@@ -147,6 +176,20 @@ export default function UniversalPlayerPage() {
 
     logPlayerDebugEvent(event);
   }, []);
+
+  useEffect(() => {
+    window.setTimeout(() => {
+      setFocus('player-play-button');
+    }, 150);
+  }, []);
+
+  useEffect(() => {
+    if (status === 'error' || status === 'unsupported') {
+      window.setTimeout(() => {
+        setFocus('player-back-button');
+      }, 100);
+    }
+  }, [status]);
 
   const pushPlayerEvent = useCallback(
     (
@@ -661,13 +704,24 @@ export default function UniversalPlayerPage() {
                 const nativeCode = mediaError?.code ?? null;
                 const nativeMessage =
                   mediaError?.message || 'Erro nativo de mídia sem descrição.';
+                const readyState = videoElement?.readyState ?? null;
+                const networkState = videoElement?.networkState ?? null;
+                const currentSrc = videoElement?.currentSrc
+                  ? maskStreamUrl(videoElement.currentSrc)
+                  : null;
 
                 setStatus('error');
                 setPlaybackError({
                   code: 'PLAYBACK_ERROR',
-                  message: `Erro no elemento de vídeo: ${nativeMessage}`,
+                  message:
+                    `Erro no elemento de vídeo: ${nativeMessage} ` +
+                    `(nativeCode=${nativeCode ?? 'n/a'}, readyState=${readyState ?? 'n/a'}, networkState=${networkState ?? 'n/a'})`,
                   details: {
                     nativeCode,
+                    nativeMessage,
+                    readyState,
+                    networkState,
+                    currentSrc,
                   },
                 });
 
@@ -678,6 +732,9 @@ export default function UniversalPlayerPage() {
                   {
                     nativeCode,
                     nativeMessage,
+                    readyState,
+                    networkState,
+                    currentSrc,
                   },
                 );
               }}

@@ -32,7 +32,13 @@ const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 const SECTION_LOADING_CARD_COUNT = 4;
 
-type CatalogPageSection = (typeof catalogSections)[number];
+type CatalogPageItem = (typeof catalogSections)[number]['items'][number] & {
+  streamUrl?: string;
+};
+
+type CatalogPageSection = Omit<(typeof catalogSections)[number], 'items'> & {
+  items: CatalogPageItem[];
+};
 
 function shouldShowSeeAll(section: { showSeeAll?: boolean }) {
   return Boolean(section.showSeeAll);
@@ -67,6 +73,7 @@ function mapHomeVodSectionsToCatalogSections(
       posterUrl: item.posterUrl,
       backdropUrl: item.backdropUrl,
       overview: item.overview,
+      streamUrl: item.streamUrl,
     })),
   }));
 }
@@ -462,6 +469,22 @@ export function CatalogPage() {
                         focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
                         onEnterPress={() => {
                           spatialDebug('catalog-grid', 'Abrir item:', item.title);
+
+                          const itemStreamUrl =
+                            'streamUrl' in item && typeof item.streamUrl === 'string'
+                              ? item.streamUrl
+                              : '';
+
+                          if (!itemStreamUrl) {
+                            return;
+                          }
+
+                          const params = new URLSearchParams({
+                            src: itemStreamUrl,
+                            title: item.title,
+                          });
+
+                          navigate(`/player?${params.toString()}`);
                         }}
                         onArrowPress={(direction) => {
                           const isLaunchesSection =
