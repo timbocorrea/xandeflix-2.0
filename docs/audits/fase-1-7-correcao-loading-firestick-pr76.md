@@ -3,10 +3,10 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Repositório: xandeflix4/xandeflix-2.0  
-Branch: feat/home-netflix-like-proportions  
-PR relacionada: #76 — feat: polish home tv proportions and dpad flow  
+Projeto: Xandeflix 2.0
+Repositório: xandeflix4/xandeflix-2.0
+Branch: feat/home-netflix-like-proportions
+PR relacionada: #76 — feat: polish home tv proportions and dpad flow
 Base: commit 7516b20 — fix: clean pr76 blocking config issues.
 
 A Fase 1.6 validou o APK debug no Fire Stick real. O app abriu sem crash fatal, sem tela branca permanente e sem dependência aparente do Vite/localhost. A navegação D-pad funcionou nos fluxos testados.
