@@ -3,11 +3,11 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Repositório: xandeflix4/xandeflix-2.0  
-Branch auditada: feat/home-netflix-like-proportions  
-Branch base: main  
-PR relacionada: #76 — feat: polish home tv proportions and dpad flow  
+Projeto: Xandeflix 2.0
+Repositório: xandeflix4/xandeflix-2.0
+Branch auditada: feat/home-netflix-like-proportions
+Branch base: main
+PR relacionada: #76 — feat: polish home tv proportions and dpad flow
 
 ## 2. Objetivo
 
