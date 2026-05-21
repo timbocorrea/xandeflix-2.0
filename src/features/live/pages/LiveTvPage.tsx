@@ -308,6 +308,9 @@ export default function LiveTvPage() {
   );
 
   const isLoading = status === "loading";
+  const shouldShowInitialLiveTvLoading =
+    isLoading ||
+    (status !== "error" && groups.length === 0 && activeGroupChannels.length === 0);
   const userFacingError = sourceLoadError ?? error;
 
   return (
@@ -351,12 +354,12 @@ export default function LiveTvPage() {
             ) : (
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-sm font-semibold text-xf-muted">
-                  {isLoading
+                  {shouldShowInitialLiveTvLoading
                     ? "Carregando lista autorizada de canais. Aguarde alguns instantes..."
                     : "Nenhum grupo carregado."}
                 </p>
 
-                {isLoading ? (
+                {shouldShowInitialLiveTvLoading ? (
                   <div className="mt-4 space-y-2">
                     {Array.from({ length: 5 }).map((_, placeholderIndex) => (
                       <div
@@ -432,12 +435,12 @@ export default function LiveTvPage() {
             ) : (
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-sm font-semibold text-xf-muted">
-                  {isLoading
+                  {shouldShowInitialLiveTvLoading
                     ? "Carregando canais..."
                     : "Nenhum canal neste grupo."}
                 </p>
 
-                {isLoading ? (
+                {shouldShowInitialLiveTvLoading ? (
                   <div className="mt-4 space-y-2">
                     {Array.from({ length: 8 }).map((_, placeholderIndex) => (
                       <div

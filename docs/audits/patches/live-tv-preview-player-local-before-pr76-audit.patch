@@ -1,0 +1,246 @@
+diff --git a/src/features/live/pages/LiveTvPage.tsx b/src/features/live/pages/LiveTvPage.tsx
+index 4e1d9db..a0eae78 100644
+--- a/src/features/live/pages/LiveTvPage.tsx
++++ b/src/features/live/pages/LiveTvPage.tsx
+@@ -20,10 +20,16 @@ import {
+ import { listAuthorizedLicenseChannels } from "@/features/playlists/services/authorizedLicenseChannels.service";
+ import { usePlaylistRuntime } from "@/features/playlists/providers/PlaylistRuntimeProvider";
+ import type { IptvChannel } from "@/features/playlists/types/playlist";
++import type { UniversalPlayerAdapter } from "@/features/player/types/player";
++import { prepareUniversalPlayerSource } from "@/features/player/lib/playerFactory";
++import { createHlsAdapter } from "@/features/player/lib/hlsAdapter";
++import { createMpegTsAdapter } from "@/features/player/lib/mpegTsAdapter";
++import { createNativeVideoAdapter } from "@/features/player/lib/nativeVideoAdapter";
+
+ const MAX_VISIBLE_CHANNELS_PER_GROUP = 160;
+
+ type ChannelSourceMode = "cache" | "playlist" | null;
++type PreviewPlaybackStatus = "idle" | "loading" | "ready" | "playing" | "error";
+
+ type ChannelGroup = {
+   name: string;
+@@ -68,6 +74,11 @@ export default function LiveTvPage() {
+   const [cacheFallbackMessage, setCacheFallbackMessage] = useState<
+     string | null
+   >(null);
++  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
++  const previewAdapterRef = useRef<UniversalPlayerAdapter | null>(null);
++  const [previewStatus, setPreviewStatus] =
++    useState<PreviewPlaybackStatus>("idle");
++  const [previewError, setPreviewError] = useState<string | null>(null);
+   const hasRequestedSourceRef = useRef(false);
+
+   useRouteInitialFocus();
+@@ -244,6 +255,88 @@ export default function LiveTvPage() {
+       .slice(0, MAX_VISIBLE_CHANNELS_PER_GROUP);
+   }, [activeGroupName, liveTvChannels]);
+
++  useEffect(() => {
++    const videoElement = previewVideoRef.current;
++
++    previewAdapterRef.current?.destroy();
++    previewAdapterRef.current = null;
++    setPreviewError(null);
++
++    if (!selectedChannel?.url || !videoElement) {
++      setPreviewStatus("idle");
++      return;
++    }
++
++    const preparation = prepareUniversalPlayerSource({
++      url: selectedChannel.url,
++      title: selectedChannel.name,
++    });
++
++    if (!preparation.ok) {
++      setPreviewStatus("error");
++      setPreviewError(preparation.error.message);
++      return;
++    }
++
++    const stream = preparation.stream;
++    const adapter =
++      stream.kind === "hls"
++        ? createHlsAdapter(videoElement)
++        : stream.kind === "mpegts"
++          ? createMpegTsAdapter(videoElement)
++          : createNativeVideoAdapter(videoElement);
++
++    let isCancelled = false;
++    previewAdapterRef.current = adapter;
++    setPreviewStatus("loading");
++
++    adapter
++      .load({
++        url: selectedChannel.url,
++        title: selectedChannel.name,
++      })
++      .then(async () => {
++        if (isCancelled) {
++          return;
++        }
++
++        setPreviewStatus("ready");
++
++        try {
++          videoElement.muted = true;
++          await adapter.play();
++
++          if (!isCancelled) {
++            setPreviewStatus("playing");
++          }
++        } catch {
++          if (!isCancelled) {
++            setPreviewStatus("ready");
++          }
++        }
++      })
++      .catch((error: unknown) => {
++        if (isCancelled) {
++          return;
++        }
++
++        const errorMessage =
++          error instanceof Error ? error.message : String(error);
++
++        setPreviewStatus("error");
++        setPreviewError(errorMessage);
++      });
++
++    return () => {
++      isCancelled = true;
++      adapter.destroy();
++
++      if (previewAdapterRef.current === adapter) {
++        previewAdapterRef.current = null;
++      }
++    };
++  }, [selectedChannel]);
++
+   const handleSelectGroup = useCallback((groupName: string) => {
+     setSelectedGroupName(groupName);
+   }, []);
+@@ -427,55 +520,86 @@ export default function LiveTvPage() {
+         </aside>
+
+         <section className="xf-live-tv-preview flex min-h-[calc(100vh-2rem)] min-w-0 flex-col gap-4 md:pl-4">
+-          <div className="relative aspect-video overflow-hidden bg-zinc-950">
+-            <div className="absolute inset-0 flex items-center justify-center bg-black">
+-              <div className="h-full w-full bg-zinc-950/95 p-8 text-center">
+-                <p className="text-xs font-black uppercase tracking-[0.4em] text-xf-red">
+-                  Xandeflix Live
+-                </p>
+-
+-                <h2 className="mt-4 text-2xl font-black">
+-                  {selectedChannel?.name ?? "Selecione um canal"}
+-                </h2>
+-
+-                <p className="mt-3 text-sm text-xf-muted">
+-                  A prévia inline MPEG-TS será ativada no próximo ciclo de forma
+-                  controlada. Por enquanto, clique novamente no mesmo canal para
+-                  abrir em tela cheia.
+-                </p>
+-
+-                {isLoading && progress ? (
+-                  <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
+-                    {getProgressLabel(progress.phase)} ·{" "}
+-                    {progress.channelsParsed} canais processados
++          <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black">
++            <video
++              ref={previewVideoRef}
++              className="h-full w-full bg-black object-contain"
++              muted
++              autoPlay
++              playsInline
++              preload="auto"
++              tabIndex={-1}
++              onPlaying={() => setPreviewStatus("playing")}
++              onWaiting={() => setPreviewStatus("loading")}
++              onError={() => {
++                setPreviewStatus("error");
++                setPreviewError("Não foi possível reproduzir a prévia deste canal.");
++              }}
++            />
++
++            {!selectedChannel ? (
++              <div className="absolute inset-0 flex items-center justify-center bg-black/90 p-8 text-center">
++                <div>
++                  <p className="text-xs font-black uppercase tracking-[0.4em] text-xf-red">
++                    Xandeflix Live
+                   </p>
+-                ) : null}
+-
+-                {channelSourceMode === "cache" ? (
+-                  <p className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+-                    Canais autorizados carregados do cache da licença.
++                  <h2 className="mt-4 text-2xl font-black">
++                    Selecione um canal
++                  </h2>
++                  <p className="mt-3 text-sm text-xf-muted">
++                    Escolha um canal na lista para iniciar a prévia.
+                   </p>
+-                ) : null}
++                </div>
++              </div>
++            ) : null}
+
+-                {cacheFallbackMessage && channelSourceMode === "playlist" ? (
+-                  <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
+-                    {cacheFallbackMessage}
++            {selectedChannel && previewStatus !== "playing" ? (
++              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/55 p-8 text-center">
++                <div>
++                  <p className="text-xs font-black uppercase tracking-[0.4em] text-xf-red">
++                    {previewStatus === "error" ? "Erro na prévia" : "Carregando prévia"}
+                   </p>
+-                ) : null}
+-
+-                {userFacingError ? (
+-                  <p className="mt-5 rounded-xl border border-yellow-500/40 bg-yellow-950/70 px-4 py-3 text-sm text-yellow-100">
+-                    {userFacingError}
++                  <h2 className="mt-4 text-2xl font-black">
++                    {selectedChannel.name}
++                  </h2>
++                  <p className="mt-3 text-sm text-xf-muted">
++                    {previewStatus === "error"
++                      ? previewError ?? "Não foi possível iniciar a prévia."
++                      : "Preparando reprodução do canal selecionado..."}
+                   </p>
+-                ) : null}
++                </div>
++              </div>
++            ) : null}
++
++            {isLoading && progress ? (
++              <div className="absolute bottom-4 left-4 right-4 rounded-xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-xf-muted">
++                {getProgressLabel(progress.phase)} · {progress.channelsParsed} canais processados
+               </div>
+-            </div>
++            ) : null}
+           </div>
+
+           <div className="rounded-2xl border border-white/10 bg-black/70 p-4">
+             <p className="text-xs font-black uppercase tracking-[0.35em] text-white">
+               Canal ativo
+             </p>
++            <h2 className="mt-3 truncate text-xl font-black">
++              {selectedChannel?.name ?? "Nenhum canal selecionado"}
++            </h2>
++            <p className="mt-2 text-sm text-xf-muted">
++              {selectedChannel
++                ? "Pressione OK novamente no mesmo canal para abrir em tela cheia."
++                : "Selecione um canal para iniciar a prévia."}
++            </p>
++            {cacheFallbackMessage && channelSourceMode === "playlist" ? (
++              <p className="mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
++                {cacheFallbackMessage}
++              </p>
++            ) : null}
++            {userFacingError ? (
++              <p className="mt-4 rounded-xl border border-yellow-500/40 bg-yellow-950/70 px-4 py-3 text-sm text-yellow-100">
++                {userFacingError}
++              </p>
++            ) : null}
+           </div>
+
+           <div className="rounded-2xl border border-white/10 bg-black/70 p-4">
