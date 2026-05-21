@@ -3,9 +3,9 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Branch base: main  
-Branch de trabalho: feat/mvp-player-wiring  
+Projeto: Xandeflix 2.0
+Branch base: main
+Branch de trabalho: feat/mvp-player-wiring
 Objetivo: conectar telas existentes ao Player Universal para reprodução real, sem criar preview inline e sem refatorar o Player inteiro.
 
 A Fase 2.1 foi iniciada após a consolidação da PR #76 na main, com Home, D-pad, Live TV e loading inicial já validados em fases anteriores.
