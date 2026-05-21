@@ -288,23 +288,16 @@ export default function LiveTvPage() {
 
   const handleSelectChannel = useCallback(
     (channel: IptvChannel) => {
-      const isSameChannel =
-        selectedChannel &&
-        getChannelKey(selectedChannel) === getChannelKey(channel);
-
-      if (isSameChannel) {
-        const params = new URLSearchParams({
-          src: channel.url,
-          title: channel.name,
-        });
-
-        navigate(`/player?${params.toString()}`);
-        return;
-      }
-
       selectChannel(channel);
+
+      const params = new URLSearchParams({
+        src: channel.url,
+        title: channel.name,
+      });
+
+      navigate(`/player?${params.toString()}`);
     },
-    [navigate, selectChannel, selectedChannel],
+    [navigate, selectChannel],
   );
 
   const isLoading = status === "loading";
@@ -425,8 +418,8 @@ export default function LiveTvPage() {
                       </span>
                       <span className="mt-0.5 block truncate text-[0.65rem] uppercase tracking-wide leading-none text-xf-muted">
                         {isActive
-                          ? "Clique novamente para abrir em tela cheia"
-                          : channel.tvgName || "Clique para selecionar"}
+                          ? "Pressione OK para assistir"
+                          : channel.tvgName || "Pressione OK para assistir"}
                       </span>
                     </div>
                   </FocusableButton>
@@ -468,9 +461,8 @@ export default function LiveTvPage() {
                 </h2>
 
                 <p className="mt-3 text-sm text-xf-muted">
-                  A prévia inline MPEG-TS será ativada no próximo ciclo de forma
-                  controlada. Por enquanto, clique novamente no mesmo canal para
-                  abrir em tela cheia.
+                  Pressione OK/Enter em um canal para abrir o Player Universal
+                  em tela cheia. A prévia inline continua fora desta fase.
                 </p>
 
                 {isLoading && progress ? (
