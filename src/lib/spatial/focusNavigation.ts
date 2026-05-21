@@ -47,8 +47,21 @@ export function scrollFocusKeyIntoView(
   element?.scrollIntoView(options);
 }
 
-function getFirstExistingFocusKey(focusKeys: string[]) {
-  return focusKeys.find((focusKey) => focusKeyExists(focusKey)) ?? focusKeys[0];
+function getFirstExistingFocusKey(
+  focusKeys: Array<string | null | undefined>,
+) {
+  const normalizedFocusKeys = focusKeys.filter(
+    (focusKey): focusKey is string => Boolean(focusKey),
+  );
+
+  if (normalizedFocusKeys.length === 0) {
+    return null;
+  }
+
+  return (
+    normalizedFocusKeys.find((focusKey) => focusKeyExists(focusKey)) ??
+    normalizedFocusKeys[0]
+  );
 }
 
 export function setFocusAndScroll({
@@ -71,6 +84,18 @@ export function setFocusAndScroll({
   });
 
   return false;
+}
+
+export function getFirstMountedCatalogItemFocusKey() {
+  if (!canUseDom()) {
+    return null;
+  }
+
+  const firstCatalogItem = document.querySelector<HTMLElement>(
+    '[data-nav-id^="catalog-section-"][data-nav-id*="-item-"]',
+  );
+
+  return firstCatalogItem?.dataset.navId ?? null;
 }
 
 function forceWindowTop() {
@@ -109,6 +134,10 @@ function setFocusWithFireTvRetry(focusKey: string) {
 export function focusHeaderWithFallback(focusKeys: string[]) {
   const targetFocusKey = getFirstExistingFocusKey(focusKeys);
 
+  if (!targetFocusKey) {
+    return false;
+  }
+
   spatialDebug('header', 'Focus header with fallback', {
     targetFocusKey,
     candidates: focusKeys,
@@ -143,10 +172,82 @@ export function focusHeroInfoButton() {
 }
 
 export function focusFirstMediaCard() {
+  const firstCatalogItemFocusKey =
+    getFirstMountedCatalogItemFocusKey() ?? FOCUS_KEYS.FIRST_MEDIA_CARD;
+
   return setFocusAndScroll({
-    focusKey: FOCUS_KEYS.FIRST_MEDIA_CARD,
+    focusKey: firstCatalogItemFocusKey,
     scrollOptions: CARD_SCROLL_OPTIONS,
   });
+}
+
+export function focusCatalogEntryPoint() {
+  if (!canUseDom()) {
+    return false;
+  }
+
+  const lastCatalogFocusKey = (
+    window as Window & {
+      __XANDEFLIX_LAST_CATALOG_FOCUS_KEY?: string;
+    }
+  ).__XANDEFLIX_LAST_CATALOG_FOCUS_KEY;
+
+  const targetFocusKey = getFirstExistingFocusKey([
+    lastCatalogFocusKey,
+    FOCUS_KEYS.HERO_PLAY_BUTTON,
+    getFirstMountedCatalogItemFocusKey(),
+    FOCUS_KEYS.SIDEBAR_HOME,
+  ]);
+
+  if (!targetFocusKey) {
+    return false;
+  }
+
+  const scrollTargetFocusKey =
+    targetFocusKey === FOCUS_KEYS.HERO_PLAY_BUTTON
+      ? FOCUS_KEYS.CATALOG_HERO_SECTION
+      : targetFocusKey;
+
+  return setFocusAndScroll({
+    focusKey: targetFocusKey,
+    scrollTargetFocusKey,
+    scrollOptions:
+      scrollTargetFocusKey === FOCUS_KEYS.CATALOG_HERO_SECTION
+        ? HERO_SCROLL_OPTIONS
+        : CARD_SCROLL_OPTIONS,
+  });
+}
+
+export function focusLiveEntryPoint() {
+  const targetFocusKey = getFirstExistingFocusKey([
+    'live-group-0',
+    'live-channel-0',
+    'sidebar-channels',
+    FOCUS_KEYS.SIDEBAR_HOME,
+  ]);
+
+  if (!targetFocusKey) {
+    return false;
+  }
+
+  return setFocusWithFireTvRetry(targetFocusKey);
+}
+
+export function focusSettingsEntryPoint() {
+  const targetFocusKey = getFirstExistingFocusKey([
+    'settings-device-id-card',
+    'settings-license-code-input',
+    'settings-activate-license-button',
+    'settings-source-url-input',
+    'sidebar-settings',
+    FOCUS_KEYS.SIDEBAR_HOME,
+  ]);
+
+  if (!targetFocusKey) {
+    return false;
+  }
+
+  return setFocusWithFireTvRetry(targetFocusKey);
 }
 
 export function focusMediaCardByIndex(index: number) {
@@ -234,5 +335,5 @@ export function focusLastCatalogItem() {
     });
   }
 
-  return focusFirstMediaCard();
+  return focusCatalogEntryPoint();
 }

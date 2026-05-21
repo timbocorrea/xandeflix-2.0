@@ -6,8 +6,9 @@ import {
 } from '@noriginmedia/norigin-spatial-navigation';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { getFirstMountedCatalogItemFocusKey } from '@/lib/spatial/focusNavigation';
 
-type RouteName = 'login' | 'catalog' | 'unknown';
+type RouteName = 'login' | 'catalog' | 'live' | 'settings' | 'unknown';
 
 type RouteInitialFocusConfig = {
   routeName: RouteName;
@@ -31,14 +32,42 @@ function getRouteInitialFocusConfig(pathname: string): RouteInitialFocusConfig {
   }
 
   if (pathname === '/') {
+    const firstCatalogFocusKey = getFirstMountedCatalogItemFocusKey();
+
     return {
       routeName: 'catalog',
       candidates: [
         'hero-play-button',
         'hero-info-button',
-        'catalog-section-continue-watching-item-0',
+        ...(firstCatalogFocusKey ? [firstCatalogFocusKey] : []),
         'sidebar-home',
         'mobile-home',
+      ],
+    };
+  }
+
+  if (pathname.startsWith('/live')) {
+    return {
+      routeName: 'live',
+      candidates: [
+        'live-group-0',
+        'live-channel-0',
+        'sidebar-channels',
+        'sidebar-home',
+      ],
+    };
+  }
+
+  if (pathname.startsWith('/settings')) {
+    return {
+      routeName: 'settings',
+      candidates: [
+        'settings-device-id-card',
+        'settings-license-code-input',
+        'settings-activate-license-button',
+        'settings-source-url-input',
+        'sidebar-settings',
+        'sidebar-home',
       ],
     };
   }

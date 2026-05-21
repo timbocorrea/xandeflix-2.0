@@ -150,6 +150,50 @@ function buildAccessibleLicenseQuery({
   return query;
 }
 
+
+async function listAllChannelGroups({
+  supabaseAdmin,
+  licenseIds,
+}: {
+  supabaseAdmin: SupabaseClient;
+  licenseIds: string[];
+}) {
+  const groups = new Set<string>();
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+
+    const { data, error } = await supabaseAdmin
+      .from('license_channels_cache')
+      .select('group_title')
+      .in('license_id', licenseIds)
+      .not('group_title', 'is', null)
+      .order('group_title', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      throw error;
+    }
+
+    const rows = (data ?? []) as { group_title: string | null }[];
+
+    for (const row of rows) {
+      if (row.group_title) {
+        groups.add(row.group_title);
+      }
+    }
+
+    if (rows.length < pageSize) {
+      break;
+    }
+  }
+
+  return Array.from(groups).sort((firstGroup, secondGroup) =>
+    firstGroup.localeCompare(secondGroup, 'pt-BR', { sensitivity: 'base' }),
+  );
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -331,24 +375,10 @@ Deno.serve(async (request) => {
       source: sourcesById.get(channel.license_iptv_source_id) ?? null,
     }));
 
-    const { data: groupRows, error: groupsError } = await supabaseAdmin
-      .from('license_channels_cache')
-      .select('group_title')
-      .in('license_id', licenseId ? [licenseId] : accessibleLicenseIds)
-      .not('group_title', 'is', null)
-      .order('group_title', { ascending: true });
-
-    if (groupsError) {
-      throw groupsError;
-    }
-
-    const groups = Array.from(
-      new Set(
-        (groupRows ?? [])
-          .map((row: { group_title: string | null }) => row.group_title)
-          .filter((value): value is string => Boolean(value)),
-      ),
-    );
+    const groups = await listAllChannelGroups({
+      supabaseAdmin,
+      licenseIds: licenseId ? [licenseId] : accessibleLicenseIds,
+    });
 
     return jsonResponse({
       ok: true,

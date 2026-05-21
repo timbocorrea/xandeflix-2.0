@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/app/providers/AuthProvider";
 import { AppShell } from "@/components/layout/AppShell";
 import { FocusableButton } from "@/components/tv/FocusableButton";
+import { useRouteInitialFocus } from "@/hooks/useRouteInitialFocus";
 import { getStoredLicenseActivation } from "@/features/licensing/lib/licenseActivationStorage";
 import {
   getChannelDisplayGroup,
@@ -68,6 +69,8 @@ export default function LiveTvPage() {
     string | null
   >(null);
   const hasRequestedSourceRef = useRef(false);
+
+  useRouteInitialFocus();
 
   useEffect(() => {
     let isActive = true;
@@ -305,6 +308,9 @@ export default function LiveTvPage() {
   );
 
   const isLoading = status === "loading";
+  const shouldShowInitialLiveTvLoading =
+    isLoading ||
+    (status !== "error" && groups.length === 0 && activeGroupChannels.length === 0);
   const userFacingError = sourceLoadError ?? error;
 
   return (
@@ -346,11 +352,24 @@ export default function LiveTvPage() {
                 );
               })
             ) : (
-              <p className="text-sm text-xf-muted">
-                {isLoading
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-sm font-semibold text-xf-muted">
+                  {shouldShowInitialLiveTvLoading
                     ? "Carregando lista autorizada de canais. Aguarde alguns instantes..."
                     : "Nenhum grupo carregado."}
-              </p>
+                </p>
+
+                {shouldShowInitialLiveTvLoading ? (
+                  <div className="mt-4 space-y-2">
+                    {Array.from({ length: 5 }).map((_, placeholderIndex) => (
+                      <div
+                        key={`live-group-loading-${placeholderIndex}`}
+                        className="h-10 rounded-2xl border border-white/5 bg-white/[0.06]"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         </aside>
@@ -414,11 +433,24 @@ export default function LiveTvPage() {
                 );
               })
             ) : (
-              <p className="text-sm text-xf-muted">
-                {isLoading
-                  ? "Carregando canais..."
-                  : "Nenhum canal neste grupo."}
-              </p>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-sm font-semibold text-xf-muted">
+                  {shouldShowInitialLiveTvLoading
+                    ? "Carregando canais..."
+                    : "Nenhum canal neste grupo."}
+                </p>
+
+                {shouldShowInitialLiveTvLoading ? (
+                  <div className="mt-4 space-y-2">
+                    {Array.from({ length: 8 }).map((_, placeholderIndex) => (
+                      <div
+                        key={`live-channel-loading-${placeholderIndex}`}
+                        className="h-12 rounded-2xl border border-white/5 bg-white/[0.06]"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         </aside>

@@ -27,8 +27,12 @@ import { SuperAdminOnly } from '../features/admin/components/SuperAdminOnly';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { getStoredLicenseActivation } from '../features/licensing/lib/licenseActivationStorage';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
+import { CatalogLaunchesPage } from '../features/catalog/pages/CatalogLaunchesPage';
+import { CatalogCategoryPage } from '../features/catalog/pages/CatalogCategoryPage';
 import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
+// Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
+// import { startCatalogVodWarmup } from '../features/catalog/services/catalogWarmup.service';
 
 const UniversalPlayerPage = lazy(
   () => import('../features/player/pages/UniversalPlayerPage'),
@@ -153,6 +157,26 @@ export function AppRoutes() {
                 </LicenseRoute>
               }
             />
+
+            <Route
+              path="/launches"
+              element={
+                <LicenseRoute>
+                  <CatalogLaunchesPage />
+                </LicenseRoute>
+              }
+            />
+
+            <Route
+              path="/category/:groupSlug"
+              element={
+                <LicenseRoute>
+                  <CatalogCategoryPage />
+                </LicenseRoute>
+              }
+            />
+
+
 
             <Route
               path="/admin"

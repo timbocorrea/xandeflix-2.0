@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 
 import { useAuth } from '../../../app/providers/AuthProvider';
 import { AppShell } from '../../../components/layout/AppShell';
@@ -16,11 +18,12 @@ import {
 } from '../../../lib/spatial/categoryFocusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
-import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
 
 import { catalogSections } from '../data/catalogSections';
 import {
+  getCachedHomeVodSections,
   loadHomeVodSections,
+  type LoadHomeVodInput,
   type HomeVodSection,
 } from '../services/homeVod.service';
 
@@ -35,6 +38,19 @@ function shouldShowSeeAll(section: { showSeeAll?: boolean }) {
   return Boolean(section.showSeeAll);
 }
 
+function isFireStickUserAgent() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  return (
+    userAgent.includes('aft') ||
+    userAgent.includes('fire tv') ||
+    userAgent.includes('firetv')
+  );
+}
+
 function mapHomeVodSectionsToCatalogSections(
   sections: HomeVodSection[],
 ): CatalogPageSection[] {
@@ -43,30 +59,81 @@ function mapHomeVodSectionsToCatalogSections(
     title: section.title,
     eyebrow: section.eyebrow,
     description: section.description,
-    showSeeAll: false,
+    showSeeAll: section.id === 'home-vod-launches',
     items: section.items.map((item) => ({
       id: item.id,
       title: item.title,
       subtitle: item.subtitle,
       posterUrl: item.posterUrl,
+      backdropUrl: item.backdropUrl,
+      overview: item.overview,
     })),
   }));
 }
 
+function getHomeVodLimitPerSection(isTv: boolean) {
+  return isTv ? 12 : 20;
+}
+
+function createHomeVodLoadInput(
+  limitPerSection: number,
+): LoadHomeVodInput | null {
+  const storedActivation = getStoredLicenseActivation();
+
+  if (!storedActivation) {
+    return null;
+  }
+
+  const licenseCode = storedActivation.licenseCode.trim();
+
+  return {
+    licenseCode,
+    deviceIdentifier: storedActivation.deviceIdentifier,
+    limitPerSection,
+  };
+}
+
+function createInitialHomeCatalogState(isTv: boolean) {
+  const limitPerSection = getHomeVodLimitPerSection(isTv);
+  const loadInput = createHomeVodLoadInput(limitPerSection);
+  const cachedSections = loadInput ? getCachedHomeVodSections(loadInput) : null;
+  const sections = cachedSections
+    ? mapHomeVodSectionsToCatalogSections(cachedSections)
+    : null;
+
+  return {
+    limitPerSection,
+    loadInput,
+    sections: sections?.length ? sections : null,
+    wasHydratedFromCache: Boolean(sections?.length),
+  };
+}
+
 export function CatalogPage() {
+  const navigate = useNavigate();
   const { signOut } = useAuth();
   const { isTv, isMobile } = useDeviceType();
+  const [initialHomeCatalogState] = useState(() =>
+    createInitialHomeCatalogState(isTv),
+  );
   const [realCatalogSections, setRealCatalogSections] = useState<
     CatalogPageSection[] | null
-  >(null);
+  >(initialHomeCatalogState.sections);
   const [isRealCatalogLoading, setIsRealCatalogLoading] = useState(true);
+  const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+  const homeVodLimitPerSection = getHomeVodLimitPerSection(isTv);
+  const wasInitialCatalogHydratedFromCache =
+    initialHomeCatalogState.wasHydratedFromCache &&
+    initialHomeCatalogState.limitPerSection === homeVodLimitPerSection;
 
   const resolvedCatalogSections = realCatalogSections?.length
     ? realCatalogSections
     : catalogSections;
 
   const [visibleSectionCount, setVisibleSectionCount] = useState(
-    isTv ? INITIAL_TV_VISIBLE_SECTIONS : resolvedCatalogSections.length,
+    isTv && !wasInitialCatalogHydratedFromCache
+      ? INITIAL_TV_VISIBLE_SECTIONS
+      : resolvedCatalogSections.length,
   );
 
   useEffect(() => {
@@ -76,21 +143,19 @@ export function CatalogPage() {
       setIsRealCatalogLoading(true);
 
       try {
-        const storedActivation = getStoredLicenseActivation();
-        const licenseCode = storedActivation?.licenseCode?.trim();
+        const homeVodLoadInput =
+          initialHomeCatalogState.limitPerSection === homeVodLimitPerSection
+            ? initialHomeCatalogState.loadInput
+            : createHomeVodLoadInput(homeVodLimitPerSection);
 
-        if (!licenseCode) {
+        if (!homeVodLoadInput) {
           setRealCatalogSections(null);
           return;
         }
 
-        const deviceIdentifier =
-          storedActivation?.deviceIdentifier || getOrCreateDeviceIdentifier();
-
         const homeVodSections = await loadHomeVodSections({
-          licenseCode,
-          deviceIdentifier,
-          limitPerSection: isTv ? 12 : 20,
+          ...homeVodLoadInput,
+          limitPerSection: homeVodLimitPerSection,
         });
 
         if (!isMounted) {
@@ -123,10 +188,15 @@ export function CatalogPage() {
     return () => {
       isMounted = false;
     };
-  }, [isTv]);
+  }, [homeVodLimitPerSection, initialHomeCatalogState]);
 
   useEffect(() => {
     if (!isTv) {
+      setVisibleSectionCount(resolvedCatalogSections.length);
+      return;
+    }
+
+    if (wasInitialCatalogHydratedFromCache) {
       setVisibleSectionCount(resolvedCatalogSections.length);
       return;
     }
@@ -138,7 +208,11 @@ export function CatalogPage() {
     }, TV_REMAINING_SECTIONS_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [isTv, resolvedCatalogSections.length]);
+  }, [
+    isTv,
+    resolvedCatalogSections.length,
+    wasInitialCatalogHydratedFromCache,
+  ]);
 
   const visibleCatalogSections = useMemo(
     () => resolvedCatalogSections.slice(0, visibleSectionCount),
@@ -148,12 +222,82 @@ export function CatalogPage() {
   const isProgressiveLoading =
     isTv && visibleSectionCount < resolvedCatalogSections.length;
 
+  const shouldShowInitialCatalogLoading =
+    isRealCatalogLoading &&
+    !wasInitialCatalogHydratedFromCache &&
+    !realCatalogSections?.length;
+  const isCompactFireStickHero = useMemo(
+    () => isTv && isFireStickUserAgent(),
+    [isTv],
+  );
+
+  const heroItems = useMemo(() => {
+    const uniqueItems = new Map<string, CatalogPageSection['items'][number]>();
+
+    for (const section of resolvedCatalogSections) {
+      for (const item of section.items) {
+        if (!item.backdropUrl && !item.posterUrl) {
+          continue;
+        }
+
+        if (!uniqueItems.has(item.id)) {
+          uniqueItems.set(item.id, item);
+        }
+      }
+    }
+
+    return Array.from(uniqueItems.values())
+      .sort((firstItem, secondItem) => {
+        return Number(Boolean(secondItem.backdropUrl)) - Number(Boolean(firstItem.backdropUrl));
+      })
+      .slice(0, 5);
+  }, [resolvedCatalogSections]);
+
+  useEffect(() => {
+    setActiveHeroIndex(0);
+  }, [heroItems.length]);
+
+  useEffect(() => {
+    if (heroItems.length <= 1) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setActiveHeroIndex((currentIndex) => {
+        return (currentIndex + 1) % heroItems.length;
+      });
+    }, 9000);
+
+    return () => window.clearTimeout(timer);
+  }, [activeHeroIndex, heroItems.length]);
+
+  const heroItem = heroItems[activeHeroIndex] ?? null;
+
+  function handlePreviousHeroItem() {
+    if (heroItems.length <= 1) {
+      return;
+    }
+
+    setActiveHeroIndex((currentIndex) => {
+      return (currentIndex - 1 + heroItems.length) % heroItems.length;
+    });
+  }
+
+  function handleNextHeroItem() {
+    if (heroItems.length <= 1) {
+      return;
+    }
+
+    setActiveHeroIndex((currentIndex) => {
+      return (currentIndex + 1) % heroItems.length;
+    });
+  }
+
   useRouteInitialFocus();
 
   const spatialNavigation = useCatalogGridNavigation({
     sections: resolvedCatalogSections,
   });
-
   return (
     <AppShell
       onSignOut={() => void signOut()}
@@ -162,32 +306,54 @@ export function CatalogPage() {
         onProfileArrowPress: spatialNavigation.handleHeaderProfileArrowPress,
         onLogoutArrowPress: spatialNavigation.handleHeaderLogoutArrowPress,
       }}
-      mainClassName="px-4 pb-28 md:px-8 md:pb-10 lg:px-10"
+      mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
-      <section className="mx-auto w-full max-w-[1680px]">
+      <section className="mx-auto w-full max-w-[1920px]">
+
         <CatalogHero
+          title={heroItem?.title}
+          description={
+            heroItem?.overview ??
+            heroItem?.subtitle ??
+            'Conteudos recomendados para sua licenca.'
+          }
+          posterUrl={heroItem?.backdropUrl ?? heroItem?.posterUrl}
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
           onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
+          isCompactTvHero={isCompactFireStickHero}
+
+          heroIndex={activeHeroIndex}
+
+          heroTotal={heroItems.length}
+
+          onPreviousHeroItem={handlePreviousHeroItem}
+
+          onNextHeroItem={handleNextHeroItem}
         />
 
-        <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 md:px-5">
-          <p className="text-[0.68rem] font-black uppercase tracking-[0.26em] text-zinc-300">
-            {realCatalogSections?.length
-              ? 'Home premium real'
-              : 'Home premium base'}
-          </p>
-          <p className="mt-1 text-sm text-zinc-400">
-            {isRealCatalogLoading
-              ? 'Carregando conteúdos autorizados da sua licença...'
-              : realCatalogSections?.length
-                ? 'Conteúdos reais autorizados para esta licença, preparados para navegação por controle remoto.'
-                : 'Conteúdo organizado para leitura a distância e navegação previsível por controle remoto.'}
-          </p>
-        </div>
+        {shouldShowInitialCatalogLoading ? (
+          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-8">
+            <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
+              Carregando catalogo
+            </p>
+            <p className="mt-3 text-sm font-semibold text-zinc-300">
+              Preparando filmes e series autorizados para a Home.
+            </p>
 
-        {visibleCatalogSections.length === 0 ? (
-          <section className="rounded-2xl border border-white/10 bg-black/40 px-6 py-10 text-center">
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+              {Array.from({ length: SECTION_LOADING_CARD_COUNT }).map(
+                (_, placeholderIndex) => (
+                  <div
+                    key={`initial-catalog-loading-${placeholderIndex}`}
+                    className="h-32 rounded-[0.18rem] border border-white/5 bg-white/[0.06]"
+                  />
+                ),
+              )}
+            </div>
+          </section>
+        ) : visibleCatalogSections.length === 0 ? (
+          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
             <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
               Catalogo indisponivel
             </p>
@@ -212,12 +378,20 @@ export function CatalogPage() {
                     ? 'TV mode'
                     : 'Web'
                 : section.eyebrow;
+            const shouldShowSectionEyebrow =
+              Boolean(sectionEyebrow) &&
+              sectionEyebrow.toLowerCase() !== 'vod autorizado';
 
             return (
               <FocusableSection
                 key={section.id}
                 focusKey={getCategorySectionFocusKey(section.id)}
-                className="mb-8 border-0 bg-transparent px-0 py-0"
+                focusScrollOptions={{
+                  block: 'center',
+                  inline: 'nearest',
+                  behavior: 'auto',
+                }}
+                className="mb-6 border-0 bg-transparent px-0 py-0"
                 onArrowPress={(direction) =>
                   spatialNavigation.handleCategorySectionArrowPress(
                     direction,
@@ -225,37 +399,43 @@ export function CatalogPage() {
                   )
                 }
               >
-                <div className="mb-3 flex items-end justify-between gap-4 px-1">
+                <div className="mb-2 flex items-end justify-between gap-4 px-0.5">
                   <div className="min-w-0">
-                    <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
-                      {sectionEyebrow}
-                    </p>
+                    {shouldShowSectionEyebrow ? (
+                      <p
+                        data-xf-home-section-eyebrow="true"
+                        className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red"
+                      >
+                        {sectionEyebrow}
+                      </p>
+                    ) : null}
 
-                    <h2 className="mt-2 text-2xl font-black text-white md:text-4xl">
+                    <h2
+                      data-xf-home-section-title="true"
+                      className={`${shouldShowSectionEyebrow ? 'mt-2 ' : ''}text-[1.05rem] font-black tracking-[-0.02em] text-white md:text-[1.55rem] lg:text-[1.7rem]`}
+                    >
                       {section.title}
                     </h2>
 
-                    <p className="mt-2 max-w-3xl text-sm text-zinc-400">
-                      {section.description ||
-                        'Selecao pronta para navegacao rapida na tela principal.'}
-                    </p>
                   </div>
 
-                  <div className="hidden rounded-xl border border-white/15 bg-white/5 px-3 py-2 md:block">
-                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-zinc-400">
-                      Itens visiveis
-                    </p>
-                    <p className="text-lg font-black text-white">
-                      {sectionItems.length}
-                    </p>
-                  </div>
-
-                  {shouldShowSeeAll(section) && !isMobile && !isTv && (
+                  {shouldShowSeeAll(section) && !isMobile && (!isTv || section.id === 'home-vod-launches') && (
                     <FocusableButton
                       focusKey={getCategorySeeAllFocusKey(section.id)}
                       className="inline-flex rounded-full border border-white/20 bg-xf-surface px-5 py-3 text-sm font-bold text-white"
+                      onClick={() => {
+                        spatialDebug('catalog-grid', 'Ver tudo:', section.title);
+
+                        if (section.id === 'home-vod-launches') {
+                          navigate('/launches');
+                        }
+                      }}
                       onEnterPress={() => {
                         spatialDebug('catalog-grid', 'Ver tudo:', section.title);
+
+                        if (section.id === 'home-vod-launches') {
+                          navigate('/launches');
+                        }
                       }}
                       onArrowPress={(direction) =>
                         spatialNavigation.handleCategorySeeAllArrowPress(
@@ -270,30 +450,50 @@ export function CatalogPage() {
                 </div>
 
                 {sectionItems.length > 0 ? (
-                  <div className="xf-carousel-row flex gap-2.5 overflow-x-auto overflow-y-visible pb-7 pr-10 scroll-smooth md:gap-3 lg:gap-3.5">
+                  <div className="xf-carousel-row flex gap-2 overflow-x-auto overflow-y-visible pb-6 pr-10 scroll-auto md:gap-2.5 lg:gap-3">
                     {sectionItems.map((item, itemIndex) => (
                       <MediaCard
                         key={item.id}
                         title={item.title}
                         subtitle={item.subtitle}
                         posterUrl={item.posterUrl}
+                        eagerLoad={isTv && categoryIndex < 2 && itemIndex < 6}
                         index={itemIndex}
                         focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
                         onEnterPress={() => {
                           spatialDebug('catalog-grid', 'Abrir item:', item.title);
                         }}
-                        onArrowPress={(direction) =>
-                          spatialNavigation.handleCategoryCardArrowPress(
+                        onArrowPress={(direction) => {
+                          const isLaunchesSection =
+                            section.id === 'home-vod-launches';
+                          const isLastVisibleLaunchCard =
+                            itemIndex === sectionItems.length - 1;
+
+                          if (
+                            isLaunchesSection &&
+                            direction === 'right' &&
+                            isLastVisibleLaunchCard
+                          ) {
+                            setFocus(getCategorySeeAllFocusKey(section.id));
+                            return false;
+                          }
+
+                          if (isLaunchesSection && direction === 'up') {
+                            setFocus(getCategorySeeAllFocusKey(section.id));
+                            return false;
+                          }
+
+                          return spatialNavigation.handleCategoryCardArrowPress(
                             direction,
                             categoryIndex,
                             itemIndex,
-                          )
-                        }
+                          );
+                        }}
                       />
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-white/10 bg-black/40 px-4 py-5">
+                  <div className="rounded-[0.18rem] border border-white/10 bg-black/40 px-4 py-5">
                     <p className="text-sm font-semibold text-zinc-300">
                       Esta secao esta vazia no momento.
                     </p>
@@ -305,7 +505,7 @@ export function CatalogPage() {
         )}
 
         {isProgressiveLoading ? (
-          <section className="mb-8 rounded-2xl border border-white/10 bg-black/35 px-4 py-5 md:px-5 md:py-6">
+          <section className="mb-8 rounded-[0.18rem] border border-white/10 bg-black/35 px-4 py-5 md:px-5 md:py-6">
             <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-zinc-300">
               Carregando mais secoes
             </p>
@@ -315,7 +515,7 @@ export function CatalogPage() {
                 (_, placeholderIndex) => (
                   <div
                     key={`catalog-loading-card-${placeholderIndex}`}
-                    className="h-[16rem] w-[11rem] shrink-0 animate-pulse rounded-2xl border border-white/10 bg-white/5"
+                    className="h-[14.5rem] w-[9.7rem] shrink-0 animate-pulse rounded-[0.18rem] border border-white/10 bg-white/5"
                   />
                 ),
               )}

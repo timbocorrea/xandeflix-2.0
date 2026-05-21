@@ -3,6 +3,8 @@ export interface CatalogItem {
   title: string;
   subtitle?: string;
   posterUrl?: string;
+  backdropUrl?: string;
+  overview?: string;
 }
 
 export interface CatalogSection {

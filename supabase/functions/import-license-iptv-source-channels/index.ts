@@ -8,6 +8,8 @@ type ImportLicenseIptvSourceChannelsRequest = {
   limit?: number;
 };
 
+type ChannelContentKind = 'live' | 'movie' | 'series' | 'unknown';
+
 type ParsedChannel = {
   name: string;
   stream_url: string;
@@ -15,17 +17,7 @@ type ParsedChannel = {
   group_title: string | null;
   tvg_id: string | null;
   sort_order: number;
-};
-
-type CachedChannel = {
-  id: string;
-  name: string;
-  stream_url: string;
-  logo_url: string | null;
-  group_title: string | null;
-  tvg_id: string | null;
-  sort_order: number;
-  is_active: boolean;
+  content_kind: ChannelContentKind;
 };
 
 type ImportSampleChannel = {
@@ -67,10 +59,9 @@ type LicenseIptvSourceRecord = {
 
 type SupabaseClient = ReturnType<typeof createClient>;
 
-const FETCH_TIMEOUT_MS = 20000;
-const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
-const DEFAULT_IMPORT_LIMIT = 1000;
-const MAX_IMPORT_LIMIT = 5000;
+const FETCH_TIMEOUT_MS = 300000;
+const DEFAULT_IMPORT_LIMIT = 350000;
+const MAX_IMPORT_LIMIT = 350000;
 const MAX_SAMPLES = 10;
 const WRITE_BATCH_SIZE = 500;
 
@@ -98,6 +89,124 @@ function normalizeText(value?: string | null) {
 
 function normalizeNullableText(value?: string | null) {
   return normalizeText(value) ?? null;
+}
+
+function normalizeClassificationText(value?: string | null) {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function includesAnyTerm(value: string, terms: string[]) {
+  return terms.some((term) => value.includes(term));
+}
+
+const MOVIE_GROUP_TERMS = [
+  'filme',
+  'filmes',
+  'movie',
+  'movies',
+  'cinema',
+  'vod',
+  'lancamento',
+  'lancamentos',
+  'estreia',
+  'estreias',
+];
+
+const SERIES_GROUP_TERMS = [
+  'serie',
+  'series',
+  'temporada',
+  'temporadas',
+  'episodio',
+  'episodios',
+  'novela',
+  'novelas',
+];
+
+const LIVE_GROUP_TERMS = [
+  'canal',
+  'canais',
+  'ao vivo',
+  'live',
+  'tv',
+  'news',
+  'noticias',
+  'jornal',
+  'esporte',
+  'esportes',
+  'sport',
+  'sports',
+  'radio',
+];
+
+const LINEAR_CHANNEL_NAME_PATTERN =
+  /^(a&e|amc|animal planet|arte 1|axn|band|bis|canal brasil|cartoon|cinemax|cnn|combate|discovery|disney|espn|fox|fx|gloob|globo|hbo|max|megapix|mtv|multishow|nat geo|nick|paramount|premiere|record|sony|space|sportv|star|syfy|telecine|tnt|tooncast|universal|warner)(\s|$)/i;
+
+const LINEAR_QUALITY_SUFFIX_PATTERN =
+  /\b(sd|hd|fhd|uhd|4k|h265|hevc)\b/i;
+
+const SERIES_NAME_PATTERNS = [
+  /\bs\d{1,2}\s*e\d{1,3}\b/i,
+  /\b\d{1,2}x\d{1,3}\b/i,
+  /\btemporada\s+\d{1,2}\b/i,
+  /\bt\d{1,2}\s*e\d{1,3}\b/i,
+];
+
+const MOVIE_YEAR_PATTERN = /\b(19|20)\d{2}\b/;
+
+function classifyChannelContentKind({
+  name,
+  groupTitle,
+}: {
+  name: string;
+  groupTitle: string | null;
+}): ChannelContentKind {
+  const normalizedGroup = normalizeClassificationText(groupTitle);
+  const normalizedName = normalizeClassificationText(name);
+
+  if (!normalizedGroup && !normalizedName) {
+    return 'unknown';
+  }
+
+  if (LINEAR_CHANNEL_NAME_PATTERN.test(normalizedName)) {
+    return 'live';
+  }
+
+  if (
+    includesAnyTerm(normalizedGroup, LIVE_GROUP_TERMS) &&
+    LINEAR_QUALITY_SUFFIX_PATTERN.test(normalizedName)
+  ) {
+    return 'live';
+  }
+
+  if (includesAnyTerm(normalizedGroup, SERIES_GROUP_TERMS)) {
+    return 'series';
+  }
+
+  if (SERIES_NAME_PATTERNS.some((pattern) => pattern.test(name))) {
+    return 'series';
+  }
+
+  if (includesAnyTerm(normalizedGroup, MOVIE_GROUP_TERMS)) {
+    return 'movie';
+  }
+
+  if (
+    MOVIE_YEAR_PATTERN.test(name) &&
+    !includesAnyTerm(normalizedGroup, LIVE_GROUP_TERMS)
+  ) {
+    return 'movie';
+  }
+
+  if (includesAnyTerm(normalizedGroup, LIVE_GROUP_TERMS)) {
+    return 'live';
+  }
+
+  return 'unknown';
 }
 
 function getBearerToken(request: Request) {
@@ -239,195 +348,60 @@ function sanitizeChannelName(value: string | null, fallbackIndex: number) {
   return normalizeText(value) ?? `Canal ${fallbackIndex}`;
 }
 
-function parseM3uChannels(
-  content: string,
-  limit: number,
-): {
-  channels: ParsedChannel[];
+type PendingM3uMetadata = {
+  name: string | null;
+  logoUrl: string | null;
+  groupTitle: string | null;
+  tvgId: string | null;
+  tvgName: string | null;
+};
+
+type StreamImportStats = {
   totalParsed: number;
+  totalAccepted: number;
+  totalWritten: number;
   totalSkipped: number;
   totalFailed: number;
   wasLimited: boolean;
-  sampleChannels: ImportSampleChannel[];
+  reachedEnd: boolean;
   looksLikeM3u: boolean;
-} {
-  const channels: ParsedChannel[] = [];
-  const sampleChannels: ImportSampleChannel[] = [];
-  const seenStreamUrls = new Set<string>();
+  sampleChannels: ImportSampleChannel[];
+  extinfLines: number;
+  firstNonEmptyLine: string;
+  sortOrder: number;
+};
 
-  let totalParsed = 0;
-  let totalSkipped = 0;
-  let totalFailed = 0;
-  let extinfLines = 0;
-  let firstNonEmptyLine = '';
-  let pendingMetadata: {
-    name: string | null;
-    logoUrl: string | null;
-    groupTitle: string | null;
-    tvgId: string | null;
-    tvgName: string | null;
-  } | null = null;
-
-  const lines = content.split(/\r?\n/);
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-
-    if (!line) {
-      continue;
-    }
-
-    if (!firstNonEmptyLine) {
-      firstNonEmptyLine = line;
-    }
-
-    if (line.startsWith('#EXTINF')) {
-      extinfLines += 1;
-      const attributes = parseAttributes(line);
-
-      pendingMetadata = {
-        name: parseChannelName(line),
-        logoUrl: normalizeNullableText(attributes['tvg-logo']),
-        groupTitle: normalizeNullableText(attributes['group-title']),
-        tvgId: normalizeNullableText(attributes['tvg-id']),
-        tvgName: normalizeNullableText(attributes['tvg-name']),
-      };
-      continue;
-    }
-
-    if (line.startsWith('#')) {
-      continue;
-    }
-
-    if (!pendingMetadata) {
-      continue;
-    }
-
-    if (!isPlayableUrl(line)) {
-      totalFailed += 1;
-      pendingMetadata = null;
-      continue;
-    }
-
-    const streamUrl = normalizeText(line);
-
-    if (!streamUrl) {
-      totalFailed += 1;
-      pendingMetadata = null;
-      continue;
-    }
-
-    totalParsed += 1;
-
-    if (seenStreamUrls.has(streamUrl)) {
-      totalSkipped += 1;
-      pendingMetadata = null;
-      continue;
-    }
-
-    seenStreamUrls.add(streamUrl);
-
-    const channelName = sanitizeChannelName(
-      pendingMetadata.name ?? pendingMetadata.tvgName,
-      totalParsed,
-    );
-
-    const channel: ParsedChannel = {
-      name: channelName,
-      stream_url: streamUrl,
-      logo_url: pendingMetadata.logoUrl,
-      group_title: pendingMetadata.groupTitle,
-      tvg_id: pendingMetadata.tvgId,
-      sort_order: channels.length,
-    };
-
-    channels.push(channel);
-
-    if (sampleChannels.length < MAX_SAMPLES) {
-      sampleChannels.push({
-        name: channel.name,
-        groupTitle: channel.group_title,
-      });
-    }
-
-    pendingMetadata = null;
-
-    if (channels.length >= limit) {
-      return {
-        channels,
-        totalParsed,
-        totalSkipped,
-        totalFailed,
-        wasLimited: true,
-        sampleChannels,
-        looksLikeM3u: firstNonEmptyLine.startsWith('#EXTM3U') || extinfLines > 0,
-      };
-    }
-  }
-
+function createStreamImportStats(): StreamImportStats {
   return {
-    channels,
-    totalParsed,
-    totalSkipped,
-    totalFailed,
+    totalParsed: 0,
+    totalAccepted: 0,
+    totalWritten: 0,
+    totalSkipped: 0,
+    totalFailed: 0,
     wasLimited: false,
-    sampleChannels,
-    looksLikeM3u: firstNonEmptyLine.startsWith('#EXTM3U') || extinfLines > 0,
+    reachedEnd: false,
+    looksLikeM3u: false,
+    sampleChannels: [],
+    extinfLines: 0,
+    firstNonEmptyLine: '',
+    sortOrder: 0,
   };
 }
 
-async function readResponseBody(response: Response) {
-  if (!response.body) {
-    const bodyText = await response.text();
-    const encoded = new TextEncoder().encode(bodyText);
+function updateLooksLikeM3u(stats: StreamImportStats) {
+  stats.looksLikeM3u =
+    stats.firstNonEmptyLine.startsWith('#EXTM3U') || stats.extinfLines > 0;
+}
 
-    return {
-      bodyText: bodyText.slice(0, MAX_RESPONSE_BYTES),
-      bytesRead: Math.min(encoded.byteLength, MAX_RESPONSE_BYTES),
-      wasLimited: encoded.byteLength > MAX_RESPONSE_BYTES,
-    };
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const chunks: string[] = [];
-  let bytesRead = 0;
-  let wasLimited = false;
-
-  while (true) {
-    const { done, value } = await reader.read();
-
-    if (done || !value) {
-      break;
-    }
-
-    const remainingBytes = MAX_RESPONSE_BYTES - bytesRead;
-
-    if (remainingBytes <= 0) {
-      wasLimited = true;
-      await reader.cancel();
-      break;
-    }
-
-    if (value.byteLength > remainingBytes) {
-      const slicedValue = value.slice(0, remainingBytes);
-      chunks.push(decoder.decode(slicedValue, { stream: true }));
-      bytesRead += slicedValue.byteLength;
-      wasLimited = true;
-      await reader.cancel();
-      break;
-    }
-
-    chunks.push(decoder.decode(value, { stream: true }));
-    bytesRead += value.byteLength;
-  }
-
-  chunks.push(decoder.decode());
+function parseExtinfMetadata(line: string): PendingM3uMetadata {
+  const attributes = parseAttributes(line);
 
   return {
-    bodyText: chunks.join(''),
-    bytesRead,
-    wasLimited,
+    name: parseChannelName(line),
+    logoUrl: normalizeNullableText(attributes['tvg-logo']),
+    groupTitle: normalizeNullableText(attributes['group-title']),
+    tvgId: normalizeNullableText(attributes['tvg-id']),
+    tvgName: normalizeNullableText(attributes['tvg-name']),
   };
 }
 
@@ -454,6 +428,7 @@ async function fetchSourcePlaylist(sourceUrl: string) {
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const cleanup = () => clearTimeout(timeoutId);
 
   try {
     const response = await fetch(sourceUrl, {
@@ -468,6 +443,8 @@ async function fetchSourcePlaylist(sourceUrl: string) {
     });
 
     if (!response.ok) {
+      cleanup();
+
       return {
         ok: false as const,
         error: 'IPTV_SOURCE_FETCH_FAILED',
@@ -475,13 +452,24 @@ async function fetchSourcePlaylist(sourceUrl: string) {
       };
     }
 
-    const bodyResult = await readResponseBody(response);
+    if (!response.body) {
+      cleanup();
+
+      return {
+        ok: false as const,
+        error: 'IPTV_SOURCE_FETCH_FAILED',
+        details: 'Source response did not provide a readable stream.',
+      };
+    }
 
     return {
       ok: true as const,
-      ...bodyResult,
+      response,
+      cleanup,
     };
   } catch (error) {
+    cleanup();
+
     return {
       ok: false as const,
       error: 'IPTV_SOURCE_FETCH_FAILED',
@@ -492,20 +480,7 @@ async function fetchSourcePlaylist(sourceUrl: string) {
             ? error.message
             : String(error),
     };
-  } finally {
-    clearTimeout(timeoutId);
   }
-}
-
-function hasCacheChanges(existing: CachedChannel, nextChannel: ParsedChannel) {
-  return (
-    existing.name !== nextChannel.name ||
-    existing.logo_url !== nextChannel.logo_url ||
-    existing.group_title !== nextChannel.group_title ||
-    existing.tvg_id !== nextChannel.tvg_id ||
-    existing.sort_order !== nextChannel.sort_order ||
-    existing.is_active !== true
-  );
 }
 
 function toCacheRow({
@@ -528,46 +503,321 @@ function toCacheRow({
     group_title: channel.group_title,
     tvg_id: channel.tvg_id,
     sort_order: channel.sort_order,
+    content_kind: channel.content_kind,
     is_active: true,
     last_imported_at: nowIso,
     updated_at: nowIso,
   };
 }
 
-function chunkRows<T>(rows: T[], chunkSize: number) {
-  const chunks: T[][] = [];
-
-  for (let index = 0; index < rows.length; index += chunkSize) {
-    chunks.push(rows.slice(index, index + chunkSize));
-  }
-
-  return chunks;
-}
-
-async function writeRowsInChunks({
+async function flushChannelBatch({
   supabaseAdmin,
-  rows,
-  mode,
+  batch,
+  licenseId,
+  sourceId,
+  nowIso,
+  stats,
 }: {
   supabaseAdmin: SupabaseClient;
-  rows: Record<string, unknown>[];
-  mode: 'insert' | 'upsert';
+  batch: ParsedChannel[];
+  licenseId: string;
+  sourceId: string;
+  nowIso: string;
+  stats: StreamImportStats;
 }) {
-  for (const chunk of chunkRows(rows, WRITE_BATCH_SIZE)) {
-    const query =
-      mode === 'insert'
-        ? supabaseAdmin.from('license_channels_cache').insert(chunk)
-        : supabaseAdmin
-          .from('license_channels_cache')
-          .upsert(chunk, {
-            onConflict: 'license_iptv_source_id,stream_url',
-          });
+  if (batch.length === 0) {
+    return;
+  }
 
-    const { error } = await query;
+  const seenStreamUrls = new Set<string>();
+  const rows: Record<string, unknown>[] = [];
 
-    if (error) {
-      throw error;
+  for (const channel of batch) {
+    if (seenStreamUrls.has(channel.stream_url)) {
+      stats.totalSkipped += 1;
+      continue;
     }
+
+    seenStreamUrls.add(channel.stream_url);
+    rows.push(
+      toCacheRow({
+        channel,
+        licenseId,
+        sourceId,
+        nowIso,
+      }),
+    );
+  }
+
+  batch.length = 0;
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from('license_channels_cache')
+    .upsert(rows, {
+      onConflict: 'license_iptv_source_id,stream_url',
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  stats.totalWritten += rows.length;
+}
+
+async function parseAndWriteM3uStream({
+  response,
+  supabaseAdmin,
+  licenseId,
+  sourceId,
+  limit,
+  nowIso,
+  stats,
+}: {
+  response: Response;
+  supabaseAdmin: SupabaseClient;
+  licenseId: string;
+  sourceId: string;
+  limit: number;
+  nowIso: string;
+  stats: StreamImportStats;
+}) {
+  if (!response.body) {
+    throw new Error('Source response did not provide a readable stream.');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const batch: ParsedChannel[] = [];
+
+  let buffer = '';
+  let pendingMetadata: PendingM3uMetadata | null = null;
+
+  async function processLine(rawLine: string) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      return false;
+    }
+
+    if (!stats.firstNonEmptyLine) {
+      stats.firstNonEmptyLine = line;
+    }
+
+    if (line.startsWith('#EXTINF')) {
+      stats.extinfLines += 1;
+      pendingMetadata = parseExtinfMetadata(line);
+      return false;
+    }
+
+    if (line.startsWith('#')) {
+      return false;
+    }
+
+    if (!pendingMetadata) {
+      return false;
+    }
+
+    if (!isPlayableUrl(line)) {
+      stats.totalFailed += 1;
+      pendingMetadata = null;
+      return false;
+    }
+
+    const streamUrl = normalizeText(line);
+
+    if (!streamUrl) {
+      stats.totalFailed += 1;
+      pendingMetadata = null;
+      return false;
+    }
+
+    stats.totalParsed += 1;
+
+    if (stats.totalAccepted >= limit) {
+      stats.wasLimited = true;
+      pendingMetadata = null;
+      return true;
+    }
+
+    const channelName = sanitizeChannelName(
+      pendingMetadata.name ?? pendingMetadata.tvgName,
+      stats.totalParsed,
+    );
+
+    const channel: ParsedChannel = {
+      name: channelName,
+      stream_url: streamUrl,
+      logo_url: pendingMetadata.logoUrl,
+      group_title: pendingMetadata.groupTitle,
+      tvg_id: pendingMetadata.tvgId,
+      sort_order: stats.sortOrder,
+      content_kind: classifyChannelContentKind({
+        name: channelName,
+        groupTitle: pendingMetadata.groupTitle,
+      }),
+    };
+
+    stats.sortOrder += 1;
+    stats.totalAccepted += 1;
+
+    if (stats.sampleChannels.length < MAX_SAMPLES) {
+      stats.sampleChannels.push({
+        name: channel.name,
+        groupTitle: channel.group_title,
+      });
+    }
+
+    batch.push(channel);
+    pendingMetadata = null;
+
+    if (batch.length >= WRITE_BATCH_SIZE) {
+      await flushChannelBatch({
+        supabaseAdmin,
+        batch,
+        licenseId,
+        sourceId,
+        nowIso,
+        stats,
+      });
+    }
+
+    return false;
+  }
+
+  async function flushAndStop() {
+    await flushChannelBatch({
+      supabaseAdmin,
+      batch,
+      licenseId,
+      sourceId,
+      nowIso,
+      stats,
+    });
+    updateLooksLikeM3u(stats);
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    if (!value) {
+      continue;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let newlineIndex = buffer.search(/\r?\n/);
+
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex);
+      const newlineLength =
+        buffer[newlineIndex] === '\r' && buffer[newlineIndex + 1] === '\n'
+          ? 2
+          : 1;
+
+      buffer = buffer.slice(newlineIndex + newlineLength);
+
+      if (await processLine(line)) {
+        await reader.cancel();
+        await flushAndStop();
+        return stats;
+      }
+
+      newlineIndex = buffer.search(/\r?\n/);
+    }
+  }
+
+  buffer += decoder.decode();
+
+  if (buffer && (await processLine(buffer))) {
+    await flushAndStop();
+    return stats;
+  }
+
+  stats.reachedEnd = true;
+
+  await flushAndStop();
+
+  return stats;
+}
+
+async function countRowsMissingCurrentImport({
+  supabaseAdmin,
+  sourceId,
+  nowIso,
+}: {
+  supabaseAdmin: SupabaseClient;
+  sourceId: string;
+  nowIso: string;
+}) {
+  const { count: neverImportedCount, error: neverImportedError } =
+    await supabaseAdmin
+      .from('license_channels_cache')
+      .select('id', { count: 'exact', head: true })
+      .eq('license_iptv_source_id', sourceId)
+      .eq('is_active', true)
+      .is('last_imported_at', null);
+
+  if (neverImportedError) {
+    throw neverImportedError;
+  }
+
+  const { count: staleImportedCount, error: staleImportedError } =
+    await supabaseAdmin
+      .from('license_channels_cache')
+      .select('id', { count: 'exact', head: true })
+      .eq('license_iptv_source_id', sourceId)
+      .eq('is_active', true)
+      .lt('last_imported_at', nowIso);
+
+  if (staleImportedError) {
+    throw staleImportedError;
+  }
+
+  return (neverImportedCount ?? 0) + (staleImportedCount ?? 0);
+}
+
+async function deactivateRowsMissingCurrentImport({
+  supabaseAdmin,
+  sourceId,
+  nowIso,
+}: {
+  supabaseAdmin: SupabaseClient;
+  sourceId: string;
+  nowIso: string;
+}) {
+  const baseUpdate = {
+    is_active: false,
+    updated_at: nowIso,
+  };
+
+  const { error: neverImportedError } = await supabaseAdmin
+    .from('license_channels_cache')
+    .update(baseUpdate)
+    .eq('license_iptv_source_id', sourceId)
+    .eq('is_active', true)
+    .is('last_imported_at', null);
+
+  if (neverImportedError) {
+    throw neverImportedError;
+  }
+
+  const { error: staleImportedError } = await supabaseAdmin
+    .from('license_channels_cache')
+    .update(baseUpdate)
+    .eq('license_iptv_source_id', sourceId)
+    .eq('is_active', true)
+    .lt('last_imported_at', nowIso);
+
+  if (staleImportedError) {
+    throw staleImportedError;
   }
 }
 
@@ -834,198 +1084,34 @@ Deno.serve(async (request) => {
       );
     }
 
-    const parsedResult = parseM3uChannels(fetchResult.bodyText, importLimit);
-    const wasLimited =
-      fetchResult.wasLimited || parsedResult.wasLimited || limitResult.wasClamped;
-
-    if (!parsedResult.looksLikeM3u || parsedResult.channels.length === 0) {
-      const result = createImportResult({
-        fetched: true,
-        parsed: false,
-        totalParsed: parsedResult.totalParsed,
-        totalSkipped: parsedResult.totalSkipped,
-        totalFailed: parsedResult.totalFailed,
-        wasLimited,
-        limit: importLimit,
-        sampleChannels: parsedResult.sampleChannels,
-        message: 'Nao foi possivel interpretar a playlist M3U.',
-      });
-
-      await insertImportAudit({
-        supabaseAdmin,
-        actorId: actor.id,
-        license: typedLicense,
-        source: typedSource,
-        result,
-        success: false,
-        error: 'IPTV_SOURCE_PARSE_FAILED',
-      });
-
-      return jsonResponse(
-        { ok: false, error: 'IPTV_SOURCE_PARSE_FAILED', result },
-        400,
-      );
-    }
-
-    const { data: existingChannels, error: existingChannelsError } =
-      await supabaseAdmin
-        .from('license_channels_cache')
-        .select(
-          'id, name, stream_url, logo_url, group_title, tvg_id, sort_order, is_active',
-        )
-        .eq('license_iptv_source_id', typedSource.id);
-
-    if (existingChannelsError) {
-      const result = createImportResult({
-        fetched: true,
-        parsed: true,
-        totalParsed: parsedResult.totalParsed,
-        totalSkipped: parsedResult.totalSkipped,
-        totalFailed: parsedResult.totalFailed + parsedResult.channels.length,
-        wasLimited,
-        limit: importLimit,
-        sampleChannels: parsedResult.sampleChannels,
-        message: 'Nao foi possivel ler o cache de canais.',
-      });
-
-      await insertImportAudit({
-        supabaseAdmin,
-        actorId: actor.id,
-        license: typedLicense,
-        source: typedSource,
-        result,
-        success: false,
-        error: 'CHANNELS_CACHE_IMPORT_FAILED',
-      });
-
-      return jsonResponse(
-        {
-          ok: false,
-          error: 'CHANNELS_CACHE_IMPORT_FAILED',
-          details: existingChannelsError.message,
-          result,
-        },
-        500,
-      );
-    }
-
-    const existingRows = (existingChannels ?? []) as CachedChannel[];
-    const existingByStreamUrl = new Map<string, CachedChannel>();
-
-    for (const existingChannel of existingRows) {
-      existingByStreamUrl.set(existingChannel.stream_url, existingChannel);
-    }
-
     const nowIso = new Date().toISOString();
-    const parsedStreamUrls = new Set(
-      parsedResult.channels.map((channel) => channel.stream_url),
-    );
-    const rowsToInsert: Record<string, unknown>[] = [];
-    const rowsToUpdate: Record<string, unknown>[] = [];
-    const rowsToReactivate: Record<string, unknown>[] = [];
-    const rowsToDeactivateMissing: Record<string, unknown>[] = [];
-    let unchangedSkipped = 0;
-
-    for (const existingChannel of existingRows) {
-      if (
-        existingChannel.is_active &&
-        !parsedStreamUrls.has(existingChannel.stream_url)
-      ) {
-        rowsToDeactivateMissing.push({
-          id: existingChannel.id,
-          license_id: typedLicense.id,
-          license_iptv_source_id: typedSource.id,
-          name: existingChannel.name,
-          stream_url: existingChannel.stream_url,
-          logo_url: existingChannel.logo_url,
-          group_title: existingChannel.group_title,
-          tvg_id: existingChannel.tvg_id,
-          sort_order: existingChannel.sort_order,
-          is_active: false,
-          updated_at: nowIso,
-        });
-      }
-    }
-
-    for (const channel of parsedResult.channels) {
-      const existingChannel = existingByStreamUrl.get(channel.stream_url);
-
-      if (!existingChannel) {
-        rowsToInsert.push(
-          toCacheRow({
-            channel,
-            licenseId: typedLicense.id,
-            sourceId: typedSource.id,
-            nowIso,
-          }),
-        );
-        continue;
-      }
-
-      if (!existingChannel.is_active) {
-        rowsToReactivate.push(
-          toCacheRow({
-            channel,
-            licenseId: typedLicense.id,
-            sourceId: typedSource.id,
-            nowIso,
-          }),
-        );
-        continue;
-      }
-
-      if (hasCacheChanges(existingChannel, channel)) {
-        rowsToUpdate.push(
-          toCacheRow({
-            channel,
-            licenseId: typedLicense.id,
-            sourceId: typedSource.id,
-            nowIso,
-          }),
-        );
-        continue;
-      }
-
-      unchangedSkipped += 1;
-    }
+    const streamStats = createStreamImportStats();
 
     try {
-      await writeRowsInChunks({
+      await parseAndWriteM3uStream({
+        response: fetchResult.response,
         supabaseAdmin,
-        rows: rowsToInsert,
-        mode: 'insert',
-      });
-      await writeRowsInChunks({
-        supabaseAdmin,
-        rows: rowsToUpdate,
-        mode: 'upsert',
-      });
-      await writeRowsInChunks({
-        supabaseAdmin,
-        rows: rowsToReactivate,
-        mode: 'upsert',
-      });
-      await writeRowsInChunks({
-        supabaseAdmin,
-        rows: rowsToDeactivateMissing,
-        mode: 'upsert',
+        licenseId: typedLicense.id,
+        sourceId: typedSource.id,
+        limit: importLimit,
+        nowIso,
+        stats: streamStats,
       });
     } catch (error) {
+      fetchResult.cleanup();
+
       const result = createImportResult({
         fetched: true,
         parsed: true,
-        totalParsed: parsedResult.totalParsed,
-        totalImported: 0,
+        totalParsed: streamStats.totalParsed,
+        totalImported: streamStats.totalWritten,
         totalUpdated: 0,
-        totalSkipped: parsedResult.totalSkipped + unchangedSkipped,
-        totalFailed:
-          rowsToInsert.length +
-          rowsToUpdate.length +
-          rowsToReactivate.length +
-          rowsToDeactivateMissing.length,
-        wasLimited,
+        totalReactivated: 0,
+        totalSkipped: streamStats.totalSkipped,
+        totalFailed: streamStats.totalFailed + streamStats.totalAccepted - streamStats.totalWritten,
+        wasLimited: streamStats.wasLimited || limitResult.wasClamped,
         limit: importLimit,
-        sampleChannels: parsedResult.sampleChannels,
+        sampleChannels: streamStats.sampleChannels,
         message: 'Nao foi possivel gravar os canais no cache.',
       });
 
@@ -1048,23 +1134,146 @@ Deno.serve(async (request) => {
         },
         500,
       );
+    } finally {
+      fetchResult.cleanup();
+    }
+
+    const wasLimited = streamStats.wasLimited || limitResult.wasClamped;
+
+    if (!streamStats.looksLikeM3u || streamStats.totalAccepted === 0) {
+      const result = createImportResult({
+        fetched: true,
+        parsed: false,
+        totalParsed: streamStats.totalParsed,
+        totalSkipped: streamStats.totalSkipped,
+        totalFailed: streamStats.totalFailed,
+        wasLimited,
+        limit: importLimit,
+        sampleChannels: streamStats.sampleChannels,
+        message: 'Nao foi possivel interpretar a playlist M3U.',
+      });
+
+      await insertImportAudit({
+        supabaseAdmin,
+        actorId: actor.id,
+        license: typedLicense,
+        source: typedSource,
+        result,
+        success: false,
+        error: 'IPTV_SOURCE_PARSE_FAILED',
+      });
+
+      return jsonResponse(
+        { ok: false, error: 'IPTV_SOURCE_PARSE_FAILED', result },
+        400,
+      );
+    }
+
+    let totalDeactivatedMissing = 0;
+
+    if (!wasLimited && streamStats.reachedEnd) {
+      try {
+        totalDeactivatedMissing = await countRowsMissingCurrentImport({
+          supabaseAdmin,
+          sourceId: typedSource.id,
+          nowIso,
+        });
+        await deactivateRowsMissingCurrentImport({
+          supabaseAdmin,
+          sourceId: typedSource.id,
+          nowIso,
+        });
+      } catch (error) {
+        const result = createImportResult({
+          fetched: true,
+          parsed: true,
+          totalParsed: streamStats.totalParsed,
+          totalImported: streamStats.totalWritten,
+          totalUpdated: 0,
+          totalReactivated: 0,
+          totalSkipped: streamStats.totalSkipped,
+          totalFailed: streamStats.totalFailed,
+          totalDeactivatedMissing: 0,
+          wasLimited,
+          limit: importLimit,
+          sampleChannels: streamStats.sampleChannels,
+          message: 'Nao foi possivel inativar canais ausentes.',
+        });
+
+        await insertImportAudit({
+          supabaseAdmin,
+          actorId: actor.id,
+          license: typedLicense,
+          source: typedSource,
+          result,
+          success: false,
+          error: 'CHANNELS_CACHE_IMPORT_FAILED',
+        });
+
+        return jsonResponse(
+          {
+            ok: false,
+            error: 'CHANNELS_CACHE_IMPORT_FAILED',
+            details: error instanceof Error ? error.message : String(error),
+            result,
+          },
+          500,
+        );
+      }
+    }
+
+    if (!streamStats.reachedEnd && !wasLimited) {
+      const result = createImportResult({
+        fetched: true,
+        parsed: true,
+        totalParsed: streamStats.totalParsed,
+        totalImported: streamStats.totalWritten,
+        totalUpdated: 0,
+        totalReactivated: 0,
+        totalSkipped: streamStats.totalSkipped,
+        totalFailed: streamStats.totalFailed,
+        wasLimited,
+        limit: importLimit,
+        sampleChannels: streamStats.sampleChannels,
+        message:
+          'Importacao parcial detectada. Canais ausentes nao foram inativados por seguranca.',
+      });
+
+      await insertImportAudit({
+        supabaseAdmin,
+        actorId: actor.id,
+        license: typedLicense,
+        source: typedSource,
+        result,
+        success: false,
+        error: 'IPTV_SOURCE_PARTIAL_IMPORT',
+      });
+
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'IPTV_SOURCE_PARTIAL_IMPORT',
+          result,
+        },
+        502,
+      );
     }
 
     const result = createImportResult({
       fetched: true,
       parsed: true,
-      totalParsed: parsedResult.totalParsed,
-      totalImported: rowsToInsert.length,
-      totalUpdated: rowsToUpdate.length,
-      totalReactivated: rowsToReactivate.length,
-      totalSkipped: parsedResult.totalSkipped + unchangedSkipped,
-      totalFailed: parsedResult.totalFailed,
-      totalDeactivatedMissing: rowsToDeactivateMissing.length,
+      totalParsed: streamStats.totalParsed,
+      totalImported: streamStats.totalWritten,
+      totalUpdated: 0,
+      totalReactivated: 0,
+      totalSkipped: streamStats.totalSkipped,
+      totalFailed: streamStats.totalFailed,
+      totalDeactivatedMissing,
       wasLimited,
       limit: importLimit,
-      sampleChannels: parsedResult.sampleChannels,
+      sampleChannels: streamStats.sampleChannels,
       message: wasLimited
-        ? 'Importacao concluida com limite operacional. Canais ausentes foram inativados.'
+        ? 'Importacao concluida com limite operacional. Canais ausentes nao foram inativados por seguranca.'
         : 'Importacao concluida. Canais ausentes foram inativados.',
     });
 

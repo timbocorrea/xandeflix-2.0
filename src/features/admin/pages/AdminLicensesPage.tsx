@@ -272,6 +272,8 @@ function getImportLicenseIptvSourceChannelsErrorMessage(error: unknown) {
       'Importação Xtream ainda não suportada nesta fase.',
     IPTV_SOURCE_FETCH_FAILED: 'Não foi possível acessar a fonte IPTV.',
     IPTV_SOURCE_PARSE_FAILED: 'Não foi possível interpretar a playlist.',
+    IPTV_SOURCE_PARTIAL_IMPORT:
+      'A importação foi interrompida antes de percorrer a lista inteira.',
     CHANNELS_CACHE_IMPORT_FAILED:
       'Não foi possível gravar os canais no cache.',
     IMPORT_LICENSE_IPTV_SOURCE_CHANNELS_FAILED:

@@ -12,7 +12,11 @@ import { useNavigate } from 'react-router-dom';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
-import { focusLastCatalogItem } from '@/lib/spatial/focusNavigation';
+import {
+  focusCatalogEntryPoint,
+  focusLiveEntryPoint,
+  focusSettingsEntryPoint,
+} from '@/lib/spatial/focusNavigation';
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 
@@ -60,8 +64,20 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
   const navigate = useNavigate();
 
   function handleSidebarArrowPress(direction: string) {
-    if (direction === 'right' && window.location.pathname === '/') {
-      return focusLastCatalogItem();
+    if (direction !== 'right') {
+      return true;
+    }
+
+    if (window.location.pathname === '/') {
+      return focusCatalogEntryPoint();
+    }
+
+    if (window.location.pathname.startsWith('/live')) {
+      return focusLiveEntryPoint();
+    }
+
+    if (window.location.pathname.startsWith('/settings')) {
+      return focusSettingsEntryPoint();
     }
 
     return true;

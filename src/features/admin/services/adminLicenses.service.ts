@@ -159,8 +159,10 @@ export interface ImportLicenseIptvSourceChannelsResult {
   totalParsed: number;
   totalImported: number;
   totalUpdated: number;
+  totalReactivated: number;
   totalSkipped: number;
   totalFailed: number;
+  totalDeactivatedMissing: number;
   wasLimited: boolean;
   limit: number;
   sampleChannels: ImportLicenseIptvSourceChannelSample[];
