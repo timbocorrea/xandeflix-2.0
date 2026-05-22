@@ -177,11 +177,15 @@ export default function UniversalPlayerPage() {
     logPlayerDebugEvent(event);
   }, []);
 
-  useEffect(() => {
+  const restorePlayerFocus = useCallback(() => {
     window.setTimeout(() => {
       setFocus('player-play-button');
-    }, 150);
+    }, 120);
   }, []);
+
+  useEffect(() => {
+    restorePlayerFocus();
+  }, [restorePlayerFocus]);
 
   useEffect(() => {
     if (status === 'error' || status === 'unsupported') {
@@ -202,6 +206,55 @@ export default function UniversalPlayerPage() {
     },
     [pushTelemetryEvent],
   );
+
+  useEffect(() => {
+    if (!usesNativeAndroidPlayer) {
+      return;
+    }
+
+    const handleNativeReturnFocus = () => {
+      pushTelemetryEvent(
+        createPlayerEvent(
+          'player',
+          'PLAYER_NATIVE_RETURN_FOCUS',
+          'info',
+          'Tela do Player recuperou foco após retorno do player nativo.',
+          {
+            kind: stream?.kind ?? null,
+            url: maskedStreamUrl,
+          },
+        ),
+      );
+
+      restorePlayerFocus();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleNativeReturnFocus();
+      }
+    };
+
+    window.addEventListener('focus', handleNativeReturnFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const appListenerPromise = App.addListener('resume', handleNativeReturnFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleNativeReturnFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      void appListenerPromise.then((listener) => {
+        listener.remove();
+      });
+    };
+  }, [
+    maskedStreamUrl,
+    pushTelemetryEvent,
+    restorePlayerFocus,
+    stream?.kind,
+    usesNativeAndroidPlayer,
+  ]);
 
   const pushNativeVideoEvent = useCallback(
     (
@@ -338,12 +391,14 @@ export default function UniversalPlayerPage() {
               onTelemetryEvent: pushTelemetryEvent,
             })
           : isNativeAndroidPlayerAvailable(stream.kind)
-            ? createNativeAndroidPlayerAdapter()
+            ? createNativeAndroidPlayerAdapter(stream.kind)
             : stream.kind === 'mpegts'
               ? createMpegTsAdapter(videoElement, {
                   onTelemetryEvent: pushTelemetryEvent,
                 })
-              : createNativeVideoAdapter(videoElement);
+              : createNativeVideoAdapter(videoElement, {
+                  onTelemetryEvent: pushTelemetryEvent,
+                });
 
       adapterRef.current = adapter;
 
@@ -452,7 +507,7 @@ export default function UniversalPlayerPage() {
         pushPlayerEvent(
           'NATIVE_PLAYER_OPENED',
           'info',
-          'Player nativo Android aberto para reprodução MPEG-TS.',
+          'Player nativo Android aberto para reprodução.',
         );
       } catch (error) {
         const errorMessage = normalizePlaybackError(error);
@@ -480,7 +535,10 @@ export default function UniversalPlayerPage() {
       await adapter.pause();
       setStatus('paused');
       pushPlayerEvent('PAUSE_REQUESTED', 'info', 'Pausa solicitada pelo usuário.');
-      return;
+
+        restorePlayerFocus();
+
+        return;
     }
 
     try {
@@ -748,11 +806,11 @@ export default function UniversalPlayerPage() {
                   </p>
 
                   <p className="mt-3 text-xl font-black text-white">
-                    A prévia inline não é usada para MPEG-TS.
+                    A prévia inline não é usada quando o player nativo Android é necessário.
                   </p>
 
                   <p className="mt-3 text-sm text-xf-muted">
-                    Clique em “Abrir player” para reproduzir este canal em tela cheia com ExoPlayer/Media3.
+                    Clique em “Abrir player” para reproduzir este conteúdo em tela cheia com ExoPlayer/Media3.
                   </p>
                 </div>
               </div>

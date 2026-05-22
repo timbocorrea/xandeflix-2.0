@@ -7,19 +7,28 @@ import type {
 } from '../types/player';
 import type { StreamKind } from '../types/stream';
 
+type NativeAndroidPlayableKind = Extract<StreamKind, 'mpegts' | 'mp4'>;
+
 export function isNativeAndroidPlayerAvailable(kind: StreamKind | undefined) {
   return (
-    kind === 'mpegts' &&
+    (kind === 'mpegts' || kind === 'mp4') &&
     Capacitor.isNativePlatform() &&
     Capacitor.getPlatform() === 'android'
   );
 }
 
-export function createNativeAndroidPlayerAdapter(): UniversalPlayerAdapter {
+export function createNativeAndroidPlayerAdapter(
+  kind: StreamKind,
+): UniversalPlayerAdapter {
+  if (kind !== 'mpegts' && kind !== 'mp4') {
+    throw new Error(`Tipo de stream não suportado pelo player nativo Android: ${kind}`);
+  }
+
+  const nativeKind: NativeAndroidPlayableKind = kind;
   let currentSource: UniversalPlayerSource | null = null;
 
   return {
-    kind: 'mpegts',
+    kind: nativeKind,
 
     async load(source: UniversalPlayerSource) {
       if (!source.url.trim()) {
@@ -37,7 +46,7 @@ export function createNativeAndroidPlayerAdapter(): UniversalPlayerAdapter {
       await openNativeAndroidPlayer({
         url: currentSource.url,
         title: currentSource.title ?? 'Xandeflix Player',
-        kind: 'mpegts',
+        kind: nativeKind,
       });
     },
 
