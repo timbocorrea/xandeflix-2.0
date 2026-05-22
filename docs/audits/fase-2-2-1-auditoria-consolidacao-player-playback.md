@@ -3,9 +3,9 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Branch: feat/player-playback-firestick  
-Base: main pós-merge da PR #77  
+Projeto: Xandeflix 2.0
+Branch: feat/player-playback-firestick
+Base: main pós-merge da PR #77
 Objetivo: auditar, validar e consolidar as alterações da Fase 2.2 antes de abrir PR.
 
 A Fase 2.2 foi executada para corrigir a falha de reprodução real no Fire Stick, mantendo escopo restrito ao Player, adapters e Android nativo.

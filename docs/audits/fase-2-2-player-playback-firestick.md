@@ -3,11 +3,11 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Branch: feat/player-playback-firestick  
-Base: main pós-merge da PR #77  
+Projeto: Xandeflix 2.0
+Branch: feat/player-playback-firestick
+Base: main pós-merge da PR #77
 
-A PR #76 consolidou Home/D-pad/layout/loading.  
+A PR #76 consolidou Home/D-pad/layout/loading.
 A PR #77 consolidou o wiring do Player Universal, permitindo que Home, categorias VOD e Live TV encaminhassem `src` e `title` para `/player`.
 
 A Fase 2.2 teve como objetivo diagnosticar e corrigir a falha de reprodução real no Fire Stick sem alterar Home, Live TV real, Supabase, TMDB, IPTV/importação, warmup ou preview inline.
