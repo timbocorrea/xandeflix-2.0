@@ -39,6 +39,7 @@ import type {
 } from "@/features/player/types/player";
 
 const MAX_VISIBLE_CHANNELS_PER_GROUP = 160;
+let lastLiveTvGroupVerticalNavigationAt = 0;
 
 type ChannelSourceMode = "cache" | "playlist" | null;
 type PreviewStatus = "idle" | "loading" | "playing" | "error";
@@ -56,12 +57,6 @@ function getChannelKey(channel: IptvChannel) {
   return `${channel.id}:${channel.url}`;
 }
 
-function getProgressLabel(phase?: string) {
-  if (phase === "downloading") return "Baixando lista";
-  if (phase === "parsing") return "Processando canais";
-  if (phase === "finalizing") return "Finalizando";
-  return "Carregando";
-}
 
 function maskStreamUrl(rawUrl: string) {
   const trimmedUrl = rawUrl.trim();
@@ -127,8 +122,6 @@ export default function LiveTvPage() {
     channels,
     selectedChannel,
     status,
-    progress,
-    error,
     loadFromSource,
     loadFromChannels,
     selectChannel,
@@ -137,12 +130,9 @@ export default function LiveTvPage() {
   const [selectedGroupName, setSelectedGroupName] = useState<string | null>(
     null,
   );
-  const [sourceLoadError, setSourceLoadError] = useState<string | null>(null);
-  const [channelSourceMode, setChannelSourceMode] =
-    useState<ChannelSourceMode>(null);
-  const [cacheFallbackMessage, setCacheFallbackMessage] = useState<
-    string | null
-  >(null);
+  const [, setSourceLoadError] = useState<string | null>(null);
+  const [, setChannelSourceMode] = useState<ChannelSourceMode>(null);
+  const [, setCacheFallbackMessage] = useState<string | null>(null);
   const hasRequestedSourceRef = useRef(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -297,7 +287,21 @@ export default function LiveTvPage() {
   }, [channels.length, loadFromChannels, loadFromSource, status]);
 
   const liveTvChannels = useMemo(() => {
-    return channels.filter(isLiveChannel);
+    return channels.filter((channel) => {
+      if (channel.contentKind === "live" || isLiveChannel(channel)) {
+        return true;
+      }
+
+      if (channel.contentKind === "movie" || channel.contentKind === "series") {
+        return false;
+      }
+
+      if (channel.tmdbMediaType === "movie" || channel.tmdbMediaType === "tv") {
+        return false;
+      }
+
+      return false;
+    });
   }, [channels]);
 
   const groups = useMemo<ChannelGroup[]>(() => {
@@ -340,17 +344,34 @@ export default function LiveTvPage() {
 
   const handleGroupArrowPress = useCallback(
     (direction: string, groupIndex: number) => {
-      if (direction === "up" && groupIndex === 0) {
+      if (direction === "right" && activeGroupChannels.length > 0) {
+        setFocus("live-channel-0");
         return false;
       }
 
-      if (direction === "down" && groupIndex === groups.length - 1) {
+      if (direction !== "up" && direction !== "down") {
+        return true;
+      }
+
+      const now = Date.now();
+
+      if (now - lastLiveTvGroupVerticalNavigationAt < 320) {
         return false;
       }
 
-      return true;
+      const nextGroupIndex =
+        direction === "down" ? groupIndex + 1 : groupIndex - 1;
+
+      if (nextGroupIndex < 0 || nextGroupIndex >= groups.length) {
+        return false;
+      }
+
+      lastLiveTvGroupVerticalNavigationAt = now;
+      setFocus(`live-group-${nextGroupIndex}`);
+
+      return false;
     },
-    [groups.length],
+    [activeGroupChannels.length, groups.length],
   );
 
   const handleChannelArrowPress = useCallback(
@@ -686,7 +707,6 @@ export default function LiveTvPage() {
   const shouldShowInitialLiveTvLoading =
     isLoading ||
     (status !== "error" && groups.length === 0 && activeGroupChannels.length === 0);
-  const userFacingError = sourceLoadError ?? error;
   const currentPreviewChannel = previewChannel ?? selectedChannel;
   const previewPanelDescription = !currentPreviewChannel
     ? "Selecione um canal para iniciar a prévia inline."
@@ -698,79 +718,62 @@ export default function LiveTvPage() {
           ? "Preview inline falhou. Pressione OK novamente no mesmo canal para tentar em tela cheia."
           : "Pressione OK no canal selecionado para iniciar a prévia.";
 
+
+
   return (
     <AppShell
       onSignOut={() => void signOut()}
       hideHeaderOnTv
       mainClassName="px-0 pt-0 pb-0 pr-0 md:px-0 md:pt-0 md:pb-0 md:pr-0 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-0"
     >
-      <section className="xf-live-tv-page xf-live-tv-layout grid min-h-screen gap-x-0 gap-y-4 text-white">
-        <aside className="flex h-screen min-h-screen flex-col bg-black/70 p-3">
-          <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
+      <section className="xf-live-tv-page xf-live-tv-layout grid min-h-screen gap-x-0 gap-y-4 overflow-hidden bg-black text-white">
+        <aside className="xf-live-tv-groups-column flex h-screen min-h-screen flex-col border-r border-white/10 bg-black/80 shadow-2xl">
+          <p className="xf-live-tv-column-title font-black uppercase tracking-[0.35em] text-xf-red">
             Grupos
           </p>
 
-          <div className="mt-5 min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 scroll-py-2">
+
+          <div className="xf-live-tv-group-list mt-5 min-h-0 flex-1 overflow-y-auto scroll-py-2">
             {groups.length > 0 ? (
               groups.map((group, index) => {
-                const isActive = group.name === activeGroupName;
+                const isActiveGroup = group.name === activeGroupName;
 
                 return (
                   <FocusableButton
                     key={group.name}
                     focusKey={`live-group-${index}`}
                     className={[
-                      "flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-black uppercase tracking-wide",
-                      isActive
-                        ? "border border-xf-red/70 bg-xf-red/20 text-white"
-                        : "border border-white/5 bg-white/5 text-xf-muted hover:text-white",
+                      "xf-live-tv-group-button flex w-full items-center border border-transparent text-left font-black uppercase tracking-wide transition hover:text-white data-[focused=true]:border-xf-red/80 data-[focused=true]:bg-xf-red/25 data-[focused=true]:text-white data-[focused=true]:shadow-lg",
+                      isActiveGroup
+                        ? "bg-xf-red/25 text-white shadow-lg"
+                        : "bg-transparent text-xf-muted",
                     ].join(" ")}
                     onArrowPress={(direction) => handleGroupArrowPress(direction, index)}
                     onEnterPress={() => handleSelectGroup(group.name)}
                     onClick={() => handleSelectGroup(group.name)}
                   >
                     <span className="truncate">{group.name}</span>
-                    <span className="ml-3 rounded-lg bg-white/10 px-2 py-1 text-xs">
-                      {group.count}
-                    </span>
                   </FocusableButton>
                 );
               })
-            ) : (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                <p className="text-sm font-semibold text-xf-muted">
-                  {shouldShowInitialLiveTvLoading
-                    ? "Carregando lista autorizada de canais. Aguarde alguns instantes..."
-                    : "Nenhum grupo carregado."}
-                </p>
-
-                {shouldShowInitialLiveTvLoading ? (
-                  <div className="mt-4 space-y-2">
-                    {Array.from({ length: 5 }).map((_, placeholderIndex) => (
-                      <div
-                        key={`live-group-loading-${placeholderIndex}`}
-                        className="h-10 rounded-2xl border border-white/5 bg-white/[0.06]"
-                      />
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
+            ) : shouldShowInitialLiveTvLoading ? (
+              Array.from({ length: 5 }).map((_, placeholderIndex) => (
+                <div
+                  key={`live-group-loading-${placeholderIndex}`}
+                  className="h-10 rounded-2xl border border-white/5 bg-white/[0.06]"
+                />
+              ))
+            ) : null}
           </div>
         </aside>
 
-        <aside className="flex h-screen min-h-screen flex-col bg-black/70 p-3">
-          <p className="text-xs font-black uppercase tracking-[0.35em] text-xf-red">
+        <aside className="xf-live-tv-channels-column flex h-screen min-h-screen flex-col border-r border-white/10 bg-black/75 shadow-2xl">
+          <p className="xf-live-tv-column-title font-black uppercase tracking-[0.35em] text-xf-red">
             Canais
           </p>
 
-          {activeGroupName ? (
-            <h1 className="mt-3 truncate text-2xl font-black">
-              {activeGroupName}
-            </h1>
-          ) : null}
 
-          <div className="mt-5 min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 scroll-py-2">
+          <div className="xf-live-tv-channel-list mt-4 min-h-0 flex-1 overflow-y-auto scroll-py-2">
             {activeGroupChannels.length > 0 ? (
               activeGroupChannels.map((channel, index) => {
                 const channelKey = getChannelKey(channel);
@@ -779,30 +782,23 @@ export default function LiveTvPage() {
                   getChannelKey(selectedChannel) === channelKey;
                 const isPreviewingThisChannel =
                   previewChannel && getChannelKey(previewChannel) === channelKey;
-                const channelActionLabel = isPreviewingThisChannel
-                  ? previewStatus === "loading"
-                    ? "Carregando preview..."
-                    : previewStatus === "playing"
-                      ? "Preview ativo · OK para tela cheia"
-                      : previewStatus === "error"
-                        ? "Preview falhou · OK para tela cheia"
-                        : "OK para tela cheia"
-                  : channel.tvgName || "OK inicia preview";
 
                 return (
                   <FocusableButton
                     key={channelKey}
                     focusKey={`live-channel-${index}`}
                     className={[
-                      "flex w-full items-center gap-2 rounded-2xl border px-4 py-2 text-left text-sm font-black uppercase tracking-wide",
-                      isActive
-                        ? "border-xf-red bg-xf-red/15 text-white"
-                        : "border-white/5 bg-white/5 text-xf-muted hover:text-white",
+                      "xf-live-tv-channel-button group flex w-full items-center border text-left transition-[background-color,border-color,box-shadow,opacity] duration-150",
+                      isPreviewingThisChannel
+                        ? "border-xf-red/90 bg-xf-red/20 text-white shadow-lg ring-1 ring-xf-red/40"
+                        : isActive
+                          ? "border-white/25 bg-white/[0.08] text-white"
+                          : "border-transparent bg-transparent text-xf-muted hover:text-white",
                     ].join(" ")}
                     onArrowPress={(direction) => handleChannelArrowPress(direction, index)}
                     onEnterPress={() => handleSelectChannel(channel)}
                   >
-                    <div className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10">
+                    <div className="xf-live-tv-channel-logo flex shrink-0 items-center justify-center overflow-hidden border border-white/10 bg-white/10">
                       {channel.logo ? (
                         <img
                           src={channel.logo}
@@ -811,48 +807,39 @@ export default function LiveTvPage() {
                           loading="lazy"
                         />
                       ) : (
-                        <span className="text-xs font-black">TV</span>
+                        <span className="xf-live-tv-channel-logo-fallback font-bold">TV</span>
                       )}
                     </div>
 
-                    <div className="min-w-0">
-                      <span className="block truncate text-sm font-black uppercase tracking-wide leading-none">
+                    <div className="min-w-0 flex-1">
+                      <span className="xf-live-tv-channel-name block truncate font-semibold leading-snug normal-case tracking-normal">
                         {channel.name}
                       </span>
-                      <span className="mt-0.5 block truncate text-[0.65rem] uppercase tracking-wide leading-none text-xf-muted">
-                        {channelActionLabel}
-                      </span>
                     </div>
+
+                    {isPreviewingThisChannel ? (
+                      <span className="xf-live-tv-preview-dot relative flex shrink-0 items-center justify-center rounded-full bg-xf-red shadow-[0_0_0.7rem_rgba(229,9,20,0.9)]">
+                        <span className="xf-live-tv-preview-dot-ping absolute inline-flex animate-ping rounded-full bg-xf-red/70 [animation-duration:2.4s]" />
+                      </span>
+                    ) : null}
                   </FocusableButton>
                 );
               })
-            ) : (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                <p className="text-sm font-semibold text-xf-muted">
-                  {shouldShowInitialLiveTvLoading
-                    ? "Carregando canais..."
-                    : "Nenhum canal neste grupo."}
-                </p>
-
-                {shouldShowInitialLiveTvLoading ? (
-                  <div className="mt-4 space-y-2">
-                    {Array.from({ length: 8 }).map((_, placeholderIndex) => (
-                      <div
-                        key={`live-channel-loading-${placeholderIndex}`}
-                        className="h-12 rounded-2xl border border-white/5 bg-white/[0.06]"
-                      />
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
+            ) : shouldShowInitialLiveTvLoading ? (
+              Array.from({ length: 8 }).map((_, placeholderIndex) => (
+                <div
+                  key={`live-channel-loading-${placeholderIndex}`}
+                  className="h-12 rounded-2xl border border-white/5 bg-white/[0.06]"
+                />
+              ))
+            ) : null}
           </div>
         </aside>
 
-        <section className="xf-live-tv-preview flex min-h-[calc(100vh-2rem)] min-w-0 flex-col gap-4 md:pl-4">
+        <section className="xf-live-tv-preview flex min-h-screen min-w-0 flex-col">
           <div
             ref={previewContainerRef}
-            className="relative aspect-video overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl"
+            className="xf-live-tv-preview-frame relative aspect-video overflow-hidden bg-black shadow-2xl"
           >
             <video
               ref={previewVideoRef}
@@ -878,74 +865,45 @@ export default function LiveTvPage() {
                     Xandeflix Live
                   </p>
 
-                  <h2 className="mt-4 text-2xl font-black">
+                  <h2 className="mt-4 text-3xl font-black">
                     {currentPreviewChannel?.name ?? "Selecione um canal"}
                   </h2>
 
-                  <p className="mt-3 text-sm text-xf-muted">
-                    {previewPanelDescription}
-                  </p>
+                  {currentPreviewChannel ? (
+                    <>
+                      <p className="mt-3 text-sm text-xf-muted">
+                        {previewPanelDescription}
+                      </p>
 
-                  {previewStatus === "loading" ? (
-                    <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
-                      Preparando preview inline...
-                    </p>
-                  ) : null}
+                      {previewStatus === "loading" ? (
+                        <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
+                          Preparando preview inline...
+                        </p>
+                      ) : null}
 
-                  {previewStatus === "error" && previewError ? (
-                    <p className="mt-5 rounded-xl border border-yellow-500/40 bg-yellow-950/70 px-4 py-3 text-sm text-yellow-100">
-                      {previewError}
-                    </p>
-                  ) : null}
-
-                  {isLoading && progress ? (
-                    <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
-                      {getProgressLabel(progress.phase)} ·{" "}
-                      {progress.channelsParsed} canais processados
-                    </p>
-                  ) : null}
-
-                  {channelSourceMode === "cache" ? (
-                    <p className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-                      Canais autorizados carregados do cache da licença.
-                    </p>
-                  ) : null}
-
-                  {cacheFallbackMessage && channelSourceMode === "playlist" ? (
-                    <p className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
-                      {cacheFallbackMessage}
-                    </p>
-                  ) : null}
-
-                  {userFacingError ? (
-                    <p className="mt-5 rounded-xl border border-yellow-500/40 bg-yellow-950/70 px-4 py-3 text-sm text-yellow-100">
-                      {userFacingError}
-                    </p>
+                      {previewStatus === "error" && previewError ? (
+                        <p className="mt-5 rounded-xl border border-yellow-500/40 bg-yellow-950/70 px-4 py-3 text-sm text-yellow-100">
+                          {previewError}
+                        </p>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               </div>
             ) : null}
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-black/70 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.35em] text-white">
-              Canal ativo
-            </p>
+          {currentPreviewChannel ? (
+            <div className="xf-live-tv-preview-info bg-black/75 shadow-2xl">
+              <h3 className="xf-live-tv-preview-title rounded-2xl bg-xf-red/20 px-4 py-3 font-black text-white">
+                {currentPreviewChannel.name}
+              </h3>
 
-            <h3 className="mt-3 truncate text-xl font-black">
-              {currentPreviewChannel?.name ?? "Nenhum canal em preview"}
-            </h3>
-
-            <p className="mt-2 text-sm text-xf-muted">
-              {previewPanelDescription}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/70 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.35em] text-white">
-              Guia de programação
-            </p>
-          </div>
+              <p className="mt-3 text-sm leading-relaxed text-xf-muted">
+                Guia de programação indisponível no momento.
+              </p>
+            </div>
+          ) : null}
         </section>
       </section>
     </AppShell>
