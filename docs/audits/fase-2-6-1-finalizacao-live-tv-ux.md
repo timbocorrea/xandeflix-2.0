@@ -3,10 +3,10 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Branch: `feat/live-tv-ux-refinement`  
-HEAD local: `06947e9d897c35f8985a4fc37c3b918ef0d48bc9`  
-Base esperada: `main` pós-PR #79  
+Projeto: Xandeflix 2.0
+Branch: `feat/live-tv-ux-refinement`
+HEAD local: `06947e9d897c35f8985a4fc37c3b918ef0d48bc9`
+Base esperada: `main` pós-PR #79
 Objetivo: estabilizar os refinamentos visuais e funcionais da página **Canais ao Vivo**, preservando preview inline nativo Android, fullscreen, Voltar, D-pad e foco.
 
 Histórico consolidado informado para esta fase:
@@ -22,7 +22,7 @@ Histórico consolidado informado para esta fase:
 - Branch atual: `feat/live-tv-ux-refinement`
 - HEAD curto: `06947e9`
 - Relação `origin/main...HEAD`: `0	0`
-- `origin/main` é ancestral do HEAD: `0`  
+- `origin/main` é ancestral do HEAD: `0`
   - `0` indica base alinhada.
 - Live reload/server.url em `capacitor.config.ts`: OK — capacitor.config.ts sem server.url/live reload
 - Live reload/server.url em `android/app/src/main/assets/capacitor.config.json`: OK — sem server.url/local dev no capacitor.config.json gerado
@@ -216,8 +216,8 @@ Recomendação:
 
 ## 11. Conclusão executiva
 
-A Fase 2.6.1 estabilizou a página **Canais ao Vivo** com ajustes incrementais, mantendo a arquitetura consolidada das PRs #76 a #79.  
-O trabalho ficou concentrado em `LiveTvPage.tsx` e `globals.css`, sem alterar Player Universal, código nativo Android, Supabase, TMDB, importação IPTV ou Home/cache.  
+A Fase 2.6.1 estabilizou a página **Canais ao Vivo** com ajustes incrementais, mantendo a arquitetura consolidada das PRs #76 a #79.
+O trabalho ficou concentrado em `LiveTvPage.tsx` e `globals.css`, sem alterar Player Universal, código nativo Android, Supabase, TMDB, importação IPTV ou Home/cache.
 
 A página agora está visualmente mais limpa, com colunas reduzidas ao essencial, navegação de grupos corrigida, filtro de Live TV menos agressivo para preservar grupos live legítimos, preview vazio simplificado e painel inferior da prévia ajustado para exibir canal ativo e guia placeholder.
 
