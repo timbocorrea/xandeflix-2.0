@@ -12,6 +12,11 @@ import {
   createNativeAndroidPlayerAdapter,
   isNativeAndroidPlayerAvailable,
 } from "@/features/player/lib/nativeAndroidPlayerAdapter";
+import {
+  addNativeAndroidPlayerResumeListener,
+  startNativeAndroidInlinePreview,
+  stopNativeAndroidInlinePreview,
+} from "@/features/player/lib/nativeAndroidPlayerBridge";
 import { createNativeVideoAdapter } from "@/features/player/lib/nativeVideoAdapter";
 import { detectStreamKind } from "@/features/player/lib/detectStreamKind";
 import { useRouteInitialFocus } from "@/hooks/useRouteInitialFocus";
@@ -140,8 +145,10 @@ export default function LiveTvPage() {
   >(null);
   const hasRequestedSourceRef = useRef(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const previewAdapterRef = useRef<UniversalPlayerAdapter | null>(null);
   const previewRequestIdRef = useRef(0);
+  const nativeFullscreenReturnRef = useRef(false);
   const lastChannelActivationRef = useRef<{
     channelKey: string;
     timestamp: number;
@@ -370,6 +377,7 @@ export default function LiveTvPage() {
   );
 
   const destroyPreviewAdapter = useCallback(() => {
+    void stopNativeAndroidInlinePreview().catch(() => undefined);
     previewAdapterRef.current?.destroy();
     previewAdapterRef.current = null;
 
@@ -413,6 +421,8 @@ export default function LiveTvPage() {
           : "universal-player-route",
       });
 
+      await stopNativeAndroidInlinePreview().catch(() => undefined);
+
       if (isNativeAndroidPlayerAvailable(stream.kind)) {
         try {
           const adapter = createNativeAndroidPlayerAdapter(stream.kind);
@@ -422,10 +432,12 @@ export default function LiveTvPage() {
             title: channel.name,
           });
 
+          nativeFullscreenReturnRef.current = true;
           await adapter.play();
           adapter.destroy();
           return;
         } catch (fullscreenError) {
+          nativeFullscreenReturnRef.current = false;
           const message = summarizeUnknownError(fullscreenError);
           console.warn("[XANDEFLIX_LIVE_FULLSCREEN_NATIVE_ERROR]", {
             channel: channel.name,
@@ -473,14 +485,45 @@ export default function LiveTvPage() {
         const stream = detectStreamKind(channel.url);
 
         if (isNativeAndroidPlayerAvailable(stream.kind)) {
-          setPreviewStatus("error");
-          setPreviewError(
-            "Prévia inline indisponível para este tipo de canal no Fire Stick. Pressione OK novamente para abrir em tela cheia.",
-          );
-          console.info("[XANDEFLIX_LIVE_PREVIEW_NATIVE_ONLY]", {
+          const previewContainer = previewContainerRef.current;
+
+          if (!previewContainer) {
+            setPreviewStatus("error");
+            setPreviewError(
+              "Área de preview inline ainda não está disponível.",
+            );
+            return;
+          }
+
+          const previewRect = previewContainer.getBoundingClientRect();
+          const previewScale = window.devicePixelRatio || 1;
+          const previewLayout = {
+            x: Math.round(previewRect.left * previewScale),
+            y: Math.round(previewRect.top * previewScale),
+            width: Math.round(previewRect.width * previewScale),
+            height: Math.round(previewRect.height * previewScale),
+          };
+
+          await startNativeAndroidInlinePreview({
+            url: channel.url,
+            title: channel.name,
+            kind: stream.kind,
+            ...previewLayout,
+          });
+
+          if (requestId !== previewRequestIdRef.current) {
+            await stopNativeAndroidInlinePreview().catch(() => undefined);
+            return;
+          }
+
+          setPreviewStatus("playing");
+          setPreviewError(null);
+
+          console.info("[XANDEFLIX_LIVE_PREVIEW_NATIVE_INLINE_STARTED]", {
             channel: channel.name,
             stream: maskStreamUrl(channel.url),
             kind: stream.kind,
+            layout: previewLayout,
           });
           return;
         }
@@ -532,6 +575,70 @@ export default function LiveTvPage() {
     },
     [destroyPreviewAdapter, handlePreviewTelemetryEvent, selectChannel],
   );
+
+  useEffect(() => {
+    const restorePreviewAfterNativeFullscreen = () => {
+      if (!nativeFullscreenReturnRef.current || !previewChannel) {
+        return;
+      }
+
+      const stream = detectStreamKind(previewChannel.url);
+
+      if (!isNativeAndroidPlayerAvailable(stream.kind)) {
+        nativeFullscreenReturnRef.current = false;
+        return;
+      }
+
+      nativeFullscreenReturnRef.current = false;
+
+      window.setTimeout(() => {
+        console.info("[XANDEFLIX_LIVE_PREVIEW_RESTORE_AFTER_FULLSCREEN]", {
+          channel: previewChannel.name,
+          stream: maskStreamUrl(previewChannel.url),
+          kind: stream.kind,
+        });
+
+        void startChannelPreview(previewChannel);
+      }, 250);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        restorePreviewAfterNativeFullscreen();
+      }
+    };
+
+    window.addEventListener("focus", restorePreviewAfterNativeFullscreen);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    const appListenerPromise = App.addListener(
+      "resume",
+      restorePreviewAfterNativeFullscreen,
+    );
+
+    const nativeResumeListenerPromise = addNativeAndroidPlayerResumeListener(
+      (event) => {
+        console.info("[XANDEFLIX_LIVE_NATIVE_RESUME_EVENT]", event);
+        restorePreviewAfterNativeFullscreen();
+      },
+    );
+
+    return () => {
+      window.removeEventListener(
+        "focus",
+        restorePreviewAfterNativeFullscreen,
+      );
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+
+      void appListenerPromise.then((listener) => {
+        listener.remove();
+      });
+
+      void nativeResumeListenerPromise.then((listener) => {
+        listener.remove();
+      });
+    };
+  }, [previewChannel, startChannelPreview]);
 
   const handleSelectChannel = useCallback(
     (channel: IptvChannel) => {
@@ -743,7 +850,10 @@ export default function LiveTvPage() {
         </aside>
 
         <section className="xf-live-tv-preview flex min-h-[calc(100vh-2rem)] min-w-0 flex-col gap-4 md:pl-4">
-          <div className="relative aspect-video overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl">
+          <div
+            ref={previewContainerRef}
+            className="relative aspect-video overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl"
+          >
             <video
               ref={previewVideoRef}
               className="absolute inset-0 h-full w-full bg-black object-contain"
