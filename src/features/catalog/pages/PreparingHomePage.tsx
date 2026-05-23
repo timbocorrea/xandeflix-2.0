@@ -6,9 +6,12 @@ import {
   clearStoredLicenseActivation,
   getStoredLicenseActivation,
 } from '@/features/licensing/lib/licenseActivationStorage';
-import { prepareHomePlaylist } from '../services/prepareHomePlaylist.service';
+import {
+  runAppBootstrap,
+  type AppBootstrapProgress,
+} from '@/features/bootstrap/services/appBootstrap.service';
 
-const MIN_PREPARING_HOME_DELAY_MS = 1200;
+const MIN_PREPARING_HOME_DELAY_MS = 900;
 
 type PreparingStep = 'loading' | 'ready' | 'error';
 
@@ -23,7 +26,10 @@ export function PreparingHomePage() {
   } = usePlaylistRuntime();
 
   const [step, setStep] = useState<PreparingStep>('loading');
+  const [bootstrapProgress, setBootstrapProgress] =
+    useState<AppBootstrapProgress | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [bootstrapWarning, setBootstrapWarning] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const hasStartedPreparingRef = useRef(false);
 
@@ -39,10 +45,12 @@ export function PreparingHomePage() {
     hasStartedPreparingRef.current = true;
     setStep('loading');
     setLocalError(null);
+    setBootstrapWarning(null);
+    setBootstrapProgress(null);
 
     const storedActivation = getStoredLicenseActivation();
 
-    if (!storedActivation?.licenseCode) {
+    if (!storedActivation?.licenseCode || !storedActivation.deviceIdentifier) {
       setLocalError('Este aparelho precisa ser ativado antes de carregar a Home.');
       setStep('error');
 
@@ -55,33 +63,51 @@ export function PreparingHomePage() {
       };
     }
 
-    void prepareHomePlaylist({
-      currentChannelsCount: channels.length,
-      currentStatus: status,
-      loadFromSource,
-    }).catch((prepareError) => {
-      if (!isActive) {
-        return;
-      }
+    void runAppBootstrap({
+      licenseCode: storedActivation.licenseCode,
+      deviceIdentifier: storedActivation.deviceIdentifier,
+      runtime: {
+        currentChannelsCount: channels.length,
+        currentStatus: status,
+        loadFromSource,
+      },
+      onProgress: (nextProgress) => {
+        if (!isActive) {
+          return;
+        }
 
-      setLocalError(
-        prepareError instanceof Error
-          ? prepareError.message
-          : 'Não foi possível carregar a lista inicial.',
-      );
-      setStep('error');
-    });
+        setBootstrapProgress(nextProgress);
+
+        if (nextProgress.warning) {
+          setBootstrapWarning(nextProgress.warning);
+        }
+      },
+    })
+      .then((result) => {
+        if (!isActive) {
+          return;
+        }
+
+        setBootstrapWarning(result.warnings[0] ?? null);
+        setStep('ready');
+      })
+      .catch((prepareError) => {
+        if (!isActive) {
+          return;
+        }
+
+        setLocalError(
+          prepareError instanceof Error
+            ? prepareError.message
+            : 'Não foi possível preparar os dados iniciais do app.',
+        );
+        setStep('error');
+      });
 
     return () => {
       isActive = false;
     };
-  }, [channels.length, loadFromSource, retryKey, status]);
-
-  useEffect(() => {
-    if (status === 'ready' && channels.length > 0) {
-      setStep('ready');
-    }
-  }, [channels.length, status]);
+  }, [channels.length, loadFromSource, navigate, retryKey, status]);
 
   useEffect(() => {
     if (step !== 'ready') {
@@ -98,6 +124,8 @@ export function PreparingHomePage() {
   function handleRetry() {
     hasStartedPreparingRef.current = false;
     setLocalError(null);
+    setBootstrapWarning(null);
+    setBootstrapProgress(null);
     setStep('loading');
     setRetryKey((current) => current + 1);
   }
@@ -108,24 +136,50 @@ export function PreparingHomePage() {
   }
 
   const progressLabel = useMemo(() => {
-    if (progress?.phase === 'downloading') {
-      return 'Baixando lista autorizada...';
-    }
-
-    if (progress?.phase === 'parsing') {
-      return `Organizando canais e catálogo (${progress.channelsParsed} itens processados)...`;
-    }
-
-    if (progress?.phase === 'finalizing') {
-      return 'Finalizando preparação da Home...';
-    }
-
     if (step === 'error') {
       return localError ?? error ?? 'Falha ao preparar a Home.';
     }
 
-    return 'Carregando lista inicial...';
-  }, [error, localError, progress, step]);
+    if (bootstrapProgress?.stepId === 'playlist') {
+      if (progress?.phase === 'downloading') {
+        return 'Baixando lista autorizada...';
+      }
+
+      if (progress?.phase === 'parsing') {
+        return `Organizando canais e catálogo (${progress.channelsParsed} itens processados)...`;
+      }
+
+      if (progress?.phase === 'finalizing') {
+        return 'Finalizando lista autorizada...';
+      }
+    }
+
+    if (step === 'ready') {
+      return 'Tudo pronto. Abrindo Xandeflix...';
+    }
+
+    return bootstrapProgress?.label ?? 'Iniciando preparação...';
+  }, [bootstrapProgress, error, localError, progress, step]);
+
+  const progressPercent = useMemo(() => {
+    if (step === 'ready') {
+      return 100;
+    }
+
+    if (!bootstrapProgress) {
+      return 12;
+    }
+
+    return Math.max(
+      12,
+      Math.min(
+        100,
+        Math.round(
+          (bootstrapProgress.completedSteps / bootstrapProgress.totalSteps) * 100,
+        ),
+      ),
+    );
+  }, [bootstrapProgress, step]);
 
   return (
     <main className="xf-app flex min-h-screen items-center justify-center bg-black px-8 text-white">
@@ -135,47 +189,57 @@ export function PreparingHomePage() {
         </p>
 
         <h1 className="mt-4 text-3xl font-black md:text-5xl">
-          Preparando sua Home
+          Preparando seu app
         </h1>
 
         <p className="mt-4 text-base font-semibold leading-relaxed text-xf-muted">
-          Estamos carregando a lista completa antes de abrir a tela principal
-          para evitar travamentos durante a navegação.
+          Estamos carregando somente os dados críticos para abrir Home, Canais
+          ao Vivo, Filmes e Séries sem tela vazia inicial.
         </p>
 
         <div className="mx-auto mt-8 h-2 w-full max-w-sm overflow-hidden rounded-full bg-white/10">
-          <div className="h-full w-1/2 animate-pulse rounded-full bg-xf-red" />
+          <div
+            className="h-full rounded-full bg-xf-red transition-all duration-500"
+            style={{ width: `${progressPercent}%` }}
+          />
         </div>
 
         <p className="mt-6 text-sm font-bold uppercase tracking-[0.25em] text-white/60">
           {progressLabel}
         </p>
 
+        {bootstrapWarning && step !== 'error' && (
+          <p className="mt-4 rounded-xl bg-yellow-950/40 px-4 py-3 text-xs font-semibold text-yellow-100">
+            {bootstrapWarning}
+          </p>
+        )}
+
         {step === 'error' && (
-            <div className="mt-6 flex flex-col gap-4">
-              <p className="rounded-xl bg-red-950/70 px-4 py-3 text-sm font-semibold text-red-100">
-                Verifique se este aparelho está autorizado, se a licença possui uma lista IPTV ativa e tente novamente.
-              </p>
+          <div className="mt-6 flex flex-col gap-4">
+            <p className="rounded-xl bg-red-950/70 px-4 py-3 text-sm font-semibold text-red-100">
+              Verifique se este aparelho está autorizado, se a licença possui
+              uma lista IPTV ativa e tente novamente.
+            </p>
 
-              <div className="flex flex-col justify-center gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  className="rounded-xl bg-xf-red px-5 py-3 text-sm font-black text-white transition hover:bg-red-700"
-                >
-                  Tentar novamente
-                </button>
+            <div className="flex flex-col justify-center gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="rounded-xl bg-xf-red px-5 py-3 text-sm font-black text-white transition hover:bg-red-700"
+              >
+                Tentar novamente
+              </button>
 
-                <button
-                  type="button"
-                  onClick={handleChangeLicense}
-                  className="rounded-xl bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
-                >
-                  Trocar licença
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleChangeLicense}
+                className="rounded-xl bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
+              >
+                Trocar licença
+              </button>
             </div>
-          )}
+          </div>
+        )}
       </section>
     </main>
   );

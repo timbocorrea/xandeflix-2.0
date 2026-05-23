@@ -32,6 +32,11 @@ import {
 } from "@/features/playlists/services/authorizedIptvSource.service";
 import { listAuthorizedLicenseChannels } from "@/features/playlists/services/authorizedLicenseChannels.service";
 import { usePlaylistRuntime } from "@/features/playlists/providers/PlaylistRuntimeProvider";
+import { getCachedAppBootstrapResult } from "@/features/bootstrap/services/appBootstrap.service";
+import {
+  getCachedLiveTvCriticalChannels,
+  storeCachedLiveTvCriticalChannels,
+} from "../services/liveTvCriticalCache.service";
 import type { IptvChannel } from "@/features/playlists/types/playlist";
 import type {
   PlayerTelemetryEvent,
@@ -42,6 +47,63 @@ const MAX_VISIBLE_CHANNELS_PER_GROUP = 160;
 let lastLiveTvGroupVerticalNavigationAt = 0;
 
 type ChannelSourceMode = "cache" | "playlist" | null;
+
+function normalizeLiveGroupTitle(groupTitle?: string | null) {
+  return groupTitle
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase() ?? "";
+}
+
+function isVodGroupTitleInLivePage(groupTitle?: string | null) {
+  const normalizedGroupTitle = normalizeLiveGroupTitle(groupTitle);
+
+  if (!normalizedGroupTitle) {
+    return false;
+  }
+
+  if (
+    normalizedGroupTitle === "filmes e series" ||
+    normalizedGroupTitle === "filmes e series 24h"
+  ) {
+    return false;
+  }
+
+  return (
+    /^filmes(\s*\||\s|$)/.test(normalizedGroupTitle) ||
+    /^series(\s*\||\s|$)/.test(normalizedGroupTitle)
+  );
+}
+
+function isLiveTvPageChannel(channel: IptvChannel) {
+  if (isVodGroupTitleInLivePage(channel.groupTitle)) {
+    return false;
+  }
+
+  if (channel.contentKind) {
+    return channel.contentKind === "live";
+  }
+
+  return isLiveChannel(channel);
+}
+
+function readInitialLiveTvCriticalChannels() {
+  const storedActivation = getStoredLicenseActivation();
+
+  if (!storedActivation) {
+    return [];
+  }
+
+  return (
+    getCachedLiveTvCriticalChannels({
+      licenseCode: storedActivation.licenseCode,
+      deviceIdentifier: storedActivation.deviceIdentifier,
+    })?.filter(isLiveTvPageChannel) ?? []
+  );
+}
+
+
 type PreviewStatus = "idle" | "loading" | "playing" | "error";
 
 type ChannelGroup = {
@@ -132,6 +194,9 @@ export default function LiveTvPage() {
   );
   const [, setSourceLoadError] = useState<string | null>(null);
   const [, setChannelSourceMode] = useState<ChannelSourceMode>(null);
+  const [instantLiveChannels, setInstantLiveChannels] = useState<IptvChannel[]>(
+    () => readInitialLiveTvCriticalChannels(),
+  );
   const [, setCacheFallbackMessage] = useState<string | null>(null);
   const hasRequestedSourceRef = useRef(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -189,6 +254,119 @@ export default function LiveTvPage() {
     let isMounted = true;
 
     if (
+      !hasRequestedSourceRef.current &&
+      status !== "loading" &&
+      status !== "ready" &&
+      channels.length === 0
+    ) {
+      const storedActivation = getStoredLicenseActivation();
+      const cachedLiveChannels = getCachedLiveTvCriticalChannels({
+        licenseCode: storedActivation?.licenseCode,
+        deviceIdentifier: storedActivation?.deviceIdentifier,
+      })?.filter(isLiveTvPageChannel);
+
+      if (storedActivation && cachedLiveChannels?.length) {
+        hasRequestedSourceRef.current = true;
+        setSourceLoadError(null);
+        setChannelSourceMode("cache");
+        setCacheFallbackMessage(null);
+        setInstantLiveChannels(cachedLiveChannels);
+
+        loadFromChannels({
+          source: {
+            url: "live-tv-critical-cache:" + storedActivation.licenseCode,
+            name:
+              "Canais ao vivo preparados da licença " +
+              storedActivation.licenseCode,
+          },
+          channels: cachedLiveChannels,
+        });
+
+        void (async () => {
+          try {
+            const fullChannels = await listAuthorizedLicenseChannels({
+              licenseCode: storedActivation.licenseCode,
+              deviceIdentifier: storedActivation.deviceIdentifier,
+              pageSize: 500,
+              maxPages: 20,
+            });
+
+            const fullLiveChannels = fullChannels.filter(isLiveTvPageChannel);
+
+            if (
+              !isMounted ||
+              fullLiveChannels.length <= cachedLiveChannels.length
+            ) {
+              return;
+            }
+
+            storeCachedLiveTvCriticalChannels({
+              licenseCode: storedActivation.licenseCode,
+              deviceIdentifier: storedActivation.deviceIdentifier,
+              channels: fullLiveChannels,
+            });
+            setInstantLiveChannels(fullLiveChannels);
+
+            loadFromChannels({
+              source: {
+                url: "license-cache-background:" + storedActivation.licenseCode,
+                name:
+                  "Canais autorizados completos da licença " +
+                  storedActivation.licenseCode,
+              },
+              channels: fullLiveChannels,
+            });
+          } catch (backgroundLoadError) {
+            console.info("[XANDEFLIX_LIVE_BACKGROUND_EXPAND_FALLBACK]", {
+              reason:
+                backgroundLoadError instanceof Error
+                  ? backgroundLoadError.message
+                  : "Erro desconhecido ao expandir canais ao vivo.",
+            });
+          }
+        })();
+
+        return () => {
+          isMounted = false;
+        };
+      }
+
+      const cachedBootstrap = getCachedAppBootstrapResult();
+      const isSameActivation =
+        cachedBootstrap &&
+        storedActivation?.licenseCode?.trim().toUpperCase() ===
+          cachedBootstrap.licenseCode.trim().toUpperCase() &&
+        storedActivation.deviceIdentifier === cachedBootstrap.deviceIdentifier;
+
+      if (isSameActivation && cachedBootstrap.livePreviewChannels.length > 0) {
+        hasRequestedSourceRef.current = true;
+        setSourceLoadError(null);
+        setChannelSourceMode("cache");
+        setCacheFallbackMessage(null);
+
+        storeCachedLiveTvCriticalChannels({
+          licenseCode: storedActivation?.licenseCode,
+          deviceIdentifier: storedActivation?.deviceIdentifier,
+          channels: cachedBootstrap.livePreviewChannels,
+        });
+
+        loadFromChannels({
+          source: {
+            url: "bootstrap-cache:" + cachedBootstrap.licenseCode,
+            name:
+              "Canais críticos preparados da licença " +
+              cachedBootstrap.licenseCode,
+          },
+          channels: cachedBootstrap.livePreviewChannels,
+        });
+
+        return () => {
+          isMounted = false;
+        };
+      }
+    }
+
+    if (
       hasRequestedSourceRef.current ||
       status === "loading" ||
       status === "ready" ||
@@ -225,13 +403,24 @@ export default function LiveTvPage() {
             const cachedChannels = await listAuthorizedLicenseChannels({
               licenseCode,
               deviceIdentifier,
+              pageSize: 500,
+              maxPages: 20,
             });
 
             if (!isMounted) {
               return;
             }
 
-            if (cachedChannels.length > 0) {
+            const liveCachedChannels = cachedChannels.filter(isLiveTvPageChannel);
+
+            if (liveCachedChannels.length > 0) {
+              storeCachedLiveTvCriticalChannels({
+                licenseCode,
+                deviceIdentifier,
+                channels: liveCachedChannels,
+              });
+              setInstantLiveChannels(liveCachedChannels);
+
               loadFromChannels({
                 source: {
                   url: "license-cache:" + licenseId,
@@ -239,7 +428,7 @@ export default function LiveTvPage() {
                     "Canais autorizados da licença " +
                     (authorizedSource.license?.code ?? ""),
                 },
-                channels: cachedChannels,
+                channels: liveCachedChannels,
               });
               setChannelSourceMode("cache");
               return;
@@ -274,8 +463,8 @@ export default function LiveTvPage() {
         if (isMounted) {
           setSourceLoadError(
             loadError instanceof Error
-            ? loadError.message
-            : "Não foi possível carregar os canais ao vivo.",
+              ? loadError.message
+              : "Não foi possível carregar os canais ao vivo.",
           );
         }
       }
@@ -287,22 +476,14 @@ export default function LiveTvPage() {
   }, [channels.length, loadFromChannels, loadFromSource, status]);
 
   const liveTvChannels = useMemo(() => {
-    return channels.filter((channel) => {
-      if (channel.contentKind === "live" || isLiveChannel(channel)) {
-        return true;
-      }
+    const runtimeLiveChannels = channels.filter(isLiveTvPageChannel);
 
-      if (channel.contentKind === "movie" || channel.contentKind === "series") {
-        return false;
-      }
+    if (runtimeLiveChannels.length > 0) {
+      return runtimeLiveChannels;
+    }
 
-      if (channel.tmdbMediaType === "movie" || channel.tmdbMediaType === "tv") {
-        return false;
-      }
-
-      return false;
-    });
-  }, [channels]);
+    return instantLiveChannels;
+  }, [channels, instantLiveChannels]);
 
   const groups = useMemo<ChannelGroup[]>(() => {
     const groupMap = new Map<string, number>();
@@ -703,7 +884,7 @@ export default function LiveTvPage() {
     };
   }, [destroyPreviewAdapter]);
 
-  const isLoading = status === "loading";
+  const isLoading = status === "loading" && liveTvChannels.length === 0;
   const shouldShowInitialLiveTvLoading =
     isLoading ||
     (status !== "error" && groups.length === 0 && activeGroupChannels.length === 0);

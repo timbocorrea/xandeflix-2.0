@@ -18,6 +18,7 @@ import {
 } from '../../../lib/spatial/categoryFocusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
+import { getCachedAppBootstrapResult } from '@/features/bootstrap/services/appBootstrap.service';
 
 import { catalogSections } from '../data/catalogSections';
 import {
@@ -34,6 +35,13 @@ const SECTION_LOADING_CARD_COUNT = 4;
 
 type CatalogPageItem = (typeof catalogSections)[number]['items'][number] & {
   streamUrl?: string;
+  kind?: 'movie' | 'series' | 'unknown';
+  groupTitle?: string;
+  tmdbId?: string;
+  tmdbTitle?: string;
+  seriesKey?: string;
+  episodeCount?: number;
+  isSeriesCollection?: boolean;
 };
 
 type CatalogPageSection = Omit<(typeof catalogSections)[number], 'items'> & {
@@ -66,20 +74,57 @@ function mapHomeVodSectionsToCatalogSections(
     eyebrow: section.eyebrow,
     description: section.description,
     showSeeAll: section.id === 'home-vod-launches',
-    items: section.items.map((item) => ({
+    items: section.items.filter((item) => isTrustedHomePosterUrl(item.posterUrl)).map((item) => ({
       id: item.id,
+      kind: item.kind,
       title: item.title,
       subtitle: item.subtitle,
       posterUrl: item.posterUrl,
       backdropUrl: item.backdropUrl,
       overview: item.overview,
       streamUrl: item.streamUrl,
+      groupTitle: item.groupTitle,
+      tmdbId: item.tmdbId,
+      tmdbTitle: item.tmdbTitle,
+      seriesKey: item.seriesKey,
+      episodeCount: item.episodeCount,
+      isSeriesCollection: item.isSeriesCollection,
     })),
   }));
 }
 
 function getHomeVodLimitPerSection(isTv: boolean) {
-  return isTv ? 12 : 20;
+  return isTv ? 15 : 20;
+}
+
+function isTrustedHomePosterUrl(value?: string | null) {
+  return Boolean(value?.startsWith('https://image.tmdb.org/t/p/'));
+}
+
+function normalizeHomeSectionTitle(value?: string | null) {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function isRenderableVodHomeSection(section: HomeVodSection) {
+  const normalizedTitle = normalizeHomeSectionTitle(section.title);
+
+  if (
+    normalizedTitle.startsWith('canais') ||
+    normalizedTitle.startsWith('canal') ||
+    normalizedTitle.includes('ao vivo')
+  ) {
+    return false;
+  }
+
+  return section.items.some((item) => isTrustedHomePosterUrl(item.posterUrl));
+}
+
+function filterRenderableVodHomeSections(sections?: HomeVodSection[] | null) {
+  return sections?.filter(isRenderableVodHomeSection) ?? [];
 }
 
 function createHomeVodLoadInput(
@@ -104,9 +149,22 @@ function createInitialHomeCatalogState(isTv: boolean) {
   const limitPerSection = getHomeVodLimitPerSection(isTv);
   const loadInput = createHomeVodLoadInput(limitPerSection);
   const cachedSections = loadInput ? getCachedHomeVodSections(loadInput) : null;
-  const sections = cachedSections
-    ? mapHomeVodSectionsToCatalogSections(cachedSections)
-    : null;
+  const cachedBootstrap = loadInput ? getCachedAppBootstrapResult() : null;
+  const bootstrapSections =
+    cachedBootstrap &&
+    cachedBootstrap.licenseCode.trim().toUpperCase() ===
+      loadInput?.licenseCode.trim().toUpperCase() &&
+    cachedBootstrap.deviceIdentifier === loadInput.deviceIdentifier
+      ? cachedBootstrap.homeSections
+      : null;
+  const safeCachedSections = filterRenderableVodHomeSections(cachedSections);
+  const safeBootstrapSections = filterRenderableVodHomeSections(bootstrapSections);
+
+  const sections = safeCachedSections.length
+    ? mapHomeVodSectionsToCatalogSections(safeCachedSections)
+    : safeBootstrapSections.length
+      ? mapHomeVodSectionsToCatalogSections(safeBootstrapSections)
+      : null;
 
   return {
     limitPerSection,
@@ -126,7 +184,9 @@ export function CatalogPage() {
   const [realCatalogSections, setRealCatalogSections] = useState<
     CatalogPageSection[] | null
   >(initialHomeCatalogState.sections);
-  const [isRealCatalogLoading, setIsRealCatalogLoading] = useState(true);
+  const [isRealCatalogLoading, setIsRealCatalogLoading] = useState(
+    !initialHomeCatalogState.sections?.length,
+  );
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const homeVodLimitPerSection = getHomeVodLimitPerSection(isTv);
   const wasInitialCatalogHydratedFromCache =
@@ -169,8 +229,10 @@ export function CatalogPage() {
           return;
         }
 
+        const safeHomeVodSections =
+          filterRenderableVodHomeSections(homeVodSections);
         const nextSections =
-          mapHomeVodSectionsToCatalogSections(homeVodSections);
+          mapHomeVodSectionsToCatalogSections(safeHomeVodSections);
 
         setRealCatalogSections(nextSections.length > 0 ? nextSections : null);
       } catch (error) {
@@ -231,7 +293,7 @@ export function CatalogPage() {
 
   const shouldShowInitialCatalogLoading =
     isRealCatalogLoading &&
-    !wasInitialCatalogHydratedFromCache &&
+    !resolvedCatalogSections.length &&
     !realCatalogSections?.length;
   const isCompactFireStickHero = useMemo(
     () => isTv && isFireStickUserAgent(),
@@ -468,12 +530,34 @@ export function CatalogPage() {
                         index={itemIndex}
                         focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
                         onEnterPress={() => {
-                          spatialDebug('catalog-grid', 'Abrir item:', item.title);
+                          const catalogItem = item as CatalogPageItem;
+
+                          if (
+                            catalogItem.isSeriesCollection ||
+                            catalogItem.kind === 'series' ||
+                            catalogItem.seriesKey
+                          ) {
+                            const params = new URLSearchParams({
+                              title: catalogItem.title,
+                              groupTitle: catalogItem.groupTitle ?? section.title,
+                            });
+
+                            if (catalogItem.tmdbId) {
+                              params.set('tmdbId', catalogItem.tmdbId);
+                            }
+
+                            if (catalogItem.tmdbTitle) {
+                              params.set('tmdbTitle', catalogItem.tmdbTitle);
+                            }
+
+                            navigate(`/category/series-detail?${params.toString()}`);
+                            return;
+                          }
 
                           const itemStreamUrl =
-                            'streamUrl' in item && typeof item.streamUrl === 'string'
-                              ? item.streamUrl
-                              : '';
+                            'streamUrl' in catalogItem && typeof catalogItem.streamUrl === 'string'
+                              ? catalogItem.streamUrl
+                              : undefined;
 
                           if (!itemStreamUrl) {
                             return;
@@ -481,7 +565,7 @@ export function CatalogPage() {
 
                           const params = new URLSearchParams({
                             src: itemStreamUrl,
-                            title: item.title,
+                            title: catalogItem.title,
                           });
 
                           navigate(`/player?${params.toString()}`);
