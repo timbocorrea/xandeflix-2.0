@@ -25,6 +25,7 @@ import {
   heartbeatPlaybackSession,
   endPlaybackSession,
 } from '@/features/licensing/services/playbackSession.service';
+import { markEpisodePlaybackStarted } from '@/features/catalog/services/episodePlaybackProgress.service';
 import type {
   PlayerError,
   PlayerTelemetryEvent,
@@ -145,6 +146,12 @@ export default function UniversalPlayerPage() {
 
   const streamUrl = searchParams.get('src') ?? '';
   const title = searchParams.get('title') ?? 'Conteúdo Xandeflix';
+  const episodeId = searchParams.get('episodeId');
+  const episodeIndex = searchParams.get('episodeIndex');
+  const seriesTitle = searchParams.get('seriesTitle');
+  const seriesGroupTitle = searchParams.get('seriesGroupTitle');
+  const seriesTmdbId = searchParams.get('seriesTmdbId');
+  const seriesTmdbTitle = searchParams.get('seriesTmdbTitle');
   const maskedStreamUrl = useMemo(() => maskStreamUrl(streamUrl), [streamUrl]);
 
   const preparation = useMemo(() => {
@@ -312,6 +319,17 @@ export default function UniversalPlayerPage() {
 
       playbackSessionIdRef.current = playbackSession.id;
 
+      markEpisodePlaybackStarted({
+        episodeId,
+        streamUrl,
+        title,
+        seriesTitle,
+        seriesGroupTitle,
+        seriesTmdbId,
+        seriesTmdbTitle,
+        episodeIndex: episodeIndex ? Number(episodeIndex) : null,
+      });
+
       pushPlayerEvent(
         'PLAYBACK_SESSION_STARTED',
         'info',
@@ -330,7 +348,18 @@ export default function UniversalPlayerPage() {
 
         void heartbeatPlaybackSession(playbackSessionIdRef.current);
       }, 60000);
-    }, [maskedStreamUrl, pushPlayerEvent, streamUrl, title]);
+    }, [
+      episodeId,
+      episodeIndex,
+      maskedStreamUrl,
+      pushPlayerEvent,
+      seriesGroupTitle,
+      seriesTitle,
+      seriesTmdbId,
+      seriesTmdbTitle,
+      streamUrl,
+      title,
+    ]);
 
     useEffect(() => {
       adapterRef.current?.destroy();
