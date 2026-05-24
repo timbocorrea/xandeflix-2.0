@@ -139,6 +139,101 @@ function resolveVisibleCount(totalItems: number) {
   return Math.min(totalItems, INITIAL_VISIBLE_ITEMS);
 }
 
+function getSeriesCollectionKey(item: HomeVodItem) {
+  return (
+    item.seriesKey ||
+    item.tmdbId ||
+    item.tmdbTitle ||
+    item.groupTitle ||
+    item.title
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function dedupeSeriesCollections(items: HomeVodItem[]) {
+  const byCollection = new Map<string, HomeVodItem>();
+
+  for (const item of items) {
+    const key = getSeriesCollectionKey(item);
+
+    if (!key || byCollection.has(key)) {
+      continue;
+    }
+
+    byCollection.set(key, {
+      ...item,
+      kind: 'series',
+      isSeriesCollection: true,
+    });
+  }
+
+  return Array.from(byCollection.values());
+}
+
+function getSeriesHeroItem(items: HomeVodItem[]) {
+  return (
+    items.find((item) => item.backdropUrl || item.posterUrl) ??
+    items[0] ??
+    null
+  );
+}
+
+function SeriesCategoryHero({
+  item,
+  totalItems,
+}: {
+  item: HomeVodItem | null;
+  totalItems: number;
+}) {
+  const backgroundUrl = item?.backdropUrl || item?.posterUrl || null;
+
+  return (
+    <section className="relative mb-7 min-h-[21rem] overflow-hidden rounded-[1rem] border border-white/10 bg-zinc-950 px-7 py-7 shadow-2xl">
+      {backgroundUrl ? (
+        <img
+          src={backgroundUrl}
+          alt={item?.title ?? 'Séries'}
+          className="absolute inset-0 size-full object-cover opacity-35"
+        />
+      ) : null}
+
+      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/85 to-black/25" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/25 to-transparent" />
+
+      <div className="relative z-10 flex min-h-[17rem] max-w-3xl flex-col justify-end">
+        <p className="mb-2 text-xs font-black uppercase tracking-[0.34em] text-xf-red">
+          Catálogo
+        </p>
+        <h1 className="text-5xl font-black leading-none text-white drop-shadow-lg md:text-6xl">
+          Séries
+        </h1>
+        <p className="mt-4 max-w-2xl text-lg font-semibold leading-snug text-zinc-200">
+          Séries, novelas, doramas e temporadas liberadas para esta licença.
+        </p>
+
+        {item ? (
+          <div className="mt-5 flex flex-wrap items-center gap-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
+            <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">
+              Destaque
+            </span>
+            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1">
+              {item.title}
+            </span>
+            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1">
+              {totalItems} títulos
+            </span>
+          </div>
+        ) : (
+          <div className="mt-5 inline-flex w-fit rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
+            Carregando séries...
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function formatHeroRating(value?: string) {
   if (!value) {
     return null;
@@ -506,9 +601,14 @@ export function CatalogCategoryPage({
 
         if (cachedItems?.length) {
           const filteredCachedItems = filterSeriesEpisodes(cachedItems);
-          setItems(filteredCachedItems);
-          setVisibleItemCount(resolveVisibleCount(filteredCachedItems.length));
-          setIsLoading(filteredCachedItems.length === 0);
+          const nextCachedItems =
+            category.slug === 'series'
+              ? dedupeSeriesCollections(filteredCachedItems)
+              : filteredCachedItems;
+
+          setItems(nextCachedItems);
+          setVisibleItemCount(resolveVisibleCount(nextCachedItems.length));
+          setIsLoading(nextCachedItems.length === 0);
         } else if (items.length === 0) {
           setItems([]);
           setVisibleItemCount(0);
@@ -527,6 +627,11 @@ export function CatalogCategoryPage({
 
         const filteredNextItems = filterSeriesEpisodes(nextItems);
 
+        const nextCategoryItems =
+          category.slug === 'series'
+            ? dedupeSeriesCollections(filteredNextItems)
+            : filteredNextItems;
+
         if (isSeriesDetailPage) {
           storeCachedSeriesEpisodes(
             {
@@ -540,8 +645,20 @@ export function CatalogCategoryPage({
           );
         }
 
-        setItems(filteredNextItems);
-        setVisibleItemCount(resolveVisibleCount(filteredNextItems.length));
+        setItems((currentItems) => {
+          if (nextCategoryItems.length === 0 && currentItems.length > 0) {
+            return currentItems;
+          }
+
+          return nextCategoryItems;
+        });
+        setVisibleItemCount((currentCount) => {
+          if (nextCategoryItems.length === 0 && items.length > 0) {
+            return currentCount;
+          }
+
+          return resolveVisibleCount(nextCategoryItems.length);
+        });
       } catch (error) {
         if (isMounted) {
           setErrorMessage(
@@ -586,6 +703,9 @@ export function CatalogCategoryPage({
   const episodeWindowItems = isSeriesDetailPage
     ? items.slice(episodeWindowStart, episodeWindowStart + EPISODE_WINDOW_SIZE)
     : visibleItems;
+
+  const isSeriesCategoryPage = !isSeriesDetailPage && category?.slug === 'series';
+  const seriesHeroItem = isSeriesCategoryPage ? getSeriesHeroItem(items) : null;
 
 
 
@@ -1080,18 +1200,27 @@ export function CatalogCategoryPage({
             </div>
           </SeriesDetailHeroFrame>
         ) : (
-          <header className="mb-6">
-            <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
-              Catalogo
-            </p>
-            <h1 className="mt-2 text-[1.7rem] font-black tracking-[-0.03em] text-white md:text-[2.35rem]">
-              {category?.title ?? 'Categoria'}
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm font-semibold text-zinc-300">
-              {category?.description ??
-                'Categoria indisponivel neste momento.'}
-            </p>
-          </header>
+          <>
+            {isSeriesCategoryPage ? (
+              <SeriesCategoryHero
+                item={seriesHeroItem}
+                totalItems={items.length}
+              />
+            ) : (
+              <header className="mb-6">
+                <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
+                  Catalogo
+                </p>
+                <h1 className="mt-2 text-[1.7rem] font-black tracking-[-0.03em] text-white md:text-[2.35rem]">
+                  {category?.title ?? 'Categoria'}
+                </h1>
+                <p className="mt-2 max-w-3xl text-sm font-semibold text-zinc-300">
+                  {category?.description ??
+                    'Categoria indisponivel neste momento.'}
+                </p>
+              </header>
+            )}
+          </>
         )}
 
         {isLoading && visibleItems.length === 0 ? (
