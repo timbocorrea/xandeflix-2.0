@@ -22,6 +22,10 @@ import {
   loadHomeVodSections,
   type HomeVodItem,
 } from '../services/homeVod.service';
+import {
+  readCachedSeriesEpisodes,
+  storeCachedSeriesEpisodes,
+} from '../services/seriesEpisodesCache.service';
 
 const GRID_COLUMNS = 5;
 const INITIAL_VISIBLE_ITEMS = 60;
@@ -31,7 +35,6 @@ const BOOTSTRAP_CATEGORY_ITEM_LIMIT = INITIAL_VISIBLE_ITEMS;
 const CATEGORY_ITEM_FOCUS_PREFIX = 'category-grid-item';
 const SERIES_DETAIL_HERO_FOCUS_KEY = 'series-detail-hero';
 const SIMILAR_ITEM_FOCUS_PREFIX = 'series-similar-item';
-const SERIES_DETAIL_EPISODES_CACHE_PREFIX = 'xandeflix:series-detail-episodes:v1:';
 
 type CatalogCategoryPageProps = {
   groupSlugOverride?: string;
@@ -43,101 +46,6 @@ function getCategoryItemFocusKey(categorySlug: string, index: number) {
 
 function getSimilarItemFocusKey(categorySlug: string, index: number) {
   return `${SIMILAR_ITEM_FOCUS_PREFIX}-${categorySlug}-${index}`;
-}
-
-function normalizeSeriesCacheKey(value: string | null | undefined) {
-  return (value ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function getSeriesEpisodesCacheKey(input: {
-  licenseCode: string;
-  deviceIdentifier: string;
-  groupTitles: string[];
-  tmdbId?: string | null;
-  tmdbTitle?: string | null;
-}) {
-  const identity =
-    normalizeSeriesCacheKey(input.tmdbId) ||
-    normalizeSeriesCacheKey(input.tmdbTitle);
-
-  if (!identity) {
-    return null;
-  }
-
-  const groupsKey = input.groupTitles
-    .map((groupTitle) => normalizeSeriesCacheKey(groupTitle))
-    .filter(Boolean)
-    .sort()
-    .join('__');
-
-  return [
-    SERIES_DETAIL_EPISODES_CACHE_PREFIX,
-    normalizeSeriesCacheKey(input.licenseCode),
-    normalizeSeriesCacheKey(input.deviceIdentifier),
-    groupsKey,
-    identity,
-  ].join(':');
-}
-
-function readCachedSeriesEpisodes(input: {
-  licenseCode: string;
-  deviceIdentifier: string;
-  groupTitles: string[];
-  tmdbId?: string | null;
-  tmdbTitle?: string | null;
-}) {
-  try {
-    const cacheKey = getSeriesEpisodesCacheKey(input);
-
-    if (!cacheKey) {
-      return [];
-    }
-
-    const rawValue = window.localStorage.getItem(cacheKey);
-
-    if (!rawValue) {
-      return [];
-    }
-
-    const parsed = JSON.parse(rawValue);
-
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed as HomeVodItem[];
-  } catch {
-    return [];
-  }
-}
-
-function storeCachedSeriesEpisodes(
-  input: {
-    licenseCode: string;
-    deviceIdentifier: string;
-    groupTitles: string[];
-    tmdbId?: string | null;
-    tmdbTitle?: string | null;
-  },
-  items: HomeVodItem[],
-) {
-  try {
-    const cacheKey = getSeriesEpisodesCacheKey(input);
-
-    if (!cacheKey || items.length === 0) {
-      return;
-    }
-
-    window.localStorage.setItem(cacheKey, JSON.stringify(items.slice(0, 500)));
-  } catch {
-    // cache best-effort
-  }
 }
 
 function readInitialCategoryItems(
@@ -486,6 +394,17 @@ export function CatalogCategoryPage({
   const [isLoading, setIsLoading] = useState(initialItems.length === 0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const currentSeriesIdentity = useMemo(
+    () =>
+      [
+        seriesGroupTitle ?? '',
+        seriesTmdbId ?? '',
+        seriesTmdbTitle ?? '',
+        seriesTitle ?? '',
+      ].join('::'),
+    [seriesGroupTitle, seriesTmdbId, seriesTmdbTitle, seriesTitle],
+  );
+
   function pickSimilarCollectionsFromSections(
     sections: { items: HomeVodItem[] }[],
     currentHeroItem: HomeVodItem | null,
@@ -680,7 +599,7 @@ export function CatalogCategoryPage({
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [category, isSeriesDetailPage, visibleItems.length]);
+  }, [category, currentSeriesIdentity, isSeriesDetailPage, visibleItems.length]);
 
   useEffect(() => {
     function goBackToHome() {
@@ -811,26 +730,62 @@ export function CatalogCategoryPage({
       return false;
     }
 
+    const similarColumns = 3;
+    const isFirstColumn = index % similarColumns === 0;
+    const isLastColumn = index % similarColumns === similarColumns - 1;
+    const lastIndex = similarItems.length - 1;
+
     if (direction === 'left') {
-      setFocus(getCategoryItemFocusKey(category.slug, episodeFocusIndex));
+      if (!isFirstColumn) {
+        setFocus(getSimilarItemFocusKey(category.slug, index - 1));
+        return false;
+      }
+
+      const previousRowLastIndex = index - 1;
+
+      if (previousRowLastIndex >= 0) {
+        setFocus(getSimilarItemFocusKey(category.slug, previousRowLastIndex));
+        return false;
+      }
+
+      const safeEpisodeIndex = Math.min(
+        Math.max(episodeFocusIndex, episodeWindowStart),
+        Math.max(
+          episodeWindowStart,
+          episodeWindowStart + episodeWindowItems.length - 1,
+        ),
+      );
+
+      setEpisodeFocusIndex(safeEpisodeIndex);
+      setFocus(getCategoryItemFocusKey(category.slug, safeEpisodeIndex));
       return false;
     }
 
     if (direction === 'right') {
-      const nextIndex = index + 1;
+      if (!isLastColumn) {
+        const nextIndex = Math.min(index + 1, lastIndex);
 
-      if (nextIndex < similarItems.length) {
-        setFocus(getSimilarItemFocusKey(category.slug, nextIndex));
+        if (nextIndex !== index) {
+          setFocus(getSimilarItemFocusKey(category.slug, nextIndex));
+        }
+
+        return false;
+      }
+
+      const nextRowFirstIndex = index + 1;
+
+      if (nextRowFirstIndex <= lastIndex) {
+        setFocus(getSimilarItemFocusKey(category.slug, nextRowFirstIndex));
       }
 
       return false;
     }
 
     if (direction === 'up') {
-      const previousIndex = index - 3;
+      const previousRowIndex = index - similarColumns;
 
-      if (previousIndex >= 0) {
-        setFocus(getSimilarItemFocusKey(category.slug, previousIndex));
+      if (previousRowIndex >= 0) {
+        setFocus(getSimilarItemFocusKey(category.slug, previousRowIndex));
         return false;
       }
 
@@ -839,10 +794,10 @@ export function CatalogCategoryPage({
     }
 
     if (direction === 'down') {
-      const nextIndex = index + 3;
+      const nextRowIndex = index + similarColumns;
 
-      if (nextIndex < similarItems.length) {
-        setFocus(getSimilarItemFocusKey(category.slug, nextIndex));
+      if (nextRowIndex <= lastIndex) {
+        setFocus(getSimilarItemFocusKey(category.slug, nextRowIndex));
       }
 
       return false;

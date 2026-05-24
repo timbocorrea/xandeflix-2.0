@@ -24,9 +24,19 @@ function getAppInstallationPlatform() {
   };
 }
 
+function shouldDisableHeartbeatOnThisDevice() {
+  const profile = getDeviceProfile();
+
+  return profile.formFactor === 'tv' || profile.playerStrategy === 'native-android';
+}
+
 export function useAppInstallationHeartbeat() {
   useEffect(() => {
     if (window.location.pathname.startsWith('/admin')) {
+      return;
+    }
+
+    if (shouldDisableHeartbeatOnThisDevice()) {
       return;
     }
 
