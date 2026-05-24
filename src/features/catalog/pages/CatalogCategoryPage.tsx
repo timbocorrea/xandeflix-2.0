@@ -26,6 +26,10 @@ import {
   readCachedSeriesEpisodes,
   storeCachedSeriesEpisodes,
 } from '../services/seriesEpisodesCache.service';
+import {
+  hasEpisodePlaybackProgress,
+  type EpisodePlaybackProgressStatus,
+} from '../services/episodePlaybackProgress.service';
 
 const GRID_COLUMNS = 5;
 const INITIAL_VISIBLE_ITEMS = 60;
@@ -269,19 +273,29 @@ function SimilarSeriesCard({
   );
 }
 
+type EpisodePlaybackStatus = EpisodePlaybackProgressStatus;
+
 type EpisodeListRowProps = {
-  item: HomeVodItem;
   index: number;
   title: string;
+  playbackStatus?: EpisodePlaybackStatus;
   focusKey: string;
   onEnterPress: () => void;
   onArrowPress: (direction: string) => boolean;
 };
 
+function getEpisodePlaybackStatusLabel(status: EpisodePlaybackStatus) {
+  if (status === 'played') {
+    return 'Reproduzido anteriormente';
+  }
+
+  return 'Não iniciado';
+}
+
 function EpisodeListRow({
-  item,
   index,
   title,
+  playbackStatus = 'not-started',
   focusKey,
   onEnterPress,
   onArrowPress,
@@ -302,13 +316,15 @@ function EpisodeListRow({
     }
   }, [focused, ref]);
 
+  const statusLabel = getEpisodePlaybackStatusLabel(playbackStatus);
+
   return (
     <div
       ref={ref}
       role="button"
       tabIndex={-1}
       className={
-        'grid grid-cols-[3.6rem_1fr_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
+        'grid grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
         (focused
           ? 'border-xf-red bg-xf-red/15 shadow-[0_0_0_0.18rem_rgba(229,9,20,0.28)]'
           : 'border-white/10 bg-white/[0.035]')
@@ -318,22 +334,12 @@ function EpisodeListRow({
         {String(index + 1).padStart(2, '0')}
       </div>
 
-      <div className="min-w-0 flex-[1_1_auto]">
-        <p className="text-[0.62rem] font-black uppercase tracking-[0.24em] text-xf-red">
-          Episodio {index + 1}
-        </p>
-        <h3 className="mt-0.5 line-clamp-1 text-sm font-black leading-tight text-white md:text-base">
-          {title}
-        </h3>
-        {item.subtitle ? (
-          <p className="mt-1 line-clamp-1 text-sm font-semibold text-zinc-400">
-            {item.subtitle}
-          </p>
-        ) : null}
-      </div>
+      <h3 className="min-w-0 line-clamp-1 text-sm font-black leading-tight text-white md:text-base">
+        {title}
+      </h3>
 
-      <p className="hidden text-[0.52rem] font-black uppercase tracking-[0.14em] text-zinc-500 md:block">
-        OK para reproduzir
+      <p className="shrink-0 rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-[0.55rem] font-black uppercase tracking-[0.12em] text-zinc-300">
+        {statusLabel}
       </p>
     </div>
   );
@@ -656,6 +662,26 @@ export function CatalogCategoryPage({
     return item.episodeTitle || item.title || `Episodio ${index + 1}`;
   }
 
+  function resolveEpisodePlaybackStatus(
+    item: HomeVodItem,
+    index: number,
+  ): EpisodePlaybackStatus {
+    const episodeTitle = resolveEpisodeTitle(item, index);
+
+    return hasEpisodePlaybackProgress({
+      episodeId: item.id,
+      streamUrl: item.streamUrl,
+      title: episodeTitle,
+      seriesTitle,
+      seriesGroupTitle,
+      seriesTmdbId,
+      seriesTmdbTitle,
+      episodeIndex: index,
+    })
+      ? 'played'
+      : 'not-started';
+  }
+
   async function loadSimilarCollections(currentHeroItem: HomeVodItem | null) {
     if (!currentHeroItem) {
       setSimilarItems([]);
@@ -813,10 +839,30 @@ export function CatalogCategoryPage({
       return;
     }
 
+    const episodeTitle = resolveEpisodeTitle(item, index);
+
     const params = new URLSearchParams({
       src: item.streamUrl,
-      title: resolveEpisodeTitle(item, index),
+      title: episodeTitle,
+      episodeId: item.id,
+      episodeIndex: String(index),
     });
+
+    if (seriesTitle) {
+      params.set('seriesTitle', seriesTitle);
+    }
+
+    if (seriesGroupTitle) {
+      params.set('seriesGroupTitle', seriesGroupTitle);
+    }
+
+    if (seriesTmdbId) {
+      params.set('seriesTmdbId', seriesTmdbId);
+    }
+
+    if (seriesTmdbTitle) {
+      params.set('seriesTmdbTitle', seriesTmdbTitle);
+    }
 
     navigate(`/player?${params.toString()}`);
   }
@@ -1094,9 +1140,12 @@ export function CatalogCategoryPage({
                       return (
                         <EpisodeListRow
                           key={item.id}
-                          item={item}
                           index={absoluteIndex}
                           title={resolveEpisodeTitle(item, absoluteIndex)}
+                          playbackStatus={resolveEpisodePlaybackStatus(
+                            item,
+                            absoluteIndex,
+                          )}
                           focusKey={getCategoryItemFocusKey(
                             category?.slug ?? 'category',
                             absoluteIndex,
