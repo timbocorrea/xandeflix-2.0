@@ -26,6 +26,10 @@ import {
   readCachedSeriesEpisodes,
   storeCachedSeriesEpisodes,
 } from '../services/seriesEpisodesCache.service';
+import {
+  hasEpisodePlaybackProgress,
+  type EpisodePlaybackProgressStatus,
+} from '../services/episodePlaybackProgress.service';
 
 const GRID_COLUMNS = 5;
 const INITIAL_VISIBLE_ITEMS = 60;
@@ -269,7 +273,7 @@ function SimilarSeriesCard({
   );
 }
 
-type EpisodePlaybackStatus = 'not-started' | 'played';
+type EpisodePlaybackStatus = EpisodePlaybackProgressStatus;
 
 type EpisodeListRowProps = {
   index: number;
@@ -658,6 +662,26 @@ export function CatalogCategoryPage({
     return item.episodeTitle || item.title || `Episodio ${index + 1}`;
   }
 
+  function resolveEpisodePlaybackStatus(
+    item: HomeVodItem,
+    index: number,
+  ): EpisodePlaybackStatus {
+    const episodeTitle = resolveEpisodeTitle(item, index);
+
+    return hasEpisodePlaybackProgress({
+      episodeId: item.id,
+      streamUrl: item.streamUrl,
+      title: episodeTitle,
+      seriesTitle,
+      seriesGroupTitle,
+      seriesTmdbId,
+      seriesTmdbTitle,
+      episodeIndex: index,
+    })
+      ? 'played'
+      : 'not-started';
+  }
+
   async function loadSimilarCollections(currentHeroItem: HomeVodItem | null) {
     if (!currentHeroItem) {
       setSimilarItems([]);
@@ -815,10 +839,30 @@ export function CatalogCategoryPage({
       return;
     }
 
+    const episodeTitle = resolveEpisodeTitle(item, index);
+
     const params = new URLSearchParams({
       src: item.streamUrl,
-      title: resolveEpisodeTitle(item, index),
+      title: episodeTitle,
+      episodeId: item.id,
+      episodeIndex: String(index),
     });
+
+    if (seriesTitle) {
+      params.set('seriesTitle', seriesTitle);
+    }
+
+    if (seriesGroupTitle) {
+      params.set('seriesGroupTitle', seriesGroupTitle);
+    }
+
+    if (seriesTmdbId) {
+      params.set('seriesTmdbId', seriesTmdbId);
+    }
+
+    if (seriesTmdbTitle) {
+      params.set('seriesTmdbTitle', seriesTmdbTitle);
+    }
 
     navigate(`/player?${params.toString()}`);
   }
@@ -1098,6 +1142,10 @@ export function CatalogCategoryPage({
                           key={item.id}
                           index={absoluteIndex}
                           title={resolveEpisodeTitle(item, absoluteIndex)}
+                          playbackStatus={resolveEpisodePlaybackStatus(
+                            item,
+                            absoluteIndex,
+                          )}
                           focusKey={getCategoryItemFocusKey(
                             category?.slug ?? 'category',
                             absoluteIndex,
