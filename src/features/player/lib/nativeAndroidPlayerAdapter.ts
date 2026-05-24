@@ -43,9 +43,19 @@ export function createNativeAndroidPlayerAdapter(
         throw new Error('Fonte não carregada para player nativo Android.');
       }
 
+      console.info('[XANDEFLIX_NATIVE_ANDROID_ADAPTER_OPEN_REQUEST]', {
+        kind: nativeKind,
+        title: currentSource.title ?? 'Xandeflix Player',
+        hasUrl: Boolean(currentSource.url),
+      });
+
       await openNativeAndroidPlayer({
         url: currentSource.url,
         title: currentSource.title ?? 'Xandeflix Player',
+        kind: nativeKind,
+      });
+
+      console.info('[XANDEFLIX_NATIVE_ANDROID_ADAPTER_OPEN_SUCCESS]', {
         kind: nativeKind,
       });
     },

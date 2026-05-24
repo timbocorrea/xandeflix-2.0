@@ -388,17 +388,6 @@ export default function UniversalPlayerPage() {
 
       const videoElement = videoRef.current;
 
-      if (!videoElement) {
-        setStatus('idle');
-        pushPlayerEvent(
-          'VIDEO_ELEMENT_MISSING',
-          'warn',
-          'Elemento de vídeo ainda não está disponível.',
-        );
-
-        return;
-      }
-
       if (!stream) {
         setStatus('error');
         setPlaybackError({
@@ -414,18 +403,31 @@ export default function UniversalPlayerPage() {
         return;
       }
 
+      const useNativeAndroidAdapter = isNativeAndroidPlayerAvailable(stream.kind);
+
+      if (!videoElement && !useNativeAndroidAdapter) {
+        setStatus('idle');
+        pushPlayerEvent(
+          'VIDEO_ELEMENT_MISSING',
+          'warn',
+          'Elemento de vídeo ainda não está disponível.',
+        );
+
+        return;
+      }
+
       const adapter =
         stream.kind === 'hls'
-          ? createHlsAdapter(videoElement, {
+          ? createHlsAdapter(videoElement as HTMLVideoElement, {
               onTelemetryEvent: pushTelemetryEvent,
             })
-          : isNativeAndroidPlayerAvailable(stream.kind)
+          : useNativeAndroidAdapter
             ? createNativeAndroidPlayerAdapter(stream.kind)
             : stream.kind === 'mpegts'
-              ? createMpegTsAdapter(videoElement, {
+              ? createMpegTsAdapter(videoElement as HTMLVideoElement, {
                   onTelemetryEvent: pushTelemetryEvent,
                 })
-              : createNativeVideoAdapter(videoElement, {
+              : createNativeVideoAdapter(videoElement as HTMLVideoElement, {
                   onTelemetryEvent: pushTelemetryEvent,
                 });
 
@@ -530,14 +532,33 @@ export default function UniversalPlayerPage() {
     if (usesNativeAndroidPlayer) {
       try {
         setStatus('loading');
-        await ensurePlaybackSessionStarted();
+        pushPlayerEvent(
+          'NATIVE_PLAYER_OPEN_REQUESTED',
+          'info',
+          'Solicitando abertura imediata do player nativo Android.',
+        );
+
         await adapter.play();
+
         setStatus('ready');
         pushPlayerEvent(
           'NATIVE_PLAYER_OPENED',
           'info',
           'Player nativo Android aberto para reprodução.',
         );
+
+        void ensurePlaybackSessionStarted().catch((sessionError: unknown) => {
+          const sessionErrorMessage = normalizePlaybackError(sessionError);
+
+          pushPlayerEvent(
+            'PLAYBACK_SESSION_START_BEST_EFFORT_FAILED',
+            'warn',
+            'Sessão de reprodução falhou após abertura do player nativo, sem bloquear playback.',
+            {
+              message: sessionErrorMessage,
+            },
+          );
+        });
       } catch (error) {
         const errorMessage = normalizePlaybackError(error);
 
