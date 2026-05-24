@@ -13,6 +13,7 @@ import {
   type HomeVodItem,
   type HomeVodSection,
 } from '@/features/catalog/services/homeVod.service';
+import { storeCachedSeriesEpisodes } from '@/features/catalog/services/seriesEpisodesCache.service';
 import { getCatalogCategoryDefinition } from '@/features/catalog/services/catalogCategoryGroups.service';
 import { storeCachedLiveTvCriticalChannels } from '@/features/live/services/liveTvCriticalCache.service';
 
@@ -57,6 +58,11 @@ export type AppBootstrapResult = {
   preloadedImages: number;
   failedImages: number;
   warnings: string[];
+  seriesEpisodesPrecache?: {
+    candidates: number;
+    storedSeriesCount: number;
+    storedEpisodeCount: number;
+  };
 };
 
 const APP_BOOTSTRAP_STORAGE_KEY = 'xandeflix:critical-bootstrap:v5';
@@ -64,6 +70,8 @@ const BOOTSTRAP_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const HOME_LIMIT_PER_SECTION = 12;
 const HOME_LAUNCHES_LIMIT = 20;
 const CATEGORY_FIRST_FOLD_LIMIT = 60;
+const SERIES_EPISODES_PRECACHE_LIMIT = 500;
+const SERIES_COLLECTIONS_PRECACHE_LIMIT = 8;
 const LIVE_PREVIEW_PAGE_SIZE = 200;
 const LIVE_PREVIEW_MAX_PAGES = 20;
 const IMAGE_PRELOAD_LIMIT = 90;
@@ -100,6 +108,9 @@ function cloneBootstrapResult(result: AppBootstrapResult): AppBootstrapResult {
     movieItems: result.movieItems.map((item) => ({ ...item })),
     seriesItems: result.seriesItems.map((item) => ({ ...item })),
     warnings: [...result.warnings],
+    seriesEpisodesPrecache: result.seriesEpisodesPrecache
+      ? { ...result.seriesEpisodesPrecache }
+      : undefined,
   };
 }
 
@@ -358,6 +369,104 @@ async function loadCategoryFirstFold({
   });
 }
 
+function isSeriesCollectionPrecacheCandidate(item: HomeVodItem) {
+  return Boolean(
+    item.kind === 'series' &&
+      item.isSeriesCollection &&
+      item.groupTitle &&
+      (item.tmdbId || item.tmdbTitle),
+  );
+}
+
+function getSeriesPrecacheIdentity(item: HomeVodItem) {
+  return item.tmdbId
+    ? `tmdb:${item.tmdbId}`
+    : `title:${item.groupTitle ?? ''}:${item.tmdbTitle ?? item.title}`;
+}
+
+async function precacheSeriesEpisodesFromHomeSections({
+  licenseCode,
+  deviceIdentifier,
+  homeSections,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+  homeSections: HomeVodSection[];
+}) {
+  const candidates = homeSections
+    .flatMap((section) => section.items)
+    .filter(isSeriesCollectionPrecacheCandidate);
+
+  const uniqueCandidates = new Map<string, HomeVodItem>();
+
+  for (const candidate of candidates) {
+    const identity = getSeriesPrecacheIdentity(candidate);
+
+    if (!uniqueCandidates.has(identity)) {
+      uniqueCandidates.set(identity, candidate);
+    }
+
+    if (uniqueCandidates.size >= SERIES_COLLECTIONS_PRECACHE_LIMIT) {
+      break;
+    }
+  }
+
+  let storedSeriesCount = 0;
+  let storedEpisodeCount = 0;
+
+  for (const candidate of uniqueCandidates.values()) {
+    if (!candidate.groupTitle) {
+      continue;
+    }
+
+    const episodes = await loadHomeVodCategoryItems({
+      licenseCode,
+      deviceIdentifier,
+      groupTitles: [candidate.groupTitle],
+      limit: SERIES_EPISODES_PRECACHE_LIMIT,
+    });
+
+    const filteredEpisodes = episodes.filter((episode) => {
+      if (candidate.tmdbId && episode.tmdbId) {
+        return String(episode.tmdbId) === String(candidate.tmdbId);
+      }
+
+      if (candidate.tmdbTitle && episode.tmdbTitle) {
+        return (
+          episode.tmdbTitle.trim().toLowerCase() ===
+          candidate.tmdbTitle.trim().toLowerCase()
+        );
+      }
+
+      return false;
+    });
+
+    if (filteredEpisodes.length === 0) {
+      continue;
+    }
+
+    storeCachedSeriesEpisodes(
+      {
+        licenseCode,
+        deviceIdentifier,
+        groupTitles: [candidate.groupTitle],
+        tmdbId: candidate.tmdbId,
+        tmdbTitle: candidate.tmdbTitle ?? candidate.title,
+      },
+      filteredEpisodes,
+    );
+
+    storedSeriesCount += 1;
+    storedEpisodeCount += filteredEpisodes.length;
+  }
+
+  return {
+    candidates: uniqueCandidates.size,
+    storedSeriesCount,
+    storedEpisodeCount,
+  };
+}
+
 export async function runAppBootstrap({
   licenseCode,
   deviceIdentifier,
@@ -491,6 +600,26 @@ export async function runAppBootstrap({
     deviceIdentifier: normalizedDeviceIdentifier,
   });
 
+  let seriesEpisodesPrecacheResult = {
+    candidates: 0,
+    storedSeriesCount: 0,
+    storedEpisodeCount: 0,
+  };
+
+  try {
+    seriesEpisodesPrecacheResult = await precacheSeriesEpisodesFromHomeSections({
+      licenseCode: normalizedLicenseCode,
+      deviceIdentifier: normalizedDeviceIdentifier,
+      homeSections,
+    });
+  } catch (error) {
+    warnings.push(
+      error instanceof Error
+        ? `Falha no pre-cache de episodios: ${error.message}`
+        : 'Falha no pre-cache de episodios.',
+    );
+  }
+
   emitProgress(onProgress, {
     stepId: 'images',
     label: 'Carregando capas e logos...',
@@ -523,6 +652,7 @@ export async function runAppBootstrap({
     preloadedImages: imagePreloadResult.preloadedImages,
     failedImages: imagePreloadResult.failedImages,
     warnings,
+    seriesEpisodesPrecache: seriesEpisodesPrecacheResult,
   };
 
   appBootstrapCache = {
