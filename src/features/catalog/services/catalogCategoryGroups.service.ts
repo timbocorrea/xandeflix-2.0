@@ -57,10 +57,21 @@ export const CATALOG_CATEGORY_DEFINITIONS: CatalogCategoryDefinition[] = [
   },
   {
     slug: 'series',
-    title: 'S\u00e9ries',
+    title: 'Séries',
     description:
-      'S\u00e9ries liberadas para esta licen\u00e7a.',
-    groupTitles: ['S\u00e9ries', 'Series'],
+      'Séries, novelas, doramas e temporadas liberadas para esta licença.',
+    groupTitles: [
+      'Séries',
+      'Series',
+      'Séries |',
+      'Series |',
+      'Novelas',
+      'Novela',
+      'Dorama',
+      'Doramas',
+      'Temporada',
+      'Temporadas',
+    ],
     homeSectionIds: ['home-vod-series'],
   },
 ];
