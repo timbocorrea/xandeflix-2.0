@@ -578,6 +578,8 @@ export function CatalogPage() {
                             title: catalogItem.title,
                           });
 
+                          params.set('direct', '1');
+
                           navigate(`/player?${params.toString()}`);
                         }}
                         onArrowPress={(direction) => {
