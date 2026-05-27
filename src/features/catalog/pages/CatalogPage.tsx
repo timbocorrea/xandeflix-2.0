@@ -230,6 +230,7 @@ export function CatalogPage() {
         const homeVodSections = await loadHomeVodSections({
           ...homeVodLoadInput,
           limitPerSection: homeVodLimitPerSection,
+          preferFresh: true,
         });
 
         window.clearTimeout(timeoutId);

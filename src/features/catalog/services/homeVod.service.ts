@@ -38,6 +38,7 @@ export type LoadHomeVodInput = {
   deviceIdentifier: string;
   limitPerSection?: number;
   launchesLimit?: number;
+  preferFresh?: boolean;
 };
 
 export type LoadHomeVodCategoryInput = {
@@ -49,7 +50,7 @@ export type LoadHomeVodCategoryInput = {
 
 const DEFAULT_LIMIT_PER_SECTION = 20;
 const DEFAULT_CATEGORY_ITEMS_LIMIT = 800;
-const HOME_VOD_CACHE_STORAGE_PREFIX = 'xandeflix:home-vod-sections:v9:';
+const HOME_VOD_CACHE_STORAGE_PREFIX = 'xandeflix:home-vod-sections:v10:';
 const HOME_VOD_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
 
@@ -700,24 +701,24 @@ export async function loadHomeVodSections({
   deviceIdentifier,
   limitPerSection = DEFAULT_LIMIT_PER_SECTION,
   launchesLimit = 20,
+  preferFresh = false,
 }: LoadHomeVodInput): Promise<HomeVodSection[]> {
-  const cachedSections = getCachedHomeVodSections({
+  const cacheInput = {
     licenseCode,
     deviceIdentifier,
     limitPerSection,
     launchesLimit,
-  });
+  };
 
-  if (cachedSections) {
-    return cachedSections;
+  if (!preferFresh) {
+    const cachedSections = getCachedHomeVodSections(cacheInput);
+
+    if (cachedSections) {
+      return cachedSections;
+    }
   }
 
-  const cacheKey = createHomeVodCacheKey({
-    licenseCode,
-    deviceIdentifier,
-    limitPerSection,
-    launchesLimit,
-  });
+  const cacheKey = createHomeVodCacheKey(cacheInput);
 
   const channels = await listAuthorizedLicenseChannels({
     licenseCode,
@@ -778,15 +779,7 @@ export async function loadHomeVodSections({
     createdAt: Date.now(),
     sections: cloneHomeVodSections(sections),
   });
-  writeStoredHomeVodSections(
-    {
-      licenseCode,
-      deviceIdentifier,
-      limitPerSection,
-      launchesLimit,
-    },
-    sections,
-  );
+  writeStoredHomeVodSections(cacheInput, sections);
 
   return sections;
 }
