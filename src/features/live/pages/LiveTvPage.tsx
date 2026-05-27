@@ -978,6 +978,7 @@ export default function LiveTvPage() {
                     ].join(" ")}
                     onArrowPress={(direction) => handleChannelArrowPress(direction, index)}
                     onEnterPress={() => handleSelectChannel(channel)}
+                    onClick={() => handleSelectChannel(channel)}
                   >
                     <div className="xf-live-tv-channel-logo flex shrink-0 items-center justify-center overflow-hidden border border-white/10 bg-white/10">
                       {channel.logo ? (
