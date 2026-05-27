@@ -330,13 +330,8 @@ function createSubtitle(channel: IptvChannel) {
   return metadata.length > 0 ? metadata.join(' • ') : channel.groupTitle;
 }
 
-function hasRenderableTmdbPoster(channel: IptvChannel) {
-  return Boolean(
-    channel.tmdbMatchStatus === 'matched' &&
-      channel.tmdbPosterPath &&
-      channel.tmdbTitle
-  );
-}
+
+
 
 function normalizeTrustedTmdbImageUrl(
   value?: string | null,
@@ -382,9 +377,8 @@ function pickTrustedTmdbArtworkUrl(
   return undefined;
 }
 
-function isTrustedHomePosterUrl(value?: string | null) {
-  return Boolean(value?.startsWith('https://image.tmdb.org/t/p/'));
-}
+
+
 
 function getChannelPosterUrl(channel: IptvChannel) {
   return (
@@ -587,9 +581,6 @@ function createSeriesCollectionItems(items: HomeVodItem[]) {
   >();
 
   for (const item of items) {
-    if (!item.posterUrl) {
-      continue;
-    }
 
     const key = getSeriesCollectionKey(item);
     const current = collections.get(key);
@@ -733,15 +724,14 @@ export async function loadHomeVodSections({
     deviceIdentifier,
     pageSize: 500,
     maxPages: 10,
-    requireTmdbMatched: true,
-    requireTmdbPoster: true,
+    requireTmdbMatched: false,
+    requireTmdbPoster: false,
     contentKinds: ['movie', 'series'],
   });
 
   const vodItems = channels
     .filter(isVodChannelForHome)
-    .map(mapChannelToHomeVodItem)
-    .filter((item) => isTrustedHomePosterUrl(item.posterUrl));
+    .map(mapChannelToHomeVodItem);
 
   const movieItems = vodItems.filter((item) => item.kind === 'movie');
   const launchItems = movieItems
@@ -848,14 +838,13 @@ export async function loadHomeVodCategoryItems({
     deviceIdentifier,
     pageSize: 500,
     maxPages: 10,
-    requireTmdbMatched: true,
-    requireTmdbPoster: true,
+    requireTmdbMatched: false,
+    requireTmdbPoster: false,
     contentKinds: categoryContentKinds,
   });
 
   const items = channels
     .filter(isVodChannel)
-    .filter(hasRenderableTmdbPoster)
     .map(mapChannelToHomeVodItem)
     .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
 
