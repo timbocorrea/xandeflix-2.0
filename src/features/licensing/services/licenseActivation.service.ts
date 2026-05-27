@@ -55,6 +55,7 @@ export async function activateLicense(input: {
       method: 'POST',
       headers: {
         apikey: env.supabaseAnonKey,
+        Authorization: `Bearer ${env.supabaseAnonKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
