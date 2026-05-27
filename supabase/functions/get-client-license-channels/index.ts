@@ -7,6 +7,8 @@ type GetClientLicenseChannelsRequest = {
   pageSize?: number;
   requireTmdbMatched?: boolean;
   requireTmdbPoster?: boolean;
+  contentKind?: string;
+  contentKinds?: string[];
 };
 
 type LicenseRecord = {
@@ -196,6 +198,24 @@ Deno.serve(async (request) => {
       return jsonResponse({ ok: false, error: 'INVALID_PAYLOAD' }, 400);
     }
 
+    // Sanitização e processamento dos filtros de contentKind / contentKinds
+    const allowedKinds = ['live', 'movie', 'series'];
+    let validatedKinds: string[] = [];
+
+    if (Array.isArray(payload.contentKinds)) {
+      validatedKinds = payload.contentKinds
+        .map((k) => String(k).trim().toLowerCase())
+        .filter((k) => allowedKinds.includes(k));
+    }
+
+    let validatedSingleKind: string | null = null;
+    if (payload.contentKind && typeof payload.contentKind === 'string') {
+      const trimmed = payload.contentKind.trim().toLowerCase();
+      if (allowedKinds.includes(trimmed)) {
+        validatedSingleKind = trimmed;
+      }
+    }
+
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         persistSession: false,
@@ -261,6 +281,13 @@ Deno.serve(async (request) => {
       )
       .eq('license_id', licenseRecord.id)
       .eq('is_active', true);
+
+    // Aplicar filtros de content_kind ANTES de ordenações e range
+    if (validatedKinds.length > 0) {
+      channelsQuery = channelsQuery.in('content_kind', validatedKinds);
+    } else if (validatedSingleKind) {
+      channelsQuery = channelsQuery.eq('content_kind', validatedSingleKind);
+    }
 
     if (requireTmdbMatched) {
       channelsQuery = channelsQuery

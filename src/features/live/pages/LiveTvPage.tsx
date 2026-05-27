@@ -289,6 +289,7 @@ export default function LiveTvPage() {
               deviceIdentifier: storedActivation.deviceIdentifier,
               pageSize: 500,
               maxPages: 20,
+              contentKind: 'live',
             });
 
             const fullLiveChannels = fullChannels.filter(isLiveTvPageChannel);
@@ -405,6 +406,7 @@ export default function LiveTvPage() {
               deviceIdentifier,
               pageSize: 500,
               maxPages: 20,
+              contentKind: 'live',
             });
 
             if (!isMounted) {

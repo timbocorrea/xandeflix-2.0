@@ -735,6 +735,7 @@ export async function loadHomeVodSections({
     maxPages: 10,
     requireTmdbMatched: true,
     requireTmdbPoster: true,
+    contentKinds: ['movie', 'series'],
   });
 
   const vodItems = channels
@@ -825,6 +826,23 @@ export async function loadHomeVodCategoryItems({
     return cachedItems;
   }
 
+  // Determinar contentKinds apropriados com base nos groupTitles da categoria
+  let categoryContentKinds: Array<'movie' | 'series'> = ['movie', 'series'];
+  const hasMovieKeywords = normalizedGroupTitles.some((title) => {
+    const norm = normalizeCatalogText(title);
+    return norm.includes('filme') || norm.includes('lancamento');
+  });
+  const hasSeriesKeywords = normalizedGroupTitles.some((title) => {
+    const norm = normalizeCatalogText(title);
+    return norm.includes('serie');
+  });
+
+  if (hasMovieKeywords && !hasSeriesKeywords) {
+    categoryContentKinds = ['movie'];
+  } else if (hasSeriesKeywords && !hasMovieKeywords) {
+    categoryContentKinds = ['series'];
+  }
+
   const channels = await listAuthorizedLicenseChannels({
     licenseCode,
     deviceIdentifier,
@@ -832,6 +850,7 @@ export async function loadHomeVodCategoryItems({
     maxPages: 10,
     requireTmdbMatched: true,
     requireTmdbPoster: true,
+    contentKinds: categoryContentKinds,
   });
 
   const items = channels

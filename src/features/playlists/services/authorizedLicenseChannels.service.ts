@@ -55,6 +55,8 @@ export type ListAuthorizedLicenseChannelsInput = {
   maxPages?: number;
   requireTmdbMatched?: boolean;
   requireTmdbPoster?: boolean;
+  contentKind?: 'live' | 'movie' | 'series';
+  contentKinds?: Array<'live' | 'movie' | 'series'>;
 };
 
 function compareNullableText(current: string | null, next: string | null) {
@@ -124,6 +126,8 @@ async function fetchLicenseChannelsPage({
   pageSize,
   requireTmdbMatched,
   requireTmdbPoster,
+  contentKind,
+  contentKinds,
 }: {
   licenseCode: string;
   deviceIdentifier: string;
@@ -131,6 +135,8 @@ async function fetchLicenseChannelsPage({
   pageSize: number;
   requireTmdbMatched?: boolean;
   requireTmdbPoster?: boolean;
+  contentKind?: 'live' | 'movie' | 'series';
+  contentKinds?: Array<'live' | 'movie' | 'series'>;
 }) {
   const { data, error } =
     await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
@@ -143,6 +149,8 @@ async function fetchLicenseChannelsPage({
           pageSize,
           ...(requireTmdbMatched === undefined ? {} : { requireTmdbMatched }),
           ...(requireTmdbPoster === undefined ? {} : { requireTmdbPoster }),
+          ...(contentKind === undefined ? {} : { contentKind }),
+          ...(contentKinds === undefined ? {} : { contentKinds }),
         },
       },
     );
@@ -170,6 +178,8 @@ export async function listAuthorizedLicenseChannels({
   maxPages = DEFAULT_MAX_PAGES,
   requireTmdbMatched,
   requireTmdbPoster,
+  contentKind,
+  contentKinds,
 }: ListAuthorizedLicenseChannelsInput): Promise<IptvChannel[]> {
   const normalizedLicenseCode = licenseCode.trim().toUpperCase();
   const normalizedDeviceIdentifier = deviceIdentifier.trim();
@@ -185,6 +195,8 @@ export async function listAuthorizedLicenseChannels({
     pageSize,
     requireTmdbMatched,
     requireTmdbPoster,
+    contentKind,
+    contentKinds,
   });
 
   const channelRows = [...firstPage.channels];
@@ -201,6 +213,8 @@ export async function listAuthorizedLicenseChannels({
           pageSize,
           requireTmdbMatched,
           requireTmdbPoster,
+          contentKind,
+          contentKinds,
         })
       );
     }

@@ -341,6 +341,7 @@ async function loadLivePreviewChannels({
     deviceIdentifier,
     pageSize: LIVE_PREVIEW_PAGE_SIZE,
     maxPages: LIVE_PREVIEW_MAX_PAGES,
+    contentKind: 'live',
   });
 
   return channels.filter(isLiveBootstrapChannel);
