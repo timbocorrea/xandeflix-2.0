@@ -726,12 +726,40 @@ async function loadHomeMovieGroupItems({
   licenseCode,
   deviceIdentifier,
   groupTitle,
+  limit = 20,
 }: {
   licenseCode: string;
   deviceIdentifier: string;
   groupTitle: string;
+  limit?: number;
 }) {
-  const channels = await listAuthorizedLicenseChannels({
+  // 1. Buscar primeiro itens com poster
+  const posterChannels = await listAuthorizedLicenseChannels({
+    licenseCode,
+    deviceIdentifier,
+    pageSize: HOME_MOVIE_GROUP_SAMPLE_PAGE_SIZE,
+    maxPages: 1,
+    requireTmdbMatched: true,
+    requireTmdbPoster: true,
+    contentKind: 'movie',
+    groupTitle,
+  });
+
+  const posterItems = posterChannels
+    .filter(isVodChannelForHome)
+    .map(mapChannelToHomeVodItem)
+    .filter(
+      (item) =>
+        item.kind === 'movie' && matchesAnyGroupTitle(item, [groupTitle]),
+    );
+
+  // 2. Se a quantidade com poster ja preenche o limite da Home, usar esses itens.
+  if (posterItems.length >= limit) {
+    return posterItems.slice(0, limit);
+  }
+
+  // 3. Se faltar, fazer fallback buscando itens sem exigir poster
+  const fallbackChannels = await listAuthorizedLicenseChannels({
     licenseCode,
     deviceIdentifier,
     pageSize: HOME_MOVIE_GROUP_SAMPLE_PAGE_SIZE,
@@ -742,21 +770,58 @@ async function loadHomeMovieGroupItems({
     groupTitle,
   });
 
-  return channels
+  const fallbackItems = fallbackChannels
     .filter(isVodChannelForHome)
     .map(mapChannelToHomeVodItem)
     .filter(
       (item) =>
         item.kind === 'movie' && matchesAnyGroupTitle(item, [groupTitle]),
     );
+
+  // 4. Mesclar posterizados + fallback removendo duplicados por id
+  const mergedItemsMap = new Map<string, HomeVodItem>();
+  for (const item of posterItems) {
+    mergedItemsMap.set(item.id, item);
+  }
+  for (const item of fallbackItems) {
+    if (!mergedItemsMap.has(item.id)) {
+      mergedItemsMap.set(item.id, item);
+    }
+  }
+
+  const mergedItems = Array.from(mergedItemsMap.values());
+
+  // 5. Ordenar com prioridade
+  mergedItems.sort((a, b) => {
+    // a. posterUrl/backdropUrl primeiro
+    const aHasPoster = Boolean(a.posterUrl || a.backdropUrl);
+    const bHasPoster = Boolean(b.posterUrl || b.backdropUrl);
+    if (aHasPoster !== bHasPoster) {
+      return aHasPoster ? -1 : 1;
+    }
+
+    // b. tmdbId/tmdbTitle depois
+    const aHasTmdb = Boolean(a.tmdbId || a.tmdbTitle);
+    const bHasTmdb = Boolean(b.tmdbId || b.tmdbTitle);
+    if (aHasTmdb !== bHasTmdb) {
+      return aHasTmdb ? -1 : 1;
+    }
+
+    // c. title depois
+    return a.title.localeCompare(b.title, 'pt-BR');
+  });
+
+  return mergedItems.slice(0, limit);
 }
 
 async function loadHomeMovieCategorySampleItems({
   licenseCode,
   deviceIdentifier,
+  limitPerSection,
 }: {
   licenseCode: string;
   deviceIdentifier: string;
+  limitPerSection: number;
 }) {
   const groupItems = await mapWithConcurrency(
     MOVIE_CATEGORY_GROUP_TITLES,
@@ -767,6 +832,7 @@ async function loadHomeMovieCategorySampleItems({
           licenseCode,
           deviceIdentifier,
           groupTitle,
+          limit: limitPerSection,
         });
       } catch {
         return [];
@@ -804,6 +870,7 @@ export async function loadHomeVodSections({
   const movieItems = await loadHomeMovieCategorySampleItems({
     licenseCode,
     deviceIdentifier,
+    limitPerSection,
   });
 
   const launchItems = movieItems
@@ -881,29 +948,82 @@ export async function loadHomeVodCategoryItems({
     categoryContentKinds = ['series'];
   }
 
-  const channels = await listAuthorizedLicenseChannels({
+  // 1. Buscar primeiro canais que possuem poster no TMDB
+  const posterChannels = await listAuthorizedLicenseChannels({
     licenseCode,
     deviceIdentifier,
-    pageSize: 500,
-    maxPages: 10,
+    pageSize: 100,
+    maxPages: 8,
+    requireTmdbMatched: true,
+    requireTmdbPoster: true,
+    contentKinds: categoryContentKinds,
+    groupTitles: normalizedGroupTitles,
+  });
+
+  const posterItems = posterChannels
+    .filter(isVodChannelForHome)
+    .map(mapChannelToHomeVodItem)
+    .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
+
+  // 2. Buscar restante dos canais sem exigir poster
+  const fallbackChannels = await listAuthorizedLicenseChannels({
+    licenseCode,
+    deviceIdentifier,
+    pageSize: 100,
+    maxPages: 8,
     requireTmdbMatched: false,
     requireTmdbPoster: false,
     contentKinds: categoryContentKinds,
     groupTitles: normalizedGroupTitles,
   });
 
-  const items = channels
-    .filter(isVodChannel)
+  const fallbackItems = fallbackChannels
+    .filter(isVodChannelForHome)
     .map(mapChannelToHomeVodItem)
     .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
 
+  // 3. Mesclar removendo duplicados por id
+  const mergedItemsMap = new Map<string, HomeVodItem>();
+  for (const item of posterItems) {
+    mergedItemsMap.set(item.id, item);
+  }
+  for (const item of fallbackItems) {
+    if (!mergedItemsMap.has(item.id)) {
+      mergedItemsMap.set(item.id, item);
+    }
+  }
+
+  const mergedItems = Array.from(mergedItemsMap.values());
+
+  // 4. Ordenar com prioridade
   const shouldSortMostRecent = normalizedGroupTitles.some((groupTitle) =>
     normalizeCatalogText(groupTitle).includes('lancamento'),
   );
-  const orderedItems = shouldSortMostRecent
-    ? [...items].sort(sortMostRecentHomeItems)
-    : items;
-  const limitedItems = orderedItems.slice(0, limit);
+
+  mergedItems.sort((a, b) => {
+    // a. posterUrl/backdropUrl primeiro
+    const aHasPoster = Boolean(a.posterUrl || a.backdropUrl);
+    const bHasPoster = Boolean(b.posterUrl || b.backdropUrl);
+    if (aHasPoster !== bHasPoster) {
+      return aHasPoster ? -1 : 1;
+    }
+
+    // b. tmdbId/tmdbTitle depois
+    const aHasTmdb = Boolean(a.tmdbId || a.tmdbTitle);
+    const bHasTmdb = Boolean(b.tmdbId || b.tmdbTitle);
+    if (aHasTmdb !== bHasTmdb) {
+      return aHasTmdb ? -1 : 1;
+    }
+
+    if (shouldSortMostRecent) {
+      return sortMostRecentHomeItems(a, b);
+    }
+
+    // c. title depois
+    return a.title.localeCompare(b.title, 'pt-BR');
+  });
+
+  const limitedItems = mergedItems.slice(0, limit);
 
   homeVodCategoryItemsCache.set(
     createHomeVodCategoryCacheKey({

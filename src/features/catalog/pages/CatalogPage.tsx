@@ -19,6 +19,7 @@ import {
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
 import { getCachedAppBootstrapResult } from '@/features/bootstrap/services/appBootstrap.service';
+import { getSlugByGroupTitle } from '@/features/catalog/services/catalogCategoryGroups.service';
 
 import { catalogSections } from '../data/catalogSections';
 import {
@@ -75,7 +76,9 @@ function mapHomeVodSectionsToCatalogSections(
     title: section.title,
     eyebrow: section.eyebrow,
     description: section.description,
-    showSeeAll: section.id === 'home-vod-launches',
+    showSeeAll:
+      section.id === 'home-vod-launches' ||
+      section.id.startsWith('home-vod-movie-category-'),
     items: section.items.map((item) => ({
       id: item.id,
       kind: item.kind,
@@ -200,6 +203,56 @@ export function CatalogPage() {
       ? INITIAL_TV_VISIBLE_SECTIONS
       : resolvedCatalogSections.length,
   );
+
+  // Preload seguro das imagens do catálogo da Home em background
+  const preloadUrls = useMemo(() => {
+    if (!realCatalogSections) {
+      return [];
+    }
+
+    const urls = new Set<string>();
+    for (const section of realCatalogSections) {
+      for (const item of section.items) {
+        if (item.posterUrl) {
+          urls.add(item.posterUrl);
+        }
+        if (item.backdropUrl) {
+          urls.add(item.backdropUrl);
+        }
+      }
+    }
+
+    return Array.from(urls).slice(0, 300);
+  }, [realCatalogSections]);
+
+  useEffect(() => {
+    if (preloadUrls.length === 0) {
+      return;
+    }
+
+    let isCancelled = false;
+    const schedulePreload = () => {
+      const scheduler =
+        typeof window !== 'undefined' && 'requestIdleCallback' in window
+          ? (window as any).requestIdleCallback
+          : (cb: () => void) => window.setTimeout(cb, 100);
+
+      scheduler(() => {
+        if (isCancelled) return;
+        for (const url of preloadUrls) {
+          if (isCancelled) break;
+          const img = new Image();
+          img.src = url;
+        }
+      });
+    };
+
+    schedulePreload();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [preloadUrls]);
 
   useEffect(() => {
     let isMounted = true;
@@ -567,7 +620,7 @@ export function CatalogPage() {
 
                   </div>
 
-                  {shouldShowSeeAll(section) && !isMobile && (!isTv || section.id === 'home-vod-launches') && (
+                  {shouldShowSeeAll(section) && !isMobile && (
                     <FocusableButton
                       focusKey={getCategorySeeAllFocusKey(section.id)}
                       className="inline-flex rounded-full border border-white/20 bg-xf-surface px-5 py-3 text-sm font-bold text-white"
@@ -576,6 +629,9 @@ export function CatalogPage() {
 
                         if (section.id === 'home-vod-launches') {
                           navigate('/launches');
+                        } else if (section.id.startsWith('home-vod-movie-category-')) {
+                          const slug = getSlugByGroupTitle(section.title);
+                          navigate(`/category/${slug}`);
                         }
                       }}
                       onEnterPress={() => {
@@ -583,6 +639,9 @@ export function CatalogPage() {
 
                         if (section.id === 'home-vod-launches') {
                           navigate('/launches');
+                        } else if (section.id.startsWith('home-vod-movie-category-')) {
+                          const slug = getSlugByGroupTitle(section.title);
+                          navigate(`/category/${slug}`);
                         }
                       }}
                       onArrowPress={(direction) =>
@@ -605,7 +664,7 @@ export function CatalogPage() {
                         title={item.title}
                         subtitle={item.subtitle}
                         posterUrl={item.posterUrl}
-                        eagerLoad={isTv && categoryIndex < 2 && itemIndex < 6}
+                        eagerLoad={true}
                         index={itemIndex}
                         focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
                         onEnterPress={() => {

@@ -525,6 +525,54 @@ export function CatalogCategoryPage({
   const [isLoading, setIsLoading] = useState(initialItems.length === 0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Preload seguro em background para as imagens da categoria
+  const categoryPreloadUrls = useMemo(() => {
+    if (!items || items.length === 0) {
+      return [];
+    }
+
+    const urls = new Set<string>();
+    for (const item of items) {
+      if (item.posterUrl) {
+        urls.add(item.posterUrl);
+      }
+      if (item.backdropUrl) {
+        urls.add(item.backdropUrl);
+      }
+    }
+
+    return Array.from(urls).slice(0, 300);
+  }, [items]);
+
+  useEffect(() => {
+    if (categoryPreloadUrls.length === 0) {
+      return;
+    }
+
+    let isCancelled = false;
+    const scheduleCategoryPreload = () => {
+      const scheduler =
+        typeof window !== 'undefined' && 'requestIdleCallback' in window
+          ? (window as any).requestIdleCallback
+          : (cb: () => void) => window.setTimeout(cb, 100);
+
+      scheduler(() => {
+        if (isCancelled) return;
+        for (const url of categoryPreloadUrls) {
+          if (isCancelled) break;
+          const img = new Image();
+          img.src = url;
+        }
+      });
+    };
+
+    scheduleCategoryPreload();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [categoryPreloadUrls]);
+
   const currentSeriesIdentity = useMemo(
     () =>
       [
