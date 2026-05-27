@@ -168,20 +168,69 @@ Deno.serve(async (request) => {
       });
     }
 
-    /**
-     * Regra de negócio:
-     * A licença sozinha não autoriza um novo aparelho.
-     * O dispositivo deve estar previamente vinculado à licença pelo Admin.
-     */
-    return jsonResponse(
-      {
-        ok: false,
-        error: 'DEVICE_NOT_PREAUTHORIZED',
-        details:
-          'Este dispositivo não está pré-vinculado a esta licença. Solicite autorização no painel administrativo.',
-      },
-      403,
-    );
+    const { count: activeDevicesCount, error: activeDevicesCountError } =
+      await supabaseAdmin
+        .from('license_devices')
+        .select('id', { count: 'exact', head: true })
+        .eq('license_id', license.id)
+        .eq('is_active', true);
+
+    if (activeDevicesCountError) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'SERVER_ERROR',
+          details: activeDevicesCountError.message,
+        },
+        500,
+      );
+    }
+
+    if ((activeDevicesCount ?? 0) >= license.max_devices) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'DEVICE_LIMIT_REACHED',
+          details:
+            'O limite de aparelhos ativos desta licença foi atingido. Desative outro aparelho no painel administrativo antes de ativar este dispositivo.',
+        },
+        403,
+      );
+    }
+
+    const { data: createdDevice, error: createDeviceError } = await supabaseAdmin
+      .from('license_devices')
+      .insert({
+        license_id: license.id,
+        device_identifier: deviceIdentifier,
+        device_name: normalizeText(payload.deviceName),
+        platform: normalizeText(payload.platform),
+        manufacturer: normalizeText(payload.manufacturer),
+        model: normalizeText(payload.model),
+        app_version: normalizeText(payload.appVersion),
+        is_active: true,
+        first_seen_at: now,
+        last_seen_at: now,
+      })
+      .select('id, device_identifier, is_active')
+      .single();
+
+    if (createDeviceError) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'SERVER_ERROR',
+          details: createDeviceError.message,
+        },
+        500,
+      );
+    }
+
+    return jsonResponse({
+      ok: true,
+      license: serializeLicense(license),
+      device: serializeDevice(createdDevice),
+    });
   } catch (error) {
     return jsonResponse({
       ok: false,
