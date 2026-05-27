@@ -3,10 +3,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { AdminLayout } from '../components/AdminLayout';
 
 import {
+  importAdminLicenseIptvSourceChannels,
   listAdminIptvSources,
   listAdminLicenseIptvSources,
   listAdminLicenses,
+  testAdminLicenseIptvSource,
+  updateAdminIptvSource,
+  updateAdminLicenseIptvSource,
 } from '../services';
+
+import type { LicenseIptvSourceDiagnostic } from '../services/adminLicenses.service';
 
 import type {
   IptvSource,
@@ -42,6 +48,13 @@ type AdminIptvSourceRow = {
   licenseLabel?: string | null;
   licenseStatus?: LicenseStatus | null;
   origin: IptvSourceOrigin;
+};
+
+type EditSourceForm = {
+  name: string;
+  sourceUrl: string;
+  type: IptvSourceType;
+  isActive: boolean;
 };
 
 const sourceOriginLabels: Record<IptvSourceOrigin, string> = {
@@ -151,6 +164,26 @@ function getOperationalStatus(row: AdminIptvSourceRow) {
   };
 }
 
+function getSourceActionErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return 'Nao foi possivel concluir a acao da fonte IPTV.';
+}
+
+function formatDiagnosticHttpStatus(diagnostic: LicenseIptvSourceDiagnostic) {
+  if (!diagnostic.responded) {
+    return 'sem resposta HTTP';
+  }
+
+  if (!diagnostic.httpStatus) {
+    return 'HTTP nao informado';
+  }
+
+  return 'HTTP ' + diagnostic.httpStatus;
+}
+
 function createLegacySourceRow(source: IptvSource): AdminIptvSourceRow {
   return {
     id: source.id,
@@ -202,7 +235,7 @@ function renderOperationalBinding(row: AdminIptvSourceRow) {
     }
 
     return (
-      <div className="min-w-[190px]">
+      <div className="max-w-[150px]">
         <p className="font-semibold text-white">
           Licença: {row.licenseCode ?? getShortId(row.licenseId)}
         </p>
@@ -226,7 +259,7 @@ function renderOperationalBinding(row: AdminIptvSourceRow) {
   }
 
   return (
-    <div className="min-w-[180px]">
+    <div className="max-w-[140px]">
       <p className="font-semibold text-white">Cliente legado vinculado</p>
       <p className="mt-1 text-xs text-xf-muted">ID: {getShortId(row.clientId)}</p>
     </div>
@@ -240,6 +273,19 @@ export function AdminIptvSourcesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<AdminIptvSourceRow | null>(null);
+  const [editSourceForm, setEditSourceForm] = useState<EditSourceForm>({
+    name: '',
+    sourceUrl: '',
+    type: 'm3u',
+    isActive: true,
+  });
+  const [isUpdatingSource, setIsUpdatingSource] = useState(false);
+  const [testingSourceId, setTestingSourceId] = useState<string | null>(null);
+  const [importingSourceId, setImportingSourceId] = useState<string | null>(null);
+  const [sourceDiagnostics, setSourceDiagnostics] = useState<
+    Record<string, LicenseIptvSourceDiagnostic>
+  >({});
 
   const rows = useMemo(() => {
     const legacyRows = legacySources.map(createLegacySourceRow);
@@ -350,6 +396,140 @@ export function AdminIptvSourcesPage() {
     );
   }
 
+  function openEditSource(row: AdminIptvSourceRow) {
+    setEditingSource(row);
+    setEditSourceForm({
+      name: row.name,
+      sourceUrl: row.sourceUrl,
+      type: row.type,
+      isActive: row.isActive,
+    });
+    setErrorMessage(null);
+    setSuccessMessage(null);
+  }
+
+  function closeEditSource() {
+    if (isUpdatingSource) {
+      return;
+    }
+
+    setEditingSource(null);
+  }
+
+  async function handleUpdateSource(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingSource) {
+      return;
+    }
+
+    const nextName = editSourceForm.name.trim();
+    const nextSourceUrl = editSourceForm.sourceUrl.trim();
+
+    if (!nextName || !nextSourceUrl) {
+      setErrorMessage('Informe o nome e a URL da fonte IPTV.');
+      return;
+    }
+
+    try {
+      setIsUpdatingSource(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      if (editingSource.ownerKind === 'license') {
+        await updateAdminLicenseIptvSource(editingSource.id, {
+          name: nextName,
+          source_url: nextSourceUrl,
+          type: editSourceForm.type,
+          is_active: editSourceForm.isActive,
+        });
+      } else {
+        await updateAdminIptvSource(editingSource.id, {
+          name: nextName,
+          source_url: nextSourceUrl,
+          type: editSourceForm.type,
+          is_active: editSourceForm.isActive,
+        });
+      }
+
+      setEditingSource(null);
+      setSuccessMessage(
+        'Fonte IPTV atualizada. Se a URL mudou, teste a fonte e importe os canais novamente para renovar o cache.',
+      );
+
+      await loadSources();
+    } catch (error) {
+      setErrorMessage(getSourceActionErrorMessage(error));
+    } finally {
+      setIsUpdatingSource(false);
+    }
+  }
+
+  async function handleTestSource(row: AdminIptvSourceRow) {
+    if (row.ownerKind !== 'license') {
+      setErrorMessage('Teste operacional esta disponivel apenas para fontes por licenca.');
+      return;
+    }
+
+    try {
+      setTestingSourceId(row.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const diagnostic = await testAdminLicenseIptvSource(row.id);
+
+      setSourceDiagnostics((currentDiagnostics) => ({
+        ...currentDiagnostics,
+        [row.id]: diagnostic,
+      }));
+
+      setSuccessMessage(
+        'Teste da fonte "' +
+          row.name +
+          '" concluido: ' +
+          formatDiagnosticHttpStatus(diagnostic) +
+          ', ' +
+          diagnostic.entryCount +
+          ' entrada(s).',
+      );
+    } catch (error) {
+      setErrorMessage(getSourceActionErrorMessage(error));
+    } finally {
+      setTestingSourceId(null);
+    }
+  }
+
+  async function handleImportSourceChannels(row: AdminIptvSourceRow) {
+    if (row.ownerKind !== 'license') {
+      setErrorMessage('Importacao operacional esta disponivel apenas para fontes por licenca.');
+      return;
+    }
+
+    try {
+      setImportingSourceId(row.id);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const result = await importAdminLicenseIptvSourceChannels(row.id);
+
+      setSuccessMessage(
+        'Importacao concluida para "' +
+          row.name +
+          '". Canais recebidos: ' +
+          result.totalParsed +
+          ', importados: ' +
+          result.totalImported +
+          ', atualizados: ' +
+          result.totalUpdated +
+          '.',
+      );
+    } catch (error) {
+      setErrorMessage(getSourceActionErrorMessage(error));
+    } finally {
+      setImportingSourceId(null);
+    }
+  }
+
   return (
     <AdminLayout>
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -434,51 +614,54 @@ export function AdminIptvSourcesPage() {
               Nenhuma fonte IPTV cadastrada até o momento.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1380px] text-left text-sm">
-                <thead className="border-b border-white/10 bg-black/20 text-xs uppercase tracking-[0.2em] text-xf-muted">
+            <div className="w-full overflow-hidden">
+              <table className="w-full table-fixed text-left text-xs">
+                <thead className="border-b border-white/10 bg-black/20 text-[10px] uppercase tracking-[0.12em] text-xf-muted">
                   <tr>
-                    <th className="px-5 py-4 font-semibold">Nome</th>
-                    <th className="px-5 py-4 font-semibold">Origem</th>
-                    <th className="px-5 py-4 font-semibold">
-                      Vínculo operacional
+                    <th className="w-[15%] px-3 py-3 font-semibold">Nome</th>
+                    <th className="w-[8%] px-3 py-3 font-semibold">Origem</th>
+                    <th className="w-[15%] px-3 py-3 font-semibold">
+                      Vínculo
                     </th>
-                    <th className="px-5 py-4 font-semibold">Tipo</th>
-                    <th className="px-5 py-4 font-semibold">URL</th>
-                    <th className="px-5 py-4 font-semibold">Fonte</th>
-                    <th className="px-5 py-4 font-semibold">
-                      Status operacional
+                    <th className="w-[7%] px-3 py-3 font-semibold">Tipo</th>
+                    <th className="w-[21%] px-3 py-3 font-semibold">URL</th>
+                    <th className="w-[7%] px-3 py-3 font-semibold">Fonte</th>
+                    <th className="w-[10%] px-3 py-3 font-semibold">
+                      Status
                     </th>
-                    <th className="px-5 py-4 font-semibold">
-                      Atualização
+                    <th className="w-[8%] px-3 py-3 font-semibold">
+                      Atual.
                     </th>
-                    <th className="px-5 py-4 font-semibold">
-                      Criada em
+                    <th className="w-[8%] px-3 py-3 font-semibold">
+                      Criada
                     </th>
-                    <th className="px-5 py-4 font-semibold">Ações</th>
+                    <th className="w-[21%] px-3 py-3 font-semibold">Ações</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {rows.map((row) => {
                     const operationalStatus = getOperationalStatus(row);
+                    const diagnostic = sourceDiagnostics[row.id];
+                    const isTestingSource = testingSourceId === row.id;
+                    const isImportingSource = importingSourceId === row.id;
 
                     return (
                       <tr
                         key={row.rowKey}
                         className="border-b border-white/5 last:border-0"
                       >
-                        <td className="px-5 py-4">
-                          <p className="font-semibold text-white">{row.name}</p>
+                        <td className="px-3 py-3 align-top">
+                          <p className="truncate font-semibold text-white">{row.name}</p>
                           <p className="mt-1 text-xs text-xf-muted">
                             {ownerKindLabels[row.ownerKind]}
                           </p>
                         </td>
 
-                        <td className="px-5 py-4">
+                        <td className="px-3 py-3 align-top">
                           <span
                             className={
-                              'rounded-full px-3 py-1 text-xs font-bold ' +
+                              'rounded-full px-2 py-1 text-[11px] font-bold ' +
                               getOriginBadgeClassName(row.origin)
                             }
                           >
@@ -486,22 +669,22 @@ export function AdminIptvSourcesPage() {
                           </span>
                         </td>
 
-                        <td className="px-5 py-4 text-xf-muted">
+                        <td className="px-3 py-3 align-top text-xf-muted">
                           {renderOperationalBinding(row)}
                         </td>
 
-                        <td className="px-5 py-4 text-xf-muted">
+                        <td className="px-3 py-3 align-top text-xf-muted">
                           {getSourceTypeLabel(row.type)}
                         </td>
 
-                        <td className="max-w-[280px] truncate px-5 py-4 text-xf-muted">
+                        <td className="truncate px-3 py-3 align-top font-mono text-[11px] text-xf-muted">
                           {row.sourceUrl}
                         </td>
 
-                        <td className="px-5 py-4">
+                        <td className="px-3 py-3 align-top">
                           <span
                             className={
-                              'rounded-full px-3 py-1 text-xs font-bold ' +
+                              'rounded-full px-2 py-1 text-[11px] font-bold ' +
                               getSourceStatusClassName(row.isActive)
                             }
                           >
@@ -509,10 +692,10 @@ export function AdminIptvSourcesPage() {
                           </span>
                         </td>
 
-                        <td className="px-5 py-4">
+                        <td className="px-3 py-3 align-top">
                           <span
                             className={
-                              'rounded-full px-3 py-1 text-xs font-bold ' +
+                              'rounded-full px-2 py-1 text-[11px] font-bold ' +
                               operationalStatus.className
                             }
                           >
@@ -520,24 +703,65 @@ export function AdminIptvSourcesPage() {
                           </span>
                         </td>
 
-                        <td className="px-5 py-4 text-xf-muted">
+                        <td className="px-3 py-3 align-top text-[11px] text-xf-muted">
                           {row.ownerKind === 'legacy-client'
                             ? formatDateTime(row.lastSyncAt)
                             : formatDateTime(row.updatedAt)}
                         </td>
 
-                        <td className="px-5 py-4 text-xf-muted">
+                        <td className="px-3 py-3 align-top text-[11px] text-xf-muted">
                           {formatDateTime(row.createdAt)}
                         </td>
 
-                        <td className="px-5 py-4">
-                          <button
-                            type="button"
-                            onClick={() => handleValidateSource(row)}
-                            className="rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/20"
-                          >
-                            Validar regra
-                          </button>
+                        <td className="px-3 py-3 align-top">
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditSource(row)}
+                              className="rounded-lg bg-xf-red px-3 py-2 text-[11px] font-bold text-white transition hover:bg-red-700"
+                            >
+                              Editar
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => void handleTestSource(row)}
+                              disabled={row.ownerKind !== 'license' || isTestingSource}
+                              className="rounded-lg bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isTestingSource ? 'Testando...' : 'Testar'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => void handleImportSourceChannels(row)}
+                              disabled={row.ownerKind !== 'license' || isImportingSource}
+                              className="rounded-lg bg-white px-3 py-2 text-[11px] font-bold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isImportingSource ? 'Importando...' : 'Importar'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleValidateSource(row)}
+                              className="rounded-lg bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/20"
+                            >
+                              Regra
+                            </button>
+                          </div>
+
+                          {diagnostic ? (
+                            <p
+                              className={
+                                diagnostic.success
+                                  ? 'mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-2 text-[11px] font-semibold text-emerald-100'
+                                  : 'mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[11px] font-semibold text-amber-100'
+                              }
+                            >
+                              {formatDiagnosticHttpStatus(diagnostic)} ·{' '}
+                              {diagnostic.entryCount} entrada(s)
+                            </p>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -547,6 +771,131 @@ export function AdminIptvSourcesPage() {
             </div>
           )}
         </div>
+
+        {editingSource ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+            <form
+              onSubmit={handleUpdateSource}
+              className="w-full max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 p-6 shadow-2xl"
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.24em] text-xf-red">
+                    Editar fonte IPTV
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black text-white">
+                    {editingSource.name}
+                  </h2>
+                  <p className="mt-1 text-sm text-xf-muted">
+                    {ownerKindLabels[editingSource.ownerKind]}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeEditSource}
+                  disabled={isUpdatingSource}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Fechar
+                </button>
+              </div>
+
+              <div className="mt-5 grid gap-4">
+                <label className="grid gap-2">
+                  <span className="text-xs font-black uppercase tracking-[0.2em] text-xf-muted">
+                    Nome
+                  </span>
+                  <input
+                    value={editSourceForm.name}
+                    onChange={(event) =>
+                      setEditSourceForm((currentForm) => ({
+                        ...currentForm,
+                        name: event.target.value,
+                      }))
+                    }
+                    className="rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+                  />
+                </label>
+
+                <label className="grid gap-2">
+                  <span className="text-xs font-black uppercase tracking-[0.2em] text-xf-muted">
+                    URL M3U / Xtream
+                  </span>
+                  <textarea
+                    value={editSourceForm.sourceUrl}
+                    onChange={(event) =>
+                      setEditSourceForm((currentForm) => ({
+                        ...currentForm,
+                        sourceUrl: event.target.value,
+                      }))
+                    }
+                    rows={4}
+                    className="resize-y rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+                  />
+                </label>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.2em] text-xf-muted">
+                      Tipo
+                    </span>
+                    <select
+                      value={editSourceForm.type}
+                      onChange={(event) =>
+                        setEditSourceForm((currentForm) => ({
+                          ...currentForm,
+                          type: event.target.value as IptvSourceType,
+                        }))
+                      }
+                      className="rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-xf-red"
+                    >
+                      <option value="m3u">M3U</option>
+                      <option value="xtream">Xtream</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </label>
+
+                  <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/40 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={editSourceForm.isActive}
+                      onChange={(event) =>
+                        setEditSourceForm((currentForm) => ({
+                          ...currentForm,
+                          isActive: event.target.checked,
+                        }))
+                      }
+                      className="h-4 w-4 accent-xf-red"
+                    />
+                    <span className="text-sm font-bold text-white">
+                      Fonte ativa
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeEditSource}
+                  disabled={isUpdatingSource}
+                  className="rounded-xl bg-white/10 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isUpdatingSource}
+                  className="rounded-xl bg-xf-red px-5 py-3 text-sm font-black text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isUpdatingSource ? 'Salvando...' : 'Salvar fonte'}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
       </section>
     </AdminLayout>
   );

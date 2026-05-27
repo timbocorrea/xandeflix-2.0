@@ -4,6 +4,7 @@ type NativeAndroidPlayerOpenOptions = {
   url: string;
   title?: string;
   kind?: string;
+  startPositionMs?: number;
 };
 
 type NativeAndroidPlayerOpenResult = {
@@ -31,6 +32,8 @@ type NativeAndroidInlinePreviewStopResult = {
 type NativeAndroidPlayerResumeEvent = {
   source?: string;
   timestamp?: number;
+  positionMs?: number;
+  streamUrl?: string;
 };
 
 type NativeAndroidPlayerPlugin = {

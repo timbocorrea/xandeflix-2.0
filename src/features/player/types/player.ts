@@ -28,6 +28,7 @@ export type UniversalPlayerSource = {
   url: string;
   mimeType?: string;
   title?: string;
+  startPositionMs?: number;
 };
 
 export type UniversalPlayerAdapter = {

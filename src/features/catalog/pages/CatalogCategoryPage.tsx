@@ -27,6 +27,8 @@ import {
   storeCachedSeriesEpisodes,
 } from '../services/seriesEpisodesCache.service';
 import {
+  getEpisodePlaybackProgressPercent,
+  getEpisodeResumePositionMs,
   hasEpisodePlaybackProgress,
   type EpisodePlaybackProgressStatus,
 } from '../services/episodePlaybackProgress.service';
@@ -137,6 +139,105 @@ function readInitialCategoryItems(
 
 function resolveVisibleCount(totalItems: number) {
   return Math.min(totalItems, INITIAL_VISIBLE_ITEMS);
+}
+
+function getSeriesCollectionKey(item: HomeVodItem) {
+  return (
+    item.seriesKey ||
+    item.tmdbId ||
+    item.tmdbTitle ||
+    item.groupTitle ||
+    item.title
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function dedupeSeriesCollections(items: HomeVodItem[]) {
+  const byCollection = new Map<string, HomeVodItem>();
+
+  for (const item of items) {
+    const key = getSeriesCollectionKey(item);
+
+    if (!key || byCollection.has(key)) {
+      continue;
+    }
+
+    byCollection.set(key, {
+      ...item,
+      kind: 'series',
+      isSeriesCollection: true,
+    });
+  }
+
+  return Array.from(byCollection.values());
+}
+
+function getSeriesHeroItem(items: HomeVodItem[]) {
+  return (
+    items.find((item) => item.backdropUrl || item.posterUrl) ??
+    items[0] ??
+    null
+  );
+}
+
+function SeriesCategoryHero({
+  item,
+  totalItems,
+}: {
+  item: HomeVodItem | null;
+  totalItems: number;
+}) {
+  const backgroundUrl = item?.backdropUrl || item?.posterUrl || null;
+
+  return (
+    <section className="relative mb-7 min-h-[21rem] overflow-hidden rounded-[1rem] border border-white/10 bg-zinc-950 px-7 py-7 shadow-2xl">
+      {backgroundUrl ? (
+        <img
+          src={backgroundUrl}
+          alt={item?.title ?? 'Séries'}
+          className="absolute inset-0 size-full object-cover opacity-35"
+        />
+      ) : null}
+
+      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/85 to-black/25" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/25 to-transparent" />
+
+      <div className="relative z-10 flex min-h-[17rem] max-w-3xl flex-col justify-end">
+        <p className="mb-2 text-xs font-black uppercase tracking-[0.34em] text-xf-red">
+          Catálogo
+        </p>
+
+        <h1 className="text-5xl font-black leading-none text-white drop-shadow-lg md:text-6xl">
+          Séries
+        </h1>
+
+        <p className="mt-4 max-w-2xl text-lg font-semibold leading-snug text-zinc-200">
+          Séries, novelas, doramas e temporadas liberadas para esta licença.
+        </p>
+
+        {item ? (
+          <div className="mt-5 flex flex-wrap items-center gap-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
+            <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">
+              Destaque
+            </span>
+
+            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1">
+              {item.title}
+            </span>
+
+            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1">
+              {totalItems} títulos
+            </span>
+          </div>
+        ) : (
+          <div className="mt-5 inline-flex w-fit rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
+            Carregando séries...
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function formatHeroRating(value?: string) {
@@ -279,6 +380,7 @@ type EpisodeListRowProps = {
   index: number;
   title: string;
   playbackStatus?: EpisodePlaybackStatus;
+  progressPercent?: number;
   focusKey: string;
   onEnterPress: () => void;
   onArrowPress: (direction: string) => boolean;
@@ -286,7 +388,7 @@ type EpisodeListRowProps = {
 
 function getEpisodePlaybackStatusLabel(status: EpisodePlaybackStatus) {
   if (status === 'played') {
-    return 'Reproduzido anteriormente';
+    return 'Iniciado';
   }
 
   return 'Não iniciado';
@@ -296,6 +398,7 @@ function EpisodeListRow({
   index,
   title,
   playbackStatus = 'not-started',
+  progressPercent = 0,
   focusKey,
   onEnterPress,
   onArrowPress,
@@ -317,6 +420,10 @@ function EpisodeListRow({
   }, [focused, ref]);
 
   const statusLabel = getEpisodePlaybackStatusLabel(playbackStatus);
+  const isStarted = playbackStatus === 'played';
+  const safeProgressPercent = isStarted
+    ? Math.min(100, Math.max(8, progressPercent))
+    : 0;
 
   return (
     <div
@@ -324,10 +431,12 @@ function EpisodeListRow({
       role="button"
       tabIndex={-1}
       className={
-        'grid grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
+        'relative overflow-hidden grid grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
         (focused
           ? 'border-xf-red bg-xf-red/15 shadow-[0_0_0_0.18rem_rgba(229,9,20,0.28)]'
-          : 'border-white/10 bg-white/[0.035]')
+          : isStarted
+            ? 'border-blue-400/80 bg-blue-500/10 shadow-[0_0_0_0.08rem_rgba(96,165,250,0.28)]'
+            : 'border-white/10 bg-white/[0.035]')
       }
     >
       <div className="flex h-9 w-12 items-center justify-center rounded-[0.4rem] border border-white/10 bg-black/35 text-[0.68rem] font-black text-white">
@@ -338,9 +447,25 @@ function EpisodeListRow({
         {title}
       </h3>
 
-      <p className="shrink-0 rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-[0.55rem] font-black uppercase tracking-[0.12em] text-zinc-300">
+      <p
+        className={
+          'shrink-0 rounded-full border px-2.5 py-1 text-[0.55rem] font-black uppercase tracking-[0.12em] ' +
+          (isStarted
+            ? 'border-blue-300/80 bg-blue-500/20 text-blue-100'
+            : 'border-white/10 bg-black/30 text-zinc-300')
+        }
+      >
         {statusLabel}
       </p>
+
+      {isStarted ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[0.12rem] bg-blue-950/60">
+          <div
+            className="h-full bg-blue-300/90"
+            style={{ width: `${safeProgressPercent}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -506,9 +631,14 @@ export function CatalogCategoryPage({
 
         if (cachedItems?.length) {
           const filteredCachedItems = filterSeriesEpisodes(cachedItems);
-          setItems(filteredCachedItems);
-          setVisibleItemCount(resolveVisibleCount(filteredCachedItems.length));
-          setIsLoading(filteredCachedItems.length === 0);
+          const nextCachedItems =
+            category.slug === 'series'
+              ? dedupeSeriesCollections(filteredCachedItems)
+              : filteredCachedItems;
+
+          setItems(nextCachedItems);
+          setVisibleItemCount(resolveVisibleCount(nextCachedItems.length));
+          setIsLoading(nextCachedItems.length === 0);
         } else if (items.length === 0) {
           setItems([]);
           setVisibleItemCount(0);
@@ -526,6 +656,10 @@ export function CatalogCategoryPage({
         }
 
         const filteredNextItems = filterSeriesEpisodes(nextItems);
+        const nextCategoryItems =
+          category.slug === 'series'
+            ? dedupeSeriesCollections(filteredNextItems)
+            : filteredNextItems;
 
         if (isSeriesDetailPage) {
           storeCachedSeriesEpisodes(
@@ -540,8 +674,21 @@ export function CatalogCategoryPage({
           );
         }
 
-        setItems(filteredNextItems);
-        setVisibleItemCount(resolveVisibleCount(filteredNextItems.length));
+        setItems((currentItems) => {
+          if (nextCategoryItems.length === 0 && currentItems.length > 0) {
+            return currentItems;
+          }
+
+          return nextCategoryItems;
+        });
+
+        setVisibleItemCount((currentCount) => {
+          if (nextCategoryItems.length === 0 && items.length > 0) {
+            return currentCount;
+          }
+
+          return resolveVisibleCount(nextCategoryItems.length);
+        });
       } catch (error) {
         if (isMounted) {
           setErrorMessage(
@@ -570,6 +717,8 @@ export function CatalogCategoryPage({
   );
 
   const heroItem = isSeriesDetailPage ? items[0] ?? visibleItems[0] : null;
+  const isSeriesCategoryPage = !isSeriesDetailPage && category?.slug === 'series';
+  const seriesHeroItem = isSeriesCategoryPage ? getSeriesHeroItem(items) : null;
 
   useEffect(() => {
     if (!isSeriesDetailPage) {
@@ -662,13 +811,10 @@ export function CatalogCategoryPage({
     return item.episodeTitle || item.title || `Episodio ${index + 1}`;
   }
 
-  function resolveEpisodePlaybackStatus(
-    item: HomeVodItem,
-    index: number,
-  ): EpisodePlaybackStatus {
+  function getEpisodePlaybackIdentity(item: HomeVodItem, index: number) {
     const episodeTitle = resolveEpisodeTitle(item, index);
 
-    return hasEpisodePlaybackProgress({
+    return {
       episodeId: item.id,
       streamUrl: item.streamUrl,
       title: episodeTitle,
@@ -677,9 +823,25 @@ export function CatalogCategoryPage({
       seriesTmdbId,
       seriesTmdbTitle,
       episodeIndex: index,
-    })
+    };
+  }
+
+  function resolveEpisodePlaybackStatus(
+    item: HomeVodItem,
+    index: number,
+  ): EpisodePlaybackStatus {
+    return hasEpisodePlaybackProgress(getEpisodePlaybackIdentity(item, index))
       ? 'played'
       : 'not-started';
+  }
+
+  function resolveEpisodePlaybackProgressPercent(
+    item: HomeVodItem,
+    index: number,
+  ) {
+    return getEpisodePlaybackProgressPercent(
+      getEpisodePlaybackIdentity(item, index),
+    );
   }
 
   async function loadSimilarCollections(currentHeroItem: HomeVodItem | null) {
@@ -840,12 +1002,24 @@ export function CatalogCategoryPage({
     }
 
     const episodeTitle = resolveEpisodeTitle(item, index);
+    const resumePositionMs = getEpisodeResumePositionMs({
+      episodeId: item.id,
+      streamUrl: item.streamUrl,
+      title: episodeTitle,
+      seriesTitle,
+      seriesGroupTitle,
+      seriesTmdbId,
+      seriesTmdbTitle,
+      episodeIndex: index,
+    });
 
     const params = new URLSearchParams({
       src: item.streamUrl,
       title: episodeTitle,
       episodeId: item.id,
       episodeIndex: String(index),
+      startPositionMs: String(resumePositionMs),
+      direct: '1',
     });
 
     if (seriesTitle) {
@@ -1080,18 +1254,27 @@ export function CatalogCategoryPage({
             </div>
           </SeriesDetailHeroFrame>
         ) : (
-          <header className="mb-6">
-            <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
-              Catalogo
-            </p>
-            <h1 className="mt-2 text-[1.7rem] font-black tracking-[-0.03em] text-white md:text-[2.35rem]">
-              {category?.title ?? 'Categoria'}
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm font-semibold text-zinc-300">
-              {category?.description ??
-                'Categoria indisponivel neste momento.'}
-            </p>
-          </header>
+          <>
+            {isSeriesCategoryPage ? (
+              <SeriesCategoryHero
+                item={seriesHeroItem}
+                totalItems={items.length}
+              />
+            ) : (
+              <header className="mb-6">
+                <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
+                  Catalogo
+                </p>
+                <h1 className="mt-2 text-[1.7rem] font-black tracking-[-0.03em] text-white md:text-[2.35rem]">
+                  {category?.title ?? 'Categoria'}
+                </h1>
+                <p className="mt-2 max-w-3xl text-sm font-semibold text-zinc-300">
+                  {category?.description ??
+                    'Categoria indisponivel neste momento.'}
+                </p>
+              </header>
+            )}
+          </>
         )}
 
         {isLoading && visibleItems.length === 0 ? (
@@ -1143,6 +1326,10 @@ export function CatalogCategoryPage({
                           index={absoluteIndex}
                           title={resolveEpisodeTitle(item, absoluteIndex)}
                           playbackStatus={resolveEpisodePlaybackStatus(
+                            item,
+                            absoluteIndex,
+                          )}
+                          progressPercent={resolveEpisodePlaybackProgressPercent(
                             item,
                             absoluteIndex,
                           )}

@@ -25,7 +25,10 @@ import {
   heartbeatPlaybackSession,
   endPlaybackSession,
 } from '@/features/licensing/services/playbackSession.service';
-import { markEpisodePlaybackStarted } from '@/features/catalog/services/episodePlaybackProgress.service';
+import {
+  markEpisodePlaybackStarted,
+  updateEpisodePlaybackPosition,
+} from '@/features/catalog/services/episodePlaybackProgress.service';
 import type {
   PlayerError,
   PlayerTelemetryEvent,
@@ -143,11 +146,15 @@ export default function UniversalPlayerPage() {
   const [telemetryEvents, setTelemetryEvents] = useState<PlayerTelemetryEvent[]>(
     [],
   );
+  const hasAutoOpenedDirectPlayerRef = useRef(false);
+  const shouldReturnFromDirectPlayerRef = useRef(false);
 
   const streamUrl = searchParams.get('src') ?? '';
   const title = searchParams.get('title') ?? 'Conteúdo Xandeflix';
+  const isDirectPlayback = searchParams.get('direct') === '1';
   const episodeId = searchParams.get('episodeId');
   const episodeIndex = searchParams.get('episodeIndex');
+  const startPositionMs = Number(searchParams.get('startPositionMs') ?? 0);
   const seriesTitle = searchParams.get('seriesTitle');
   const seriesGroupTitle = searchParams.get('seriesGroupTitle');
   const seriesTmdbId = searchParams.get('seriesTmdbId');
@@ -351,6 +358,7 @@ export default function UniversalPlayerPage() {
     }, [
       episodeId,
       episodeIndex,
+      startPositionMs,
       maskedStreamUrl,
       pushPlayerEvent,
       seriesGroupTitle,
@@ -388,17 +396,6 @@ export default function UniversalPlayerPage() {
 
       const videoElement = videoRef.current;
 
-      if (!videoElement) {
-        setStatus('idle');
-        pushPlayerEvent(
-          'VIDEO_ELEMENT_MISSING',
-          'warn',
-          'Elemento de vídeo ainda não está disponível.',
-        );
-
-        return;
-      }
-
       if (!stream) {
         setStatus('error');
         setPlaybackError({
@@ -414,18 +411,31 @@ export default function UniversalPlayerPage() {
         return;
       }
 
+      const useNativeAndroidAdapter = isNativeAndroidPlayerAvailable(stream.kind);
+
+      if (!videoElement && !useNativeAndroidAdapter) {
+        setStatus('idle');
+        pushPlayerEvent(
+          'VIDEO_ELEMENT_MISSING',
+          'warn',
+          'Elemento de vídeo ainda não está disponível.',
+        );
+
+        return;
+      }
+
       const adapter =
         stream.kind === 'hls'
-          ? createHlsAdapter(videoElement, {
+          ? createHlsAdapter(videoElement as HTMLVideoElement, {
               onTelemetryEvent: pushTelemetryEvent,
             })
-          : isNativeAndroidPlayerAvailable(stream.kind)
+          : useNativeAndroidAdapter
             ? createNativeAndroidPlayerAdapter(stream.kind)
             : stream.kind === 'mpegts'
-              ? createMpegTsAdapter(videoElement, {
+              ? createMpegTsAdapter(videoElement as HTMLVideoElement, {
                   onTelemetryEvent: pushTelemetryEvent,
                 })
-              : createNativeVideoAdapter(videoElement, {
+              : createNativeVideoAdapter(videoElement as HTMLVideoElement, {
                   onTelemetryEvent: pushTelemetryEvent,
                 });
 
@@ -448,7 +458,8 @@ export default function UniversalPlayerPage() {
       adapter
         .load({
           url: streamUrl,
-          title,
+        title,
+        startPositionMs,
         })
         .then(() => {
           if (isCancelled) return;
@@ -530,14 +541,33 @@ export default function UniversalPlayerPage() {
     if (usesNativeAndroidPlayer) {
       try {
         setStatus('loading');
-        await ensurePlaybackSessionStarted();
+        pushPlayerEvent(
+          'NATIVE_PLAYER_OPEN_REQUESTED',
+          'info',
+          'Solicitando abertura imediata do player nativo Android.',
+        );
+
         await adapter.play();
+
         setStatus('ready');
         pushPlayerEvent(
           'NATIVE_PLAYER_OPENED',
           'info',
           'Player nativo Android aberto para reprodução.',
         );
+
+        void ensurePlaybackSessionStarted().catch((sessionError: unknown) => {
+          const sessionErrorMessage = normalizePlaybackError(sessionError);
+
+          pushPlayerEvent(
+            'PLAYBACK_SESSION_START_BEST_EFFORT_FAILED',
+            'warn',
+            'Sessão de reprodução falhou após abertura do player nativo, sem bloquear playback.',
+            {
+              message: sessionErrorMessage,
+            },
+          );
+        });
       } catch (error) {
         const errorMessage = normalizePlaybackError(error);
 
@@ -599,6 +629,26 @@ export default function UniversalPlayerPage() {
       );
     }
   }, [ensurePlaybackSessionStarted, pushPlayerEvent, status, usesNativeAndroidPlayer]);
+
+  useEffect(() => {
+    if (
+      !isDirectPlayback ||
+      !usesNativeAndroidPlayer ||
+      hasAutoOpenedDirectPlayerRef.current ||
+      status !== 'ready'
+    ) {
+      return;
+    }
+
+    hasAutoOpenedDirectPlayerRef.current = true;
+    shouldReturnFromDirectPlayerRef.current = true;
+    void handleTogglePlayback();
+  }, [
+    handleTogglePlayback,
+    isDirectPlayback,
+    status,
+    usesNativeAndroidPlayer,
+  ]);
 
   const handleRetry = useCallback(() => {
     setPlaybackError(null);
@@ -692,6 +742,138 @@ export default function UniversalPlayerPage() {
     };
   }, [endCurrentPlaybackSession, navigate]);
 
+  useEffect(() => {
+    if (!isDirectPlayback || !usesNativeAndroidPlayer) {
+      return;
+    }
+
+    let isActive = true;
+    let fallbackReturnTimer: number | null = null;
+
+    const clearFallbackReturnTimer = () => {
+      if (fallbackReturnTimer !== null) {
+        window.clearTimeout(fallbackReturnTimer);
+        fallbackReturnTimer = null;
+      }
+    };
+
+    const returnFromDirectNativePlayer = (event?: { positionMs?: number }) => {
+      if (!isActive || !shouldReturnFromDirectPlayerRef.current) {
+        return;
+      }
+
+      clearFallbackReturnTimer();
+
+      const returnedPositionMs =
+        typeof event?.positionMs === 'number' && Number.isFinite(event.positionMs)
+          ? Math.max(0, event.positionMs)
+          : 0;
+
+      const parsedEpisodeIndex =
+        episodeIndex !== null ? Number(episodeIndex) : Number.NaN;
+
+      if (
+        returnedPositionMs >= 5000 &&
+        episodeId &&
+        Number.isFinite(parsedEpisodeIndex)
+      ) {
+        updateEpisodePlaybackPosition(
+          {
+            episodeId,
+            episodeIndex: parsedEpisodeIndex,
+            streamUrl,
+            title,
+          },
+          Math.floor(returnedPositionMs / 1000),
+        );
+      }
+
+      shouldReturnFromDirectPlayerRef.current = false;
+      endCurrentPlaybackSession();
+
+      window.setTimeout(() => {
+        if (!isActive) {
+          return;
+        }
+
+        if (window.history.length > 1) {
+          navigate(-1);
+          return;
+        }
+
+        navigate('/');
+      }, 80);
+    };
+
+    const scheduleFallbackReturn = () => {
+      if (!shouldReturnFromDirectPlayerRef.current || fallbackReturnTimer !== null) {
+        return;
+      }
+
+      fallbackReturnTimer = window.setTimeout(() => {
+        fallbackReturnTimer = null;
+        returnFromDirectNativePlayer();
+      }, 700);
+    };
+
+    const handleWindowFocus = () => {
+      scheduleFallbackReturn();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        scheduleFallbackReturn();
+      }
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const appListenerPromise = App.addListener(
+      'resume',
+      returnFromDirectNativePlayer,
+    );
+
+    return () => {
+      isActive = false;
+      clearFallbackReturnTimer();
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      void appListenerPromise.then((listener) => {
+        listener.remove();
+      });
+    };
+  }, [
+    endCurrentPlaybackSession,
+    episodeId,
+    episodeIndex,
+    isDirectPlayback,
+    navigate,
+    streamUrl,
+    title,
+    usesNativeAndroidPlayer,
+  ]);
+
+  if (isDirectPlayback && usesNativeAndroidPlayer) {
+    return (
+      <main
+        className="xf-app flex min-h-screen items-center justify-center bg-black px-8 text-white"
+        aria-label="Carregando player nativo em tela cheia"
+      >
+        <div className="text-center">
+          <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-white/20 border-t-xf-red" />
+          <p className="text-2xl font-black uppercase tracking-[0.28em] text-white">
+            Carregando...
+          </p>
+          <p className="mt-3 max-w-2xl truncate text-base font-semibold text-zinc-400">
+            {title}
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="xf-app min-h-screen bg-black px-8 py-8 text-white">
       <div className="mx-auto flex min-h-[80vh] max-w-6xl flex-col justify-between rounded-3xl border border-white/10 bg-zinc-950 p-8">
@@ -717,6 +899,17 @@ export default function UniversalPlayerPage() {
               playsInline
               preload="metadata"
               onPlaying={() => {
+                const videoElement = videoRef.current;
+
+                if (
+                  videoElement &&
+                  Number.isFinite(startPositionMs) &&
+                  startPositionMs >= 5000 &&
+                  videoElement.currentTime < 1
+                ) {
+                  videoElement.currentTime = startPositionMs / 1000;
+                }
+
                 setStatus('playing');
                 pushNativeVideoEvent(
                   'PLAYING',
@@ -724,7 +917,46 @@ export default function UniversalPlayerPage() {
                   'HTMLVideoElement entrou em estado playing.',
                 );
               }}
+              onTimeUpdate={() => {
+                const videoElement = videoRef.current;
+
+                if (!videoElement || videoElement.currentTime < 5) {
+                  return;
+                }
+
+                updateEpisodePlaybackPosition(
+                  {
+                    episodeId,
+                    streamUrl,
+                    title,
+                    seriesTitle,
+                    seriesGroupTitle,
+                    seriesTmdbId,
+                    seriesTmdbTitle,
+                    episodeIndex: episodeIndex ? Number(episodeIndex) : null,
+                  },
+                  videoElement.currentTime,
+                );
+              }}
               onPause={() => {
+                const videoElement = videoRef.current;
+
+                if (videoElement && videoElement.currentTime >= 5) {
+                  updateEpisodePlaybackPosition(
+                    {
+                      episodeId,
+                      streamUrl,
+                      title,
+                      seriesTitle,
+                      seriesGroupTitle,
+                      seriesTmdbId,
+                      seriesTmdbTitle,
+                      episodeIndex: episodeIndex ? Number(episodeIndex) : null,
+                    },
+                    videoElement.currentTime,
+                  );
+                }
+
                 setStatus((currentStatus) => {
                   if (
                     currentStatus === 'loading' ||

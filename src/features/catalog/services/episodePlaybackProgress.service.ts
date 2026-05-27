@@ -135,3 +135,60 @@ export function markEpisodePlaybackStarted(
     // Progresso local best-effort. Falha nao deve bloquear reproducao.
   }
 }
+
+export function getEpisodeResumePositionMs(input: EpisodePlaybackProgressInput) {
+  const progress = readEpisodePlaybackProgress(input);
+  const positionSeconds = progress?.lastPositionSeconds;
+
+  if (typeof positionSeconds !== 'number' || positionSeconds < 5) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor(positionSeconds * 1000));
+}
+
+export function updateEpisodePlaybackPosition(
+  input: EpisodePlaybackProgressInput,
+  positionSeconds: number,
+) {
+  if (typeof window === 'undefined' || !Number.isFinite(positionSeconds)) {
+    return;
+  }
+
+  try {
+    const key = getEpisodePlaybackProgressKey(input);
+
+    if (!key) {
+      return;
+    }
+
+    const currentRecord = readEpisodePlaybackProgress(input);
+    const now = Date.now();
+
+    const nextRecord: EpisodePlaybackProgressRecord = {
+      status: 'played',
+      startedAt: currentRecord?.startedAt ?? now,
+      updatedAt: now,
+      playCount: currentRecord?.playCount ?? 1,
+      lastPositionSeconds: Math.max(0, Math.floor(positionSeconds)),
+    };
+
+    window.localStorage.setItem(key, JSON.stringify(nextRecord));
+  } catch {
+    // Progresso local best-effort. Falha nao deve bloquear reproducao.
+  }
+}
+
+
+export function getEpisodePlaybackProgressPercent(
+  input: EpisodePlaybackProgressInput,
+) {
+  const progress = readEpisodePlaybackProgress(input);
+  const positionSeconds = progress?.lastPositionSeconds;
+
+  if (typeof positionSeconds !== 'number' || positionSeconds < 5) {
+    return progress?.status === 'played' ? 8 : 0;
+  }
+
+  return Math.min(96, Math.max(8, Math.round((positionSeconds / 3600) * 100)));
+}

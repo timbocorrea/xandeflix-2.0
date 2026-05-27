@@ -10,6 +10,13 @@ export interface CreateIptvSourceInput {
   is_active?: boolean;
 }
 
+export interface UpdateIptvSourceInput {
+  name?: string;
+  source_url?: string;
+  type?: IptvSource['type'];
+  is_active?: boolean;
+}
+
 export async function listAdminIptvSources(): Promise<IptvSource[]> {
   const { data, error } = await supabase
     .from('iptv_sources')
@@ -47,6 +54,27 @@ export async function createAdminIptvSource(input: CreateIptvSourceInput): Promi
       type: input.type ?? 'm3u',
       is_active: input.is_active ?? true,
     })
+    .select('*')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as IptvSource;
+}
+
+export async function updateAdminIptvSource(
+  sourceId: string,
+  input: UpdateIptvSourceInput,
+): Promise<IptvSource> {
+  const { data, error } = await supabase
+    .from('iptv_sources')
+    .update({
+      ...input,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sourceId)
     .select('*')
     .single();
 

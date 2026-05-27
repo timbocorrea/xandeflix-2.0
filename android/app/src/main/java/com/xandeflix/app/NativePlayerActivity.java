@@ -3,6 +3,8 @@ package com.xandeflix.app;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -20,28 +22,44 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DefaultDataSource;
-import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @OptIn(markerClass = UnstableApi.class)
 public class NativePlayerActivity extends AppCompatActivity {
     public static final String EXTRA_STREAM_URL = "streamUrl";
     public static final String EXTRA_STREAM_TITLE = "streamTitle";
     public static final String EXTRA_STREAM_KIND = "streamKind";
+    public static final String EXTRA_START_POSITION_MS = "startPositionMs";
 
     private static final String TAG = "XandeflixNativePlayer";
     private static final long SEEK_BACK_MS = 5000L;
     private static final long SEEK_FORWARD_MS = 15000L;
     private static final long CONTROLLER_AUTO_HIDE_DELAY_MS = 3500L;
+    private static final long MIN_RESUME_POSITION_MS = 5000L;
+    private static final int FAST_START_MIN_BUFFER_MS = 2500;
+    private static final int FAST_START_MAX_BUFFER_MS = 12000;
+    private static final int FAST_START_PLAYBACK_BUFFER_MS = 500;
+    private static final int FAST_START_REBUFFER_MS = 1000;
+    private static final String PLAYBACK_PROGRESS_PREFS = "xandeflix_native_playback_progress";
+    private static long lastPlaybackPositionMs = 0L;
+    private static String lastPlaybackStreamUrl = "";
 
     private PlayerView playerView;
     private ExoPlayer player;
     private String currentMaskedUrl = "";
     private String currentTitle = "Xandeflix Player";
     private String currentKind = "unknown";
+    private String currentStreamUrl = "";
+    private long requestedStartPositionMs = 0L;
+    private List<NativeStreamRequest> playbackRequests = new ArrayList<>();
+    private int currentRequestIndex = 0;
     private final android.os.Handler controllerHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable hideControllerRunnable = new Runnable() {
         @Override
@@ -71,6 +89,10 @@ public class NativePlayerActivity extends AppCompatActivity {
         String streamUrl = getIntent().getStringExtra(EXTRA_STREAM_URL);
         String streamTitle = getIntent().getStringExtra(EXTRA_STREAM_TITLE);
         String streamKind = getIntent().getStringExtra(EXTRA_STREAM_KIND);
+        requestedStartPositionMs = Math.max(
+                0L,
+                getIntent().getLongExtra(EXTRA_START_POSITION_MS, 0L)
+        );
 
         if (streamUrl == null || streamUrl.trim().isEmpty()) {
             Toast.makeText(this, "URL do stream não informada.", Toast.LENGTH_LONG).show();
@@ -79,13 +101,14 @@ public class NativePlayerActivity extends AppCompatActivity {
         }
 
         String trimmedUrl = streamUrl.trim();
+        currentStreamUrl = trimmedUrl;
         currentTitle = streamTitle != null && !streamTitle.trim().isEmpty()
                 ? streamTitle.trim()
                 : "Xandeflix Player";
         currentKind = streamKind != null && !streamKind.trim().isEmpty()
                 ? streamKind.trim()
                 : "unknown";
-        currentMaskedUrl = maskStreamUrl(trimmedUrl);
+        currentMaskedUrl = NativeStreamRequest.fromRawUrl(trimmedUrl).get(0).getMaskedUrl();
 
         Log.i(
                 TAG,
@@ -155,31 +178,48 @@ public class NativePlayerActivity extends AppCompatActivity {
                 "Inicializando ExoPlayer. title=\"" + currentTitle + "\" kind=\"" + currentKind + "\" url=" + currentMaskedUrl
         );
 
-        DefaultHttpDataSource.Factory httpDataSourceFactory =
-                new DefaultHttpDataSource.Factory()
-                        .setUserAgent(
-                                "Mozilla/5.0 (Linux; Android 12; Fire TV) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36"
-                        )
-                        .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(30000)
-                        .setReadTimeoutMs(30000)
-                        .setDefaultRequestProperties(
-                                new java.util.HashMap<String, String>() {{
-                                    put("Accept", "*/*");
-                                    put("Connection", "keep-alive");
-                                    put("Origin", "https://xandeflix.app");
-                                    put("Referer", "https://xandeflix.app/");
-                                }}
-                        );
+        playbackRequests = NativeStreamRequest.fromRawUrl(streamUrl);
+        currentRequestIndex = 0;
+
+        if (playbackRequests.isEmpty()) {
+            Toast.makeText(this, "URL do stream nao informada.", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+
+        NativeStreamRequest initialRequest = playbackRequests.get(0);
+        currentMaskedUrl = initialRequest.getMaskedUrl();
+
+        Log.i(
+                TAG,
+                "Candidatos nativos preparados. count="
+                        + playbackRequests.size()
+                        + " headers="
+                        + initialRequest.getHeaderSummary()
+                        + " url="
+                        + currentMaskedUrl
+        );
 
         DefaultDataSource.Factory dataSourceFactory =
-                new DefaultDataSource.Factory(this, httpDataSourceFactory);
+                new DefaultDataSource.Factory(this, initialRequest.createHttpDataSourceFactory());
 
         DefaultMediaSourceFactory mediaSourceFactory =
                 new DefaultMediaSourceFactory(dataSourceFactory);
 
+        DefaultLoadControl fastStartLoadControl =
+                new DefaultLoadControl.Builder()
+                        .setBufferDurationsMs(
+                                FAST_START_MIN_BUFFER_MS,
+                                FAST_START_MAX_BUFFER_MS,
+                                FAST_START_PLAYBACK_BUFFER_MS,
+                                FAST_START_REBUFFER_MS
+                        )
+                        .setPrioritizeTimeOverSizeThresholds(true)
+                        .build();
+
         player = new ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)
+                .setLoadControl(fastStartLoadControl)
                 .setSeekBackIncrementMs(SEEK_BACK_MS)
                 .setSeekForwardIncrementMs(SEEK_FORWARD_MS)
                 .build();
@@ -191,12 +231,28 @@ public class NativePlayerActivity extends AppCompatActivity {
             public void onPlayerError(PlaybackException error) {
                 Log.e(
                         TAG,
-                        "Falha no ExoPlayer. title=\"" + currentTitle + "\" kind=\"" + currentKind + "\" url=" + currentMaskedUrl + " error=" + error.getErrorCodeName(),
+                        "Falha no ExoPlayer. title=\""
+                                + currentTitle
+                                + "\" kind=\""
+                                + currentKind
+                                + "\" url="
+                                + currentMaskedUrl
+                                + " candidate="
+                                + getCurrentCandidateLabel()
+                                + " error="
+                                + error.getErrorCodeName()
+                                + " httpStatus="
+                                + NativeStreamRequest.describeHttpStatus(error),
                         error
                 );
+
+                if (tryNextPlaybackCandidate(error)) {
+                    return;
+                }
+
                 Toast.makeText(
                         NativePlayerActivity.this,
-                        "Não foi possível reproduzir: " + error.getErrorCodeName(),
+                        buildPlaybackErrorMessage(error),
                         Toast.LENGTH_LONG
                 ).show();
             }
@@ -205,20 +261,142 @@ public class NativePlayerActivity extends AppCompatActivity {
             public void onPlaybackStateChanged(int playbackState) {
                 Log.i(
                         TAG,
-                        "Estado ExoPlayer: " + playbackState + " title=\"" + currentTitle + "\" kind=\"" + currentKind + "\" url=" + currentMaskedUrl
+                        "Estado ExoPlayer: "
+                                + playbackState
+                                + " title=\""
+                                + currentTitle
+                                + "\" kind=\""
+                                + currentKind
+                                + "\" url="
+                                + currentMaskedUrl
+                                + " candidate="
+                                + getCurrentCandidateLabel()
                 );
             }
         });
 
-        MediaItem mediaItem = MediaItem.fromUri(Uri.parse(streamUrl));
-
-        player.setMediaItem(mediaItem);
-        player.prepare();
-        player.play();
+        preparePlaybackCandidate(0, false);
 
         showControllerAndFocus();
 
-        Log.i(TAG, "ExoPlayer iniciado para stream do usuário: " + currentMaskedUrl);
+        Log.i(
+                TAG,
+                "ExoPlayer fast-start solicitado para stream do usuário: " + currentMaskedUrl
+                        + " bufferForPlaybackMs=" + FAST_START_PLAYBACK_BUFFER_MS
+                        + " minBufferMs=" + FAST_START_MIN_BUFFER_MS
+                        + " maxBufferMs=" + FAST_START_MAX_BUFFER_MS
+        );
+    }
+
+    private void preparePlaybackCandidate(int requestIndex, boolean retry) {
+        if (player == null || requestIndex < 0 || requestIndex >= playbackRequests.size()) {
+            return;
+        }
+
+        NativeStreamRequest request = playbackRequests.get(requestIndex);
+        currentRequestIndex = requestIndex;
+        currentMaskedUrl = request.getMaskedUrl();
+
+        if (retry) {
+            player.stop();
+            player.clearMediaItems();
+        }
+
+        MediaItem mediaItem = MediaItem.fromUri(Uri.parse(request.getMediaUrl()));
+        long savedPlaybackPositionMs = shouldResumePlaybackPosition()
+                ? readSavedPlaybackPositionMs(currentStreamUrl)
+                : 0L;
+        long resumePositionMs = Math.max(
+                requestedStartPositionMs,
+                savedPlaybackPositionMs
+        );
+        boolean hasExplicitEpisodeResume =
+                requestedStartPositionMs >= MIN_RESUME_POSITION_MS;
+
+        if (resumePositionMs >= MIN_RESUME_POSITION_MS) {
+            player.setMediaItem(mediaItem, resumePositionMs);
+            Log.i(
+                    TAG,
+                    "Preparando stream com retomada inicial. explicit="
+                            + hasExplicitEpisodeResume
+                            + " requestedStartPositionMs="
+                            + requestedStartPositionMs
+                            + " savedPlaybackPositionMs="
+                            + savedPlaybackPositionMs
+                            + " resumePositionMs="
+                            + resumePositionMs
+                            + " url="
+                            + currentMaskedUrl
+                            + " candidate="
+                            + getCurrentCandidateLabel()
+            );
+        } else {
+            player.setMediaItem(mediaItem);
+            Log.i(
+                    TAG,
+                    "Preparando stream sem retomada inicial. url="
+                            + currentMaskedUrl
+                            + " candidate="
+                            + getCurrentCandidateLabel()
+            );
+        }
+
+        player.setPlayWhenReady(true);
+        player.prepare();
+    }
+
+    private boolean tryNextPlaybackCandidate(PlaybackException error) {
+        if (!NativeStreamRequest.shouldTryNextCandidate(error)) {
+            return false;
+        }
+
+        int nextRequestIndex = currentRequestIndex + 1;
+
+        if (nextRequestIndex >= playbackRequests.size()) {
+            return false;
+        }
+
+        NativeStreamRequest nextRequest = playbackRequests.get(nextRequestIndex);
+
+        Log.w(
+                TAG,
+                "HTTP ruim no candidato "
+                        + getCurrentCandidateLabel()
+                        + " status="
+                        + NativeStreamRequest.describeHttpStatus(error)
+                        + ". Tentando proximo candidato "
+                        + nextRequest.getCandidateIndex()
+                        + "/"
+                        + nextRequest.getCandidateCount()
+                        + " url="
+                        + nextRequest.getMaskedUrl()
+        );
+
+        preparePlaybackCandidate(nextRequestIndex, true);
+        return true;
+    }
+
+    private String buildPlaybackErrorMessage(PlaybackException error) {
+        String httpStatus = NativeStreamRequest.describeHttpStatus(error);
+
+        if (!"unknown".equals(httpStatus)) {
+            return "Nao foi possivel reproduzir: " + error.getErrorCodeName() + " (HTTP " + httpStatus + ")";
+        }
+
+        return "Nao foi possivel reproduzir: " + error.getErrorCodeName();
+    }
+
+    private String getCurrentCandidateLabel() {
+        if (playbackRequests.isEmpty() || currentRequestIndex < 0 || currentRequestIndex >= playbackRequests.size()) {
+            return "0/0";
+        }
+
+        NativeStreamRequest request = playbackRequests.get(currentRequestIndex);
+        return request.getCandidateIndex() + "/" + request.getCandidateCount();
+    }
+
+    private boolean shouldResumePlaybackPosition() {
+        return !"mpegts".equalsIgnoreCase(currentKind);
     }
 
     @Override
@@ -315,6 +493,66 @@ public class NativePlayerActivity extends AppCompatActivity {
         );
     }
 
+    public static long consumeLastPlaybackPositionMs() {
+        long positionMs = lastPlaybackPositionMs;
+        lastPlaybackPositionMs = 0L;
+        return Math.max(0L, positionMs);
+    }
+
+    public static String consumeLastPlaybackStreamUrl() {
+        String streamUrl = lastPlaybackStreamUrl;
+        lastPlaybackStreamUrl = "";
+        return streamUrl != null ? streamUrl : "";
+    }
+
+    private String getProgressStorageKey() {
+        return "url:" + currentStreamUrl;
+    }
+
+    private long readSavedPlaybackPositionMs(String streamUrl) {
+        try {
+            if (streamUrl == null || streamUrl.trim().isEmpty()) {
+                return 0L;
+            }
+
+            SharedPreferences preferences = getSharedPreferences(
+                    PLAYBACK_PROGRESS_PREFS,
+                    Context.MODE_PRIVATE
+            );
+
+            return Math.max(0L, preferences.getLong("url:" + streamUrl.trim(), 0L));
+        } catch (Exception error) {
+            Log.w(TAG, "Falha ao ler progresso salvo do player nativo.", error);
+            return 0L;
+        }
+    }
+
+    private void saveCurrentPlaybackPosition() {
+        try {
+            if (player == null || currentStreamUrl == null || currentStreamUrl.isEmpty() || !shouldResumePlaybackPosition()) {
+                return;
+            }
+
+            long currentPositionMs = player.getCurrentPosition();
+
+            if (currentPositionMs < MIN_RESUME_POSITION_MS) {
+                return;
+            }
+
+            lastPlaybackPositionMs = currentPositionMs;
+            lastPlaybackStreamUrl = currentStreamUrl;
+
+            getSharedPreferences(PLAYBACK_PROGRESS_PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putLong(getProgressStorageKey(), currentPositionMs)
+                    .apply();
+
+            Log.i(TAG, "Progresso nativo salvo. positionMs=" + currentPositionMs + " url=" + currentMaskedUrl);
+        } catch (Exception error) {
+            Log.w(TAG, "Falha ao salvar progresso do player nativo.", error);
+        }
+    }
+
     private void showControllerAndFocus() {
         if (playerView != null) {
             playerView.showController();
@@ -371,6 +609,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         if (player != null) {
+            saveCurrentPlaybackPosition();
             player.pause();
         }
 
@@ -391,6 +630,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         }
 
         if (player != null) {
+            saveCurrentPlaybackPosition();
             player.release();
             player = null;
         }

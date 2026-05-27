@@ -4,6 +4,7 @@ import { AdminLayout } from '../components/AdminLayout';
 
 import {
   createAdminLicense,
+  createAdminLicenseDevice,
   createAdminLicenseIptvSource,
   importAdminLicenseIptvSourceChannels,
   listAdminClients,
@@ -412,6 +413,10 @@ export function AdminLicensesPage() {
   const [updatingLicenseDeviceId, setUpdatingLicenseDeviceId] = useState<
     string | null
   >(null);
+  const [isCreatingLicenseDevice, setIsCreatingLicenseDevice] = useState(false);
+  const [newLicenseDeviceIdentifier, setNewLicenseDeviceIdentifier] = useState('');
+  const [newLicenseDeviceName, setNewLicenseDeviceName] = useState('');
+  const [newLicenseDevicePlatform, setNewLicenseDevicePlatform] = useState('Fire TV');
 
   const [editingLicense, setEditingLicense] = useState<License | null>(null);
   const [isUpdatingLicense, setIsUpdatingLicense] = useState(false);
@@ -734,6 +739,73 @@ export function AdminLicensesPage() {
       setErrorMessage(getUpdateLicenseStatusErrorMessage(error));
     } finally {
       setUpdatingLicenseStatusId(null);
+    }
+  }
+
+  async function handleCreateLicenseDevice(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedLicense) {
+      return;
+    }
+
+    const normalizedDeviceIdentifier = newLicenseDeviceIdentifier.trim();
+
+    if (!normalizedDeviceIdentifier) {
+      setErrorMessage('Informe o identificador do dispositivo.');
+      return;
+    }
+
+    try {
+      setIsCreatingLicenseDevice(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const createdDevice = await createAdminLicenseDevice({
+        licenseId: selectedLicense.id,
+        deviceIdentifier: normalizedDeviceIdentifier,
+        deviceName: newLicenseDeviceName.trim() || 'Dispositivo autorizado',
+        platform: newLicenseDevicePlatform.trim() || 'Fire TV',
+        isActive: true,
+      });
+
+      setLicenseDevices((currentDevices) => {
+        const exists = currentDevices.some((device) => device.id === createdDevice.id);
+
+        return exists
+          ? currentDevices.map((device) =>
+              device.id === createdDevice.id ? createdDevice : device,
+            )
+          : [createdDevice, ...currentDevices];
+      });
+
+      setDevicesByLicenseId((current) => {
+        const currentDevices = current[selectedLicense.id] ?? [];
+        const exists = currentDevices.some((device) => device.id === createdDevice.id);
+        const nextDevices = exists
+          ? currentDevices.map((device) =>
+              device.id === createdDevice.id ? createdDevice : device,
+            )
+          : [createdDevice, ...currentDevices];
+
+        return {
+          ...current,
+          [selectedLicense.id]: nextDevices,
+        };
+      });
+
+      setNewLicenseDeviceIdentifier('');
+      setNewLicenseDeviceName('');
+      setNewLicenseDevicePlatform('Fire TV');
+      setSuccessMessage('Dispositivo pré-vinculado à licença com sucesso.');
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível pré-vincular o dispositivo à licença.',
+      );
+    } finally {
+      setIsCreatingLicenseDevice(false);
     }
   }
 
@@ -1252,8 +1324,7 @@ export function AdminLicensesPage() {
 
                 {licenseDevices.length === 0 ? (
                   <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100">
-                    Próximo passo: informe o código <strong>{selectedLicense.license_code}</strong> ao cliente.
-                    O dispositivo aparecerá aqui após a ativação no app.
+                    Próximo passo: pré-vincule o identificador do dispositivo autorizado antes de liberar esta licença ao cliente.
                   </div>
                 ) : null}
 
@@ -1270,10 +1341,60 @@ export function AdminLicensesPage() {
                 {licenseDevices.length} dispositivo(s) vinculado(s).
               </p>
 
+              <form
+                onSubmit={(event) => void handleCreateLicenseDevice(event)}
+                className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4"
+              >
+                <h4 className="text-sm font-black text-white">
+                  Pré-vincular dispositivo
+                </h4>
+                <p className="mt-1 text-xs text-xf-muted">
+                  Cadastre o identificador autorizado antes de liberar a licença.
+                </p>
+
+                <div className="mt-3 grid gap-3">
+                  <input
+                    type="text"
+                    value={newLicenseDeviceIdentifier}
+                    onChange={(event) =>
+                      setNewLicenseDeviceIdentifier(event.target.value)
+                    }
+                    placeholder="Identificador do dispositivo"
+                    className="rounded-xl border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-xf-red"
+                  />
+
+                  <input
+                    type="text"
+                    value={newLicenseDeviceName}
+                    onChange={(event) => setNewLicenseDeviceName(event.target.value)}
+                    placeholder="Nome do dispositivo"
+                    className="rounded-xl border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-xf-red"
+                  />
+
+                  <input
+                    type="text"
+                    value={newLicenseDevicePlatform}
+                    onChange={(event) =>
+                      setNewLicenseDevicePlatform(event.target.value)
+                    }
+                    placeholder="Plataforma"
+                    className="rounded-xl border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-xf-red"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isCreatingLicenseDevice}
+                  className="mt-4 rounded-xl bg-xf-red px-4 py-2 text-xs font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isCreatingLicenseDevice ? 'Vinculando...' : 'Pré-vincular dispositivo'}
+                </button>
+              </form>
+
               <div className="mt-4 flex flex-col gap-3">
                 {licenseDevices.length === 0 ? (
                   <p className="text-sm text-xf-muted">
-                    Nenhum dispositivo ativado. Entregue o código da licença ao cliente para concluir a ativação no app.
+                    Nenhum dispositivo pré-vinculado. Cadastre o identificador antes de entregar a licença ao cliente.
                   </p>
                 ) : (
                   licenseDevices.map((device) => (

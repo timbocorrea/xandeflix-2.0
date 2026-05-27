@@ -42,11 +42,13 @@ const menuItems = [
     label: 'Filmes',
     icon: Clapperboard,
     navId: 'sidebar-movies',
+    path: '/launches',
   },
   {
     label: 'Séries',
     icon: MonitorPlay,
     navId: 'sidebar-series',
+    path: '/category/series',
   },
   {
     label: 'Configurações',

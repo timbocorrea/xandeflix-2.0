@@ -15,7 +15,6 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DefaultDataSource;
-import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.ui.AspectRatioFrameLayout;
@@ -27,6 +26,9 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @OptIn(markerClass = UnstableApi.class)
 @CapacitorPlugin(name = "NativeAndroidPlayer")
 public class NativeAndroidPlayerPlugin extends Plugin {
@@ -35,6 +37,8 @@ public class NativeAndroidPlayerPlugin extends Plugin {
     private PlayerView inlinePreviewView;
     private ExoPlayer inlinePreviewPlayer;
     private String inlinePreviewMaskedUrl = "";
+    private List<NativeStreamRequest> inlinePreviewRequests = new ArrayList<>();
+    private int inlinePreviewRequestIndex = 0;
 
     @Override
     protected void handleOnResume() {
@@ -44,7 +48,15 @@ public class NativeAndroidPlayerPlugin extends Plugin {
         event.put("source", "native-android-player-plugin-resume");
         event.put("timestamp", System.currentTimeMillis());
 
-        Log.i(TAG, "NativeAndroidPlayer resume event.");
+        long lastPositionMs = NativePlayerActivity.consumeLastPlaybackPositionMs();
+        String lastStreamUrl = NativePlayerActivity.consumeLastPlaybackStreamUrl();
+
+        if (lastPositionMs > 0L) {
+            event.put("positionMs", lastPositionMs);
+            event.put("streamUrl", lastStreamUrl);
+        }
+
+        Log.i(TAG, "NativeAndroidPlayer resume event. positionMs=" + lastPositionMs);
         notifyListeners("resume", event, true);
     }
 
@@ -53,6 +65,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
         String url = call.getString("url");
         String title = call.getString("title", "Xandeflix Player");
         String kind = call.getString("kind", "unknown");
+        Long startPositionMs = call.getLong("startPositionMs", 0L);
 
         if (url == null || url.trim().isEmpty()) {
             call.reject("URL do stream não informada.");
@@ -63,13 +76,14 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
         Log.i(
                 TAG,
-                "Plugin open solicitado. title=\"" + title + "\" kind=\"" + kind + "\" url=" + maskStreamUrl(trimmedUrl)
+                "Plugin open solicitado. title=\"" + title + "\" kind=\"" + kind + "\" url=" + NativeStreamRequest.fromRawUrl(trimmedUrl).get(0).getMaskedUrl()
         );
 
         Intent intent = new Intent(getContext(), NativePlayerActivity.class);
         intent.putExtra(NativePlayerActivity.EXTRA_STREAM_URL, trimmedUrl);
         intent.putExtra(NativePlayerActivity.EXTRA_STREAM_TITLE, title);
         intent.putExtra(NativePlayerActivity.EXTRA_STREAM_KIND, kind);
+        intent.putExtra(NativePlayerActivity.EXTRA_START_POSITION_MS, Math.max(0L, startPositionMs));
 
         getActivity().startActivity(intent);
 
@@ -121,7 +135,16 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                     return;
                 }
 
-                inlinePreviewMaskedUrl = maskStreamUrl(trimmedUrl);
+                inlinePreviewRequests = NativeStreamRequest.fromRawUrl(trimmedUrl);
+                inlinePreviewRequestIndex = 0;
+
+                if (inlinePreviewRequests.isEmpty()) {
+                    call.reject("URL do stream nao informada para preview inline.");
+                    return;
+                }
+
+                NativeStreamRequest initialRequest = inlinePreviewRequests.get(0);
+                inlinePreviewMaskedUrl = initialRequest.getMaskedUrl();
 
                 inlinePreviewView = new PlayerView(activity);
                 inlinePreviewView.setUseController(false);
@@ -143,25 +166,8 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 contentRoot.addView(inlinePreviewView, layoutParams);
                 inlinePreviewView.bringToFront();
 
-                DefaultHttpDataSource.Factory httpDataSourceFactory =
-                        new DefaultHttpDataSource.Factory()
-                                .setUserAgent(
-                                        "Mozilla/5.0 (Linux; Android 12; Fire TV) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36"
-                                )
-                                .setAllowCrossProtocolRedirects(true)
-                                .setConnectTimeoutMs(30000)
-                                .setReadTimeoutMs(30000)
-                                .setDefaultRequestProperties(
-                                        new java.util.HashMap<String, String>() {{
-                                            put("Accept", "*/*");
-                                            put("Connection", "keep-alive");
-                                            put("Origin", "https://xandeflix.app");
-                                            put("Referer", "https://xandeflix.app/");
-                                        }}
-                                );
-
                 DefaultDataSource.Factory dataSourceFactory =
-                        new DefaultDataSource.Factory(activity, httpDataSourceFactory);
+                        new DefaultDataSource.Factory(activity, initialRequest.createHttpDataSourceFactory());
 
                 DefaultMediaSourceFactory mediaSourceFactory =
                         new DefaultMediaSourceFactory(dataSourceFactory);
@@ -177,23 +183,43 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                     public void onPlayerError(PlaybackException error) {
                         Log.e(
                                 TAG,
-                                "Falha no preview inline nativo. title=\"" + safeTitle + "\" kind=\"" + safeKind + "\" url=" + inlinePreviewMaskedUrl + " error=" + error.getErrorCodeName(),
+                                "Falha no preview inline nativo. title=\""
+                                        + safeTitle
+                                        + "\" kind=\""
+                                        + safeKind
+                                        + "\" url="
+                                        + inlinePreviewMaskedUrl
+                                        + " candidate="
+                                        + getInlinePreviewCandidateLabel()
+                                        + " error="
+                                        + error.getErrorCodeName()
+                                        + " httpStatus="
+                                        + NativeStreamRequest.describeHttpStatus(error),
                                 error
                         );
+
+                        tryNextInlinePreviewCandidate(error);
                     }
 
                     @Override
                     public void onPlaybackStateChanged(int playbackState) {
                         Log.i(
                                 TAG,
-                                "Preview inline nativo estado=" + playbackState + " title=\"" + safeTitle + "\" kind=\"" + safeKind + "\" url=" + inlinePreviewMaskedUrl
+                                "Preview inline nativo estado="
+                                        + playbackState
+                                        + " title=\""
+                                        + safeTitle
+                                        + "\" kind=\""
+                                        + safeKind
+                                        + "\" url="
+                                        + inlinePreviewMaskedUrl
+                                        + " candidate="
+                                        + getInlinePreviewCandidateLabel()
                         );
                     }
                 });
 
-                inlinePreviewPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(trimmedUrl)));
-                inlinePreviewPlayer.prepare();
-                inlinePreviewPlayer.play();
+                prepareInlinePreviewCandidate(0, false);
 
                 Log.i(
                         TAG,
@@ -209,6 +235,83 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 call.reject("Erro ao iniciar preview inline nativo: " + error.getMessage());
             }
         });
+    }
+
+    private void prepareInlinePreviewCandidate(int requestIndex, boolean retry) {
+        if (
+                inlinePreviewPlayer == null
+                        || requestIndex < 0
+                        || requestIndex >= inlinePreviewRequests.size()
+        ) {
+            return;
+        }
+
+        NativeStreamRequest request = inlinePreviewRequests.get(requestIndex);
+        inlinePreviewRequestIndex = requestIndex;
+        inlinePreviewMaskedUrl = request.getMaskedUrl();
+
+        if (retry) {
+            inlinePreviewPlayer.stop();
+            inlinePreviewPlayer.clearMediaItems();
+        }
+
+        inlinePreviewPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(request.getMediaUrl())));
+        inlinePreviewPlayer.prepare();
+        inlinePreviewPlayer.play();
+
+        Log.i(
+                TAG,
+                "Preview inline nativo preparando candidato "
+                        + getInlinePreviewCandidateLabel()
+                        + " url="
+                        + inlinePreviewMaskedUrl
+                        + " headers="
+                        + request.getHeaderSummary()
+        );
+    }
+
+    private boolean tryNextInlinePreviewCandidate(PlaybackException error) {
+        if (!NativeStreamRequest.shouldTryNextCandidate(error)) {
+            return false;
+        }
+
+        int nextRequestIndex = inlinePreviewRequestIndex + 1;
+
+        if (nextRequestIndex >= inlinePreviewRequests.size()) {
+            return false;
+        }
+
+        NativeStreamRequest nextRequest = inlinePreviewRequests.get(nextRequestIndex);
+
+        Log.w(
+                TAG,
+                "HTTP ruim no preview inline candidato "
+                        + getInlinePreviewCandidateLabel()
+                        + " status="
+                        + NativeStreamRequest.describeHttpStatus(error)
+                        + ". Tentando proximo candidato "
+                        + nextRequest.getCandidateIndex()
+                        + "/"
+                        + nextRequest.getCandidateCount()
+                        + " url="
+                        + nextRequest.getMaskedUrl()
+        );
+
+        prepareInlinePreviewCandidate(nextRequestIndex, true);
+        return true;
+    }
+
+    private String getInlinePreviewCandidateLabel() {
+        if (
+                inlinePreviewRequests.isEmpty()
+                        || inlinePreviewRequestIndex < 0
+                        || inlinePreviewRequestIndex >= inlinePreviewRequests.size()
+        ) {
+            return "0/0";
+        }
+
+        NativeStreamRequest request = inlinePreviewRequests.get(inlinePreviewRequestIndex);
+        return request.getCandidateIndex() + "/" + request.getCandidateCount();
     }
 
     @PluginMethod
@@ -257,6 +360,8 @@ public class NativeAndroidPlayerPlugin extends Plugin {
             }
 
             inlinePreviewMaskedUrl = "";
+            inlinePreviewRequests = new ArrayList<>();
+            inlinePreviewRequestIndex = 0;
         } catch (Exception error) {
             Log.e(TAG, "Falha ao encerrar preview inline nativo.", error);
         }

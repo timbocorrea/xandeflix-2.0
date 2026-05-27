@@ -177,6 +177,22 @@ export interface ImportAdminLicenseIptvSourceChannelsResponse {
   details?: string;
 }
 
+export interface CreateAdminLicenseDeviceInput {
+  licenseId: string;
+  deviceIdentifier: string;
+  deviceName?: string | null;
+  platform?: string | null;
+  isActive?: boolean;
+}
+
+export interface CreateAdminLicenseDeviceResponse {
+  ok: boolean;
+  device?: LicenseDevice;
+  alreadyExisted?: boolean;
+  error?: string;
+  details?: string;
+}
+
 export interface UpdateAdminLicenseDeviceStatusInput {
   deviceId: string;
   isActive: boolean;
@@ -444,6 +460,34 @@ export async function importAdminLicenseIptvSourceChannels(
   }
 
   return data.result;
+}
+
+export async function createAdminLicenseDevice(
+  input: CreateAdminLicenseDeviceInput,
+): Promise<LicenseDevice> {
+  const { data, error } =
+    await supabase.functions.invoke<CreateAdminLicenseDeviceResponse>(
+      'create-license-device',
+      {
+        body: {
+          licenseId: input.licenseId,
+          deviceIdentifier: input.deviceIdentifier.trim(),
+          deviceName: input.deviceName ?? null,
+          platform: input.platform ?? null,
+          isActive: input.isActive ?? true,
+        },
+      },
+    );
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.ok || !data.device) {
+    throw new Error(data?.error ?? 'CREATE_LICENSE_DEVICE_FAILED');
+  }
+
+  return data.device;
 }
 
 export async function updateAdminLicenseDeviceStatus({
