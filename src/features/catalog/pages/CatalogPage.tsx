@@ -74,7 +74,7 @@ function mapHomeVodSectionsToCatalogSections(
     eyebrow: section.eyebrow,
     description: section.description,
     showSeeAll: section.id === 'home-vod-launches',
-    items: section.items.filter((item) => isTrustedHomePosterUrl(item.posterUrl)).map((item) => ({
+    items: section.items.map((item) => ({
       id: item.id,
       kind: item.kind,
       title: item.title,
@@ -97,10 +97,6 @@ function getHomeVodLimitPerSection(isTv: boolean) {
   return isTv ? 15 : 20;
 }
 
-function isTrustedHomePosterUrl(value?: string | null) {
-  return Boolean(value?.startsWith('https://image.tmdb.org/t/p/'));
-}
-
 function normalizeHomeSectionTitle(value?: string | null) {
   return (value ?? '')
     .normalize('NFD')
@@ -120,7 +116,7 @@ function isRenderableVodHomeSection(section: HomeVodSection) {
     return false;
   }
 
-  return section.items.some((item) => isTrustedHomePosterUrl(item.posterUrl));
+  return section.items.length > 0;
 }
 
 function filterRenderableVodHomeSections(sections?: HomeVodSection[] | null) {
@@ -319,7 +315,7 @@ export function CatalogPage() {
 
     for (const section of resolvedCatalogSections) {
       for (const item of section.items) {
-        if (!item.backdropUrl && !item.posterUrl) {
+        if (!item.title) {
           continue;
         }
 
