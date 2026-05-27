@@ -9,6 +9,8 @@ type GetClientLicenseChannelsRequest = {
   requireTmdbPoster?: boolean;
   contentKind?: string;
   contentKinds?: string[];
+  groupTitle?: string;
+  groupTitles?: string[];
 };
 
 type LicenseRecord = {
@@ -57,6 +59,7 @@ type LicenseChannelCacheRecord = {
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 500;
+const MAX_GROUP_TITLE_FILTERS = 50;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -216,6 +219,22 @@ Deno.serve(async (request) => {
       }
     }
 
+    const validatedGroupTitle =
+      typeof payload.groupTitle === 'string'
+        ? normalizeText(payload.groupTitle)
+        : null;
+    const validatedGroupTitles = Array.isArray(payload.groupTitles)
+      ? Array.from(
+          new Set(
+            payload.groupTitles
+              .map((groupTitle) =>
+                typeof groupTitle === 'string' ? groupTitle.trim() : '',
+              )
+              .filter(Boolean),
+          ),
+        ).slice(0, MAX_GROUP_TITLE_FILTERS)
+      : [];
+
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         persistSession: false,
@@ -287,6 +306,12 @@ Deno.serve(async (request) => {
       channelsQuery = channelsQuery.in('content_kind', validatedKinds);
     } else if (validatedSingleKind) {
       channelsQuery = channelsQuery.eq('content_kind', validatedSingleKind);
+    }
+
+    if (validatedGroupTitle) {
+      channelsQuery = channelsQuery.eq('group_title', validatedGroupTitle);
+    } else if (validatedGroupTitles.length > 0) {
+      channelsQuery = channelsQuery.in('group_title', validatedGroupTitles);
     }
 
     if (requireTmdbMatched) {

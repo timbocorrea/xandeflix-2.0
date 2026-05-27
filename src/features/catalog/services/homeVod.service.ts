@@ -50,9 +50,35 @@ export type LoadHomeVodCategoryInput = {
 
 const DEFAULT_LIMIT_PER_SECTION = 20;
 const DEFAULT_CATEGORY_ITEMS_LIMIT = 800;
+const HOME_MOVIE_GROUP_SAMPLE_PAGE_SIZE = 30;
+const HOME_MOVIE_GROUP_FETCH_CONCURRENCY = 4;
 const HOME_VOD_CACHE_STORAGE_PREFIX = 'xandeflix:home-vod-sections:v10:';
 const HOME_VOD_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
+
+// Fonte BLACK TV validada pela Fase 3.8.7; evita varrer todo o catalogo de filmes.
+const MOVIE_CATEGORY_GROUP_TITLES = [
+  'Filmes | Drama',
+  'Filmes | Comedia',
+  'Filmes | Acao',
+  'Filmes | Terror',
+  'Filmes | Animacao',
+  'Filmes | Legendados',
+  'Filmes | Lancamentos',
+  'Filmes | Suspense',
+  'Filmes | Romance',
+  'Filmes | Documentarios',
+  'Filmes | Nacionais',
+  'Filmes | Fantasia',
+  'Filmes | Crime',
+  'Filmes | Ficcao',
+  'Filmes | Faroeste',
+  'Filmes | Religiosos',
+  'Filmes | Guerra',
+  'Filmes | Aventura',
+  'Filmes | Família',
+  'Filmes | Cinema',
+] as const;
 
 type HomeVodCacheEntry = {
   createdAt: number;
@@ -545,97 +571,86 @@ function normalizeSectionId(value: string) {
     .replace(/^-+|-+$/g, '');
 }
 
+function hasHomeVodArtwork(item: HomeVodItem) {
+  return Boolean(item.posterUrl || item.backdropUrl);
+}
+
+function hasHomeVodTmdbMetadata(item: HomeVodItem) {
+  return Boolean(item.tmdbId || item.tmdbTitle);
+}
+
+function sortHomeMovieItems(firstItem: HomeVodItem, secondItem: HomeVodItem) {
+  const artworkScore =
+    Number(hasHomeVodArtwork(secondItem)) - Number(hasHomeVodArtwork(firstItem));
+
+  if (artworkScore !== 0) {
+    return artworkScore;
+  }
+
+  const tmdbScore =
+    Number(hasHomeVodTmdbMetadata(secondItem)) -
+    Number(hasHomeVodTmdbMetadata(firstItem));
+
+  if (tmdbScore !== 0) {
+    return tmdbScore;
+  }
+
+  return firstItem.title.localeCompare(secondItem.title, 'pt-BR', {
+    sensitivity: 'base',
+  });
+}
+
+async function mapWithConcurrency<TItem, TResult>(
+  items: readonly TItem[],
+  concurrency: number,
+  mapper: (item: TItem) => Promise<TResult>,
+) {
+  const results: TResult[] = [];
+  let nextIndex = 0;
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      for (;;) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+
+        if (currentIndex >= items.length) {
+          return;
+        }
+
+        results[currentIndex] = await mapper(items[currentIndex]);
+      }
+    },
+  );
+
+  await Promise.all(workers);
+
+  return results;
+}
+
 function sortItemsByTitle(firstItem: HomeVodItem, secondItem: HomeVodItem) {
-  const posterScore =
-    Number(Boolean(secondItem.posterUrl)) - Number(Boolean(firstItem.posterUrl));
-
-  if (posterScore !== 0) {
-    return posterScore;
-  }
-
-  return firstItem.title.localeCompare(secondItem.title, 'pt-BR');
-}
-
-function cleanSeriesEpisodeTitle(value: string) {
-  return value
-    .replace(/\s*S\d{1,2}\s*E\d{1,4}.*$/i, '')
-    .replace(/\s*\d{1,2}x\d{1,4}.*$/i, '')
-    .replace(/\s+Ep(?:is[oó]dio)?\s*\d+.*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function getSeriesCollectionKey(item: HomeVodItem) {
-  if (item.tmdbId) {
-    return `tmdb:${item.tmdbId}`;
-  }
-
-  const title = item.tmdbTitle || cleanSeriesEpisodeTitle(item.title);
-
-  return `title:${normalizeCatalogText(item.groupTitle)}:${normalizeCatalogText(title)}`;
-}
-
-function createSeriesCollectionItems(items: HomeVodItem[]) {
-  const collections = new Map<
-    string,
-    { representative: HomeVodItem; episodes: HomeVodItem[] }
-  >();
-
-  for (const item of items) {
-
-    const key = getSeriesCollectionKey(item);
-    const current = collections.get(key);
-
-    if (!current) {
-      collections.set(key, {
-        representative: item,
-        episodes: [item],
-      });
-      continue;
-    }
-
-    current.episodes.push(item);
-
-    if (!current.representative.posterUrl && item.posterUrl) {
-      current.representative = item;
-    }
-  }
-
-  return Array.from(collections.entries())
-    .map(([seriesKey, collection]) => {
-      const representative = collection.representative;
-      const title =
-        representative.tmdbTitle ||
-        cleanSeriesEpisodeTitle(representative.title) ||
-        representative.title;
-
-      return {
-        ...representative,
-        id: `series-collection-${seriesKey.replace(/[^a-z0-9]+/gi, '-')}`,
-        title,
-        subtitle:
-          collection.episodes.length === 1
-            ? '1 episodio'
-            : `${collection.episodes.length} episodios`,
-        streamUrl: undefined,
-        seriesKey,
-        episodeCount: collection.episodes.length,
-        isSeriesCollection: true,
-      };
-    })
-    .sort(sortItemsByTitle);
+  return sortHomeMovieItems(firstItem, secondItem);
 }
 
 function createCategorySections({
   items,
   sectionPrefix,
   maxItemsPerSection,
+  groupTitleOrder,
 }: {
   items: HomeVodItem[];
   sectionPrefix: string;
   maxItemsPerSection: number;
+  groupTitleOrder?: readonly string[];
 }) {
   const groupedItems = new Map<string, HomeVodItem[]>();
+  const groupTitleOrderIndex = new Map(
+    groupTitleOrder?.map((groupTitle, index) => [
+      normalizeCatalogText(groupTitle),
+      index,
+    ]),
+  );
 
   for (const item of items) {
     const groupTitle = item.groupTitle?.trim();
@@ -650,9 +665,20 @@ function createCategorySections({
   }
 
   return Array.from(groupedItems.entries())
-    .sort(([firstTitle], [secondTitle]) =>
-      firstTitle.localeCompare(secondTitle, 'pt-BR'),
-    )
+    .sort(([firstTitle], [secondTitle]) => {
+      const firstIndex =
+        groupTitleOrderIndex.get(normalizeCatalogText(firstTitle)) ??
+        Number.MAX_SAFE_INTEGER;
+      const secondIndex =
+        groupTitleOrderIndex.get(normalizeCatalogText(secondTitle)) ??
+        Number.MAX_SAFE_INTEGER;
+
+      if (firstIndex !== secondIndex) {
+        return firstIndex - secondIndex;
+      }
+
+      return firstTitle.localeCompare(secondTitle, 'pt-BR');
+    })
     .map(([groupTitle, groupItems]) =>
       createSection({
         id: `${sectionPrefix}-${normalizeSectionId(groupTitle)}`,
@@ -696,6 +722,61 @@ function createSection({
   };
 }
 
+async function loadHomeMovieGroupItems({
+  licenseCode,
+  deviceIdentifier,
+  groupTitle,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+  groupTitle: string;
+}) {
+  const channels = await listAuthorizedLicenseChannels({
+    licenseCode,
+    deviceIdentifier,
+    pageSize: HOME_MOVIE_GROUP_SAMPLE_PAGE_SIZE,
+    maxPages: 1,
+    requireTmdbMatched: false,
+    requireTmdbPoster: false,
+    contentKind: 'movie',
+    groupTitle,
+  });
+
+  return channels
+    .filter(isVodChannelForHome)
+    .map(mapChannelToHomeVodItem)
+    .filter(
+      (item) =>
+        item.kind === 'movie' && matchesAnyGroupTitle(item, [groupTitle]),
+    );
+}
+
+async function loadHomeMovieCategorySampleItems({
+  licenseCode,
+  deviceIdentifier,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+}) {
+  const groupItems = await mapWithConcurrency(
+    MOVIE_CATEGORY_GROUP_TITLES,
+    HOME_MOVIE_GROUP_FETCH_CONCURRENCY,
+    async (groupTitle) => {
+      try {
+        return await loadHomeMovieGroupItems({
+          licenseCode,
+          deviceIdentifier,
+          groupTitle,
+        });
+      } catch {
+        return [];
+      }
+    },
+  );
+
+  return groupItems.flat();
+}
+
 export async function loadHomeVodSections({
   licenseCode,
   deviceIdentifier,
@@ -720,38 +801,21 @@ export async function loadHomeVodSections({
 
   const cacheKey = createHomeVodCacheKey(cacheInput);
 
-  const channels = await listAuthorizedLicenseChannels({
+  const movieItems = await loadHomeMovieCategorySampleItems({
     licenseCode,
     deviceIdentifier,
-    pageSize: 500,
-    maxPages: 10,
-    requireTmdbMatched: false,
-    requireTmdbPoster: false,
-    contentKinds: ['movie', 'series'],
   });
 
-  const vodItems = channels
-    .filter(isVodChannelForHome)
-    .map(mapChannelToHomeVodItem);
-
-  const movieItems = vodItems.filter((item) => item.kind === 'movie');
   const launchItems = movieItems
     .filter(isLaunchGroup)
-    .sort(sortMostRecentHomeItems);
+    .sort(sortHomeMovieItems);
   const regularMovieItems = movieItems.filter((item) => !isLaunchGroup(item));
-  const seriesItems = vodItems.filter((item) => item.kind === 'series');
-  const unknownVodItems = vodItems.filter((item) => item.kind === 'unknown');
 
   const movieCategorySections = createCategorySections({
     items: regularMovieItems,
     sectionPrefix: 'home-vod-movie-category',
     maxItemsPerSection: limitPerSection,
-  });
-
-  const seriesCategorySections = createCategorySections({
-    items: createSeriesCollectionItems(seriesItems),
-    sectionPrefix: 'home-vod-series-category',
-    maxItemsPerSection: limitPerSection,
+    groupTitleOrder: MOVIE_CATEGORY_GROUP_TITLES,
   });
 
   const sections = [
@@ -764,15 +828,6 @@ export async function loadHomeVodSections({
       limit: launchesLimit,
     }),
     ...movieCategorySections,
-    ...seriesCategorySections,
-    createSection({
-      id: 'home-vod-other',
-      title: 'Outros conteúdos VOD',
-      eyebrow: '',
-      description: 'Conteúdos sob demanda ainda sem categoria final.',
-      items: unknownVodItems,
-      limit: limitPerSection,
-    }),
   ].filter((section): section is HomeVodSection => Boolean(section));
 
   homeVodSectionsCache.set(cacheKey, {
@@ -834,6 +889,7 @@ export async function loadHomeVodCategoryItems({
     requireTmdbMatched: false,
     requireTmdbPoster: false,
     contentKinds: categoryContentKinds,
+    groupTitles: normalizedGroupTitles,
   });
 
   const items = channels

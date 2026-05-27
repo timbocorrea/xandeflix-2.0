@@ -57,6 +57,8 @@ export type ListAuthorizedLicenseChannelsInput = {
   requireTmdbPoster?: boolean;
   contentKind?: 'live' | 'movie' | 'series';
   contentKinds?: Array<'live' | 'movie' | 'series'>;
+  groupTitle?: string;
+  groupTitles?: string[];
 };
 
 function compareNullableText(current: string | null, next: string | null) {
@@ -128,6 +130,8 @@ async function fetchLicenseChannelsPage({
   requireTmdbPoster,
   contentKind,
   contentKinds,
+  groupTitle,
+  groupTitles,
 }: {
   licenseCode: string;
   deviceIdentifier: string;
@@ -137,6 +141,8 @@ async function fetchLicenseChannelsPage({
   requireTmdbPoster?: boolean;
   contentKind?: 'live' | 'movie' | 'series';
   contentKinds?: Array<'live' | 'movie' | 'series'>;
+  groupTitle?: string;
+  groupTitles?: string[];
 }) {
   const { data, error } =
     await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
@@ -151,6 +157,8 @@ async function fetchLicenseChannelsPage({
           ...(requireTmdbPoster === undefined ? {} : { requireTmdbPoster }),
           ...(contentKind === undefined ? {} : { contentKind }),
           ...(contentKinds === undefined ? {} : { contentKinds }),
+          ...(groupTitle === undefined ? {} : { groupTitle }),
+          ...(groupTitles === undefined ? {} : { groupTitles }),
         },
       },
     );
@@ -180,9 +188,24 @@ export async function listAuthorizedLicenseChannels({
   requireTmdbPoster,
   contentKind,
   contentKinds,
+  groupTitle,
+  groupTitles,
 }: ListAuthorizedLicenseChannelsInput): Promise<IptvChannel[]> {
   const normalizedLicenseCode = licenseCode.trim().toUpperCase();
   const normalizedDeviceIdentifier = deviceIdentifier.trim();
+  const normalizedGroupTitle = groupTitle?.trim() || undefined;
+  const normalizedGroupTitles = groupTitles
+    ? Array.from(
+        new Set(
+          groupTitles
+            .map((currentGroupTitle) => currentGroupTitle.trim())
+            .filter(Boolean),
+        ),
+      )
+    : undefined;
+  const safeGroupTitles = normalizedGroupTitles?.length
+    ? normalizedGroupTitles
+    : undefined;
 
   if (!normalizedLicenseCode || !normalizedDeviceIdentifier) {
     return [];
@@ -197,6 +220,8 @@ export async function listAuthorizedLicenseChannels({
     requireTmdbPoster,
     contentKind,
     contentKinds,
+    groupTitle: normalizedGroupTitle,
+    groupTitles: safeGroupTitles,
   });
 
   const channelRows = [...firstPage.channels];
@@ -215,6 +240,8 @@ export async function listAuthorizedLicenseChannels({
           requireTmdbPoster,
           contentKind,
           contentKinds,
+          groupTitle: normalizedGroupTitle,
+          groupTitles: safeGroupTitles,
         })
       );
     }
