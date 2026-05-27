@@ -27,11 +27,13 @@ import {
   type LoadHomeVodInput,
   type HomeVodSection,
 } from '../services/homeVod.service';
+import { CATALOG_WARMUP_REFRESH_EVENT } from '../services/catalogWarmup.service';
 
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 const SECTION_LOADING_CARD_COUNT = 4;
+const WARMUP_HOME_REFRESH_DEBOUNCE_MS = 2000;
 
 type CatalogPageItem = (typeof catalogSections)[number]['items'][number] & {
   streamUrl?: string;
@@ -267,6 +269,72 @@ export function CatalogPage() {
 
     return () => {
       isMounted = false;
+    };
+  }, [homeVodLimitPerSection, initialHomeCatalogState]);
+
+  useEffect(() => {
+    let isMounted = true;
+    let refreshTimeoutId: number | null = null;
+
+    async function refreshHomeAfterWarmup() {
+      const homeVodLoadInput =
+        initialHomeCatalogState.limitPerSection === homeVodLimitPerSection
+          ? initialHomeCatalogState.loadInput
+          : createHomeVodLoadInput(homeVodLimitPerSection);
+
+      if (!homeVodLoadInput) {
+        return;
+      }
+
+      try {
+        const homeVodSections = await loadHomeVodSections({
+          ...homeVodLoadInput,
+          limitPerSection: homeVodLimitPerSection,
+          preferFresh: true,
+        });
+
+        if (!isMounted) {
+          return;
+        }
+
+        const safeHomeVodSections =
+          filterRenderableVodHomeSections(homeVodSections);
+        const nextSections =
+          mapHomeVodSectionsToCatalogSections(safeHomeVodSections);
+
+        setRealCatalogSections(nextSections.length > 0 ? nextSections : null);
+      } catch (error) {
+        spatialDebug(
+          'catalog-grid',
+          'Falha ao atualizar Home apos warmup TMDB:',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
+    function handleWarmupRefresh() {
+      if (refreshTimeoutId !== null) {
+        window.clearTimeout(refreshTimeoutId);
+      }
+
+      refreshTimeoutId = window.setTimeout(() => {
+        refreshTimeoutId = null;
+        void refreshHomeAfterWarmup();
+      }, WARMUP_HOME_REFRESH_DEBOUNCE_MS);
+    }
+
+    window.addEventListener(CATALOG_WARMUP_REFRESH_EVENT, handleWarmupRefresh);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener(
+        CATALOG_WARMUP_REFRESH_EVENT,
+        handleWarmupRefresh,
+      );
+
+      if (refreshTimeoutId !== null) {
+        window.clearTimeout(refreshTimeoutId);
+      }
     };
   }, [homeVodLimitPerSection, initialHomeCatalogState]);
 

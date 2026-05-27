@@ -11,6 +11,11 @@ type CatalogWarmupInput = {
 type CatalogWarmupResponse = {
   ok?: boolean;
   hasMore?: boolean;
+  processed?: number;
+  matched?: number;
+  updated?: number;
+  processedByGroup?: Record<string, number>;
+  matchedByGroup?: Record<string, number>;
   error?: string;
   details?: string;
 };
@@ -22,6 +27,11 @@ const CATALOG_WARMUP_MAX_PER_GROUP = 60;
 const CATALOG_WARMUP_MAX_CYCLES = 6;
 const CATALOG_WARMUP_DELAY_MS = 2000;
 const CATALOG_WARMUP_STORAGE_PREFIX = 'xandeflix.catalogVodWarmup';
+
+export const CATALOG_WARMUP_REFRESH_EVENT =
+  'xandeflix:catalog-vod-warmup-refreshed';
+export const CATALOG_WARMUP_REFRESH_STORAGE_KEY =
+  'xandeflix:catalog-vod-warmup:last-refreshed-at';
 
 let runningWarmupKey: string | null = null;
 
@@ -49,6 +59,51 @@ function canStartWarmup(warmupKey: string) {
   return !lastStartedAt || Date.now() - lastStartedAt >= CATALOG_WARMUP_THROTTLE_MS;
 }
 
+function hasPositiveNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function hasPositiveGroupValue(value: unknown) {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  return Object.values(value).some(hasPositiveNumber);
+}
+
+function hasUsefulWarmupProgress(data: CatalogWarmupResponse) {
+  return (
+    data.ok === true &&
+    (hasPositiveNumber(data.processed) ||
+      hasPositiveNumber(data.matched) ||
+      hasPositiveNumber(data.updated) ||
+      hasPositiveGroupValue(data.processedByGroup) ||
+      hasPositiveGroupValue(data.matchedByGroup))
+  );
+}
+
+function notifyCatalogWarmupRefreshed(summary?: unknown) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const refreshedAt = Date.now();
+
+  window.localStorage.setItem(
+    CATALOG_WARMUP_REFRESH_STORAGE_KEY,
+    String(refreshedAt),
+  );
+
+  window.dispatchEvent(
+    new CustomEvent(CATALOG_WARMUP_REFRESH_EVENT, {
+      detail: {
+        refreshedAt,
+        summary,
+      },
+    }),
+  );
+}
+
 async function runCatalogVodWarmup(input: CatalogWarmupInput) {
   const warmupKey = createWarmupKey(input);
   runningWarmupKey = warmupKey;
@@ -74,6 +129,10 @@ async function runCatalogVodWarmup(input: CatalogWarmupInput) {
 
       if (error || !data?.ok || data.error || data.details) {
         break;
+      }
+
+      if (hasUsefulWarmupProgress(data)) {
+        notifyCatalogWarmupRefreshed(data);
       }
 
       if (!data.hasMore) {
