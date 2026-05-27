@@ -533,16 +533,17 @@ function isVodChannelForHome(channel: IptvChannel) {
     return false;
   }
 
-  if (isVodGroupTitleForHome(channel.groupTitle)) {
-    return true;
-  }
-
   if (channel.contentKind) {
     return channel.contentKind === 'movie' || channel.contentKind === 'series';
   }
 
+  if (isVodGroupTitleForHome(channel.groupTitle)) {
+    return isVodChannel(channel);
+  }
+
   return isVodChannel(channel);
 }
+
 function normalizeSectionId(value: string) {
   return normalizeCatalogText(value)
     .replace(/[^a-z0-9]+/g, '-')
