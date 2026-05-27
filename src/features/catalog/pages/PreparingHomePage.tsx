@@ -10,6 +10,7 @@ import {
   runAppBootstrap,
   type AppBootstrapProgress,
 } from '@/features/bootstrap/services/appBootstrap.service';
+import { startCatalogVodWarmup } from '@/features/catalog/services/catalogWarmup.service';
 
 const MIN_PREPARING_HOME_DELAY_MS = 900;
 
@@ -89,6 +90,13 @@ export function PreparingHomePage() {
         }
 
         setBootstrapWarning(result.warnings[0] ?? null);
+
+        // Chamar warmup do catálogo VOD de forma não bloqueante em background
+        void startCatalogVodWarmup({
+          licenseCode: result.licenseCode,
+          deviceIdentifier: result.deviceIdentifier,
+        });
+
         setStep('ready');
       })
       .catch((prepareError) => {
