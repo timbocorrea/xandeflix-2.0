@@ -71,9 +71,9 @@ const HOME_LIMIT_PER_SECTION = 12;
 const HOME_LAUNCHES_LIMIT = 20;
 const CATEGORY_FIRST_FOLD_LIMIT = 60;
 const SERIES_EPISODES_PRECACHE_LIMIT = 500;
-const SERIES_COLLECTIONS_PRECACHE_LIMIT = 8;
+const SERIES_COLLECTIONS_PRECACHE_LIMIT = 4;
 const LIVE_PREVIEW_PAGE_SIZE = 200;
-const LIVE_PREVIEW_MAX_PAGES = 20;
+const LIVE_PREVIEW_MAX_PAGES = 5;
 const IMAGE_PRELOAD_LIMIT = 90;
 const IMAGE_PRELOAD_CONCURRENCY = 6;
 const IMAGE_PRELOAD_TIMEOUT_MS = 2500;
@@ -600,25 +600,22 @@ export async function runAppBootstrap({
     deviceIdentifier: normalizedDeviceIdentifier,
   });
 
-  let seriesEpisodesPrecacheResult = {
+  const seriesEpisodesPrecacheResult = {
     candidates: 0,
     storedSeriesCount: 0,
     storedEpisodeCount: 0,
   };
 
-  try {
-    seriesEpisodesPrecacheResult = await precacheSeriesEpisodesFromHomeSections({
-      licenseCode: normalizedLicenseCode,
-      deviceIdentifier: normalizedDeviceIdentifier,
-      homeSections,
-    });
-  } catch (error) {
-    warnings.push(
-      error instanceof Error
-        ? `Falha no pre-cache de episodios: ${error.message}`
-        : 'Falha no pre-cache de episodios.',
-    );
-  }
+  // Start precaching in the background without blocking the critical bootstrap path
+  void precacheSeriesEpisodesFromHomeSections({
+    licenseCode: normalizedLicenseCode,
+    deviceIdentifier: normalizedDeviceIdentifier,
+    homeSections,
+  }).then((precacheResult) => {
+    console.info('[XANDEFLIX_BOOTSTRAP_SERIES_PRECACHE_BG_SUCCESS]', precacheResult);
+  }).catch((precacheError) => {
+    console.warn('[XANDEFLIX_BOOTSTRAP_SERIES_PRECACHE_BG_FAILED]', precacheError);
+  });
 
   emitProgress(onProgress, {
     stepId: 'images',

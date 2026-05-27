@@ -732,7 +732,7 @@ export async function loadHomeVodSections({
     licenseCode,
     deviceIdentifier,
     pageSize: 500,
-    maxPages: 40,
+    maxPages: 10,
     requireTmdbMatched: true,
     requireTmdbPoster: true,
   });
@@ -829,7 +829,7 @@ export async function loadHomeVodCategoryItems({
     licenseCode,
     deviceIdentifier,
     pageSize: 500,
-    maxPages: 20,
+    maxPages: 10,
     requireTmdbMatched: true,
     requireTmdbPoster: true,
   });

@@ -190,17 +190,24 @@ export async function listAuthorizedLicenseChannels({
   const channelRows = [...firstPage.channels];
   const totalPages = Math.min(firstPage.totalPages || 1, maxPages);
 
-  for (let page = 2; page <= totalPages; page += 1) {
-    const nextPage = await fetchLicenseChannelsPage({
-      licenseCode: normalizedLicenseCode,
-      deviceIdentifier: normalizedDeviceIdentifier,
-      page,
-      pageSize,
-      requireTmdbMatched,
-      requireTmdbPoster,
-    });
-
-    channelRows.push(...nextPage.channels);
+  if (totalPages > 1) {
+    const pagePromises = [];
+    for (let page = 2; page <= totalPages; page += 1) {
+      pagePromises.push(
+        fetchLicenseChannelsPage({
+          licenseCode: normalizedLicenseCode,
+          deviceIdentifier: normalizedDeviceIdentifier,
+          page,
+          pageSize,
+          requireTmdbMatched,
+          requireTmdbPoster,
+        })
+      );
+    }
+    const restPages = await Promise.all(pagePromises);
+    for (const nextPage of restPages) {
+      channelRows.push(...nextPage.channels);
+    }
   }
 
   return channelRows

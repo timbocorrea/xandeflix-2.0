@@ -209,6 +209,16 @@ export function CatalogPage() {
     async function loadRealCatalog() {
       setIsRealCatalogLoading(true);
 
+      const timeoutId = window.setTimeout(() => {
+        if (isMounted && !realCatalogSections?.length) {
+          setIsRealCatalogLoading(false);
+          spatialDebug(
+            'catalog-grid',
+            'Timeout de 3s atingido. Continuando carregamento em background com fallback catalogSections.'
+          );
+        }
+      }, 3000);
+
       try {
         const homeVodLoadInput =
           initialHomeCatalogState.limitPerSection === homeVodLimitPerSection
@@ -216,6 +226,7 @@ export function CatalogPage() {
             : createHomeVodLoadInput(homeVodLimitPerSection);
 
         if (!homeVodLoadInput) {
+          window.clearTimeout(timeoutId);
           setRealCatalogSections(null);
           return;
         }
@@ -224,6 +235,8 @@ export function CatalogPage() {
           ...homeVodLoadInput,
           limitPerSection: homeVodLimitPerSection,
         });
+
+        window.clearTimeout(timeoutId);
 
         if (!isMounted) {
           return;
@@ -236,6 +249,7 @@ export function CatalogPage() {
 
         setRealCatalogSections(nextSections.length > 0 ? nextSections : null);
       } catch (error) {
+        window.clearTimeout(timeoutId);
         spatialDebug(
           'catalog-grid',
           'Falha ao carregar Home VOD real:',
