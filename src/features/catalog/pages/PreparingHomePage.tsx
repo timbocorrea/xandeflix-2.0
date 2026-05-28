@@ -13,12 +13,36 @@ import {
 import { startCatalogVodWarmup } from '@/features/catalog/services/catalogWarmup.service';
 import {
   areSupabaseContentWritesDisabled,
+  env,
   SUPABASE_CONTENT_WRITES_DISABLED_REASON,
 } from '@/config/env';
 
 const MIN_PREPARING_HOME_DELAY_MS = 900;
+const LOCAL_CATALOG_SMOKE_TEST_LOG_PREFIX =
+  'XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT';
 
 type PreparingStep = 'loading' | 'ready' | 'error';
+
+function runLocalCatalogSmokeTestInBackground() {
+  if (!env.localCatalogSmokeTestEnabled) {
+    return;
+  }
+
+  void import('@/features/localCatalog/services/localCatalogSmokeTest.service')
+    .then(({ runLocalCatalogSmokeTest }) => runLocalCatalogSmokeTest())
+    .then((result) => {
+      console.info(LOCAL_CATALOG_SMOKE_TEST_LOG_PREFIX, result);
+    })
+    .catch((error: unknown) => {
+      console.info(LOCAL_CATALOG_SMOKE_TEST_LOG_PREFIX, {
+        ok: false,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : 'LOCAL_CATALOG_SMOKE_TEST_IMPORT_FAILED',
+      });
+    });
+}
 
 export function PreparingHomePage() {
   const navigate = useNavigate();
@@ -106,6 +130,8 @@ export function PreparingHomePage() {
             deviceIdentifier: result.deviceIdentifier,
           });
         }
+
+        runLocalCatalogSmokeTestInBackground();
 
         setStep('ready');
       })

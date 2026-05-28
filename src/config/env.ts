@@ -12,6 +12,8 @@ export const env = {
   disableSupabaseContentWrites:
     normalizeEnvValue(import.meta.env.VITE_DISABLE_SUPABASE_CONTENT_WRITES) === 'true',
   contentStorageMode: normalizeEnvValue(import.meta.env.VITE_CONTENT_STORAGE_MODE),
+  localCatalogSmokeTestEnabled:
+    normalizeEnvValue(import.meta.env.VITE_LOCAL_CATALOG_SMOKE_TEST) === 'true',
 };
 
 export function areSupabaseContentWritesDisabled() {

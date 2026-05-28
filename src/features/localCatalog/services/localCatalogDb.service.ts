@@ -297,6 +297,27 @@ export async function putLocalCatalogItems(items: LocalCatalogItem[]) {
   }
 }
 
+export async function deleteLocalCatalogItems(itemIds: string[]) {
+  if (itemIds.length === 0) {
+    return;
+  }
+
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(PLAYLIST_ITEMS_STORE, 'readwrite');
+    const store = transaction.objectStore(PLAYLIST_ITEMS_STORE);
+
+    for (const itemId of itemIds) {
+      store.delete(itemId);
+    }
+
+    await waitForTransaction(transaction);
+  } finally {
+    db.close();
+  }
+}
+
 export async function listLocalCatalogItems(
   input: ListLocalCatalogItemsInput = {},
 ) {
