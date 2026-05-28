@@ -3,8 +3,8 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Branch: `fix/vod-episode-native-player-direct`  
+Projeto: Xandeflix 2.0
+Branch: `fix/vod-episode-native-player-direct`
 Objetivo: criar a base inicial do importador local progressivo de playlist para IndexedDB, sem migrar Home, Live TV ou VOD.
 
 ## 2. Diretriz de segurança
