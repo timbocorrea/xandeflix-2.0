@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
+import { useNavigate } from 'react-router-dom';
 
 import { AppShell } from '@/components/layout/AppShell';
 import { FocusableButton } from '@/components/tv/FocusableButton';
@@ -8,12 +9,14 @@ import { FocusableInput } from '@/components/tv/FocusableInput';
 import { TvKeyboardModal } from '@/components/tv/keyboard/TvKeyboardModal';
 import { useRouteInitialFocus } from '@/hooks/useRouteInitialFocus';
 import { useAuth } from '@/app/providers/AuthProvider';
+import { env } from '@/config/env';
 import { getStoredLicenseActivation, saveStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
 import { activateLicense } from '@/features/licensing/services/licenseActivation.service';
 import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
 import { maskStreamUrl } from '@/lib/security/maskStreamUrl';
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
   const { signOut } = useAuth();
 
   useRouteInitialFocus();
@@ -202,6 +205,31 @@ export default function SettingsPage() {
           <div className="mt-4 rounded-xl border border-xf-red/30 bg-xf-red/10 p-4 text-sm font-bold text-red-100">
             Ativando licença e carregando conteúdo autorizado. Aguarde alguns instantes...
           </div>
+        ) : null}
+
+        {env.localCatalogSmokeTestEnabled ? (
+          <section className="mt-6 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-6">
+            <p className="text-xs font-bold uppercase tracking-[0.3em] text-sky-200">
+              Diagnóstico
+            </p>
+
+            <h2 className="mt-3 text-2xl font-black">
+              Diagnóstico IndexedDB local
+            </h2>
+
+            <p className="mt-3 max-w-3xl text-sm text-sky-100/80">
+              Executar smoke test local sem Supabase.
+            </p>
+
+            <FocusableButton
+              focusKey="settings-local-catalog-smoke-button"
+              className="mt-5 rounded-xl bg-sky-500 px-6 py-4 text-base font-black text-white transition hover:bg-sky-400"
+              onEnterPress={() => navigate('/debug/local-catalog-smoke')}
+              onClick={() => navigate('/debug/local-catalog-smoke')}
+            >
+              Abrir diagnóstico
+            </FocusableButton>
+          </section>
         ) : null}
 
         <section className="mt-6 rounded-2xl border border-white/10 bg-black/60 p-6">
