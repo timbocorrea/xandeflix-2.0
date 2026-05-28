@@ -1,5 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+const PLAYBACK_SESSION_TTL_MS = 10 * 60 * 1000;
+
 type HeartbeatPlaybackSessionRequest = {
   sessionId?: string;
   licenseCode?: string;
@@ -87,7 +89,7 @@ Deno.serve(async (request) => {
 
     const now = new Date();
     const nowIso = now.toISOString();
-    const expiresAt = new Date(now.getTime() + 3 * 60 * 1000).toISOString();
+    const expiresAt = new Date(now.getTime() + PLAYBACK_SESSION_TTL_MS).toISOString();
 
     const { data: session, error: sessionError } = await supabaseAdmin
       .from('playback_sessions')
