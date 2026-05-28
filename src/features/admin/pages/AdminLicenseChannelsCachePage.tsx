@@ -69,6 +69,8 @@ function getUpdateErrorMessage(error: unknown) {
     INVALID_PAYLOAD: 'Dados inválidos para atualizar o canal.',
     LICENSE_CHANNEL_NOT_FOUND: 'Canal importado não localizado.',
     LICENSE_NOT_FOUND: 'Licença vinculada ao canal não localizada.',
+    'supabase-content-writes-disabled':
+      'Escritas de conteúdo no Supabase estão desabilitadas pelo modo local.',
     LICENSE_CHANNEL_STATUS_UPDATE_FAILED:
       'Não foi possível atualizar o status do canal.',
   };

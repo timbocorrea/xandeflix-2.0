@@ -1,4 +1,8 @@
 import { supabase } from '../../../lib/supabase/supabaseClient';
+import {
+  areSupabaseContentWritesDisabled,
+  SUPABASE_CONTENT_WRITES_DISABLED_REASON,
+} from '@/config/env';
 
 import type { LicenseChannelCache } from '../types/admin.types';
 
@@ -95,6 +99,10 @@ export async function listAdminLicenseChannelsCache(
 export async function updateAdminLicenseChannelStatus(
   input: UpdateAdminLicenseChannelStatusInput,
 ) {
+  if (areSupabaseContentWritesDisabled()) {
+    throw new Error(SUPABASE_CONTENT_WRITES_DISABLED_REASON);
+  }
+
   const { data, error } =
     await supabase.functions.invoke<UpdateAdminLicenseChannelStatusResponse>(
       'update-license-channel-status',

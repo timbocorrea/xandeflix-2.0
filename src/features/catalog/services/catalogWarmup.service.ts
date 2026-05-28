@@ -1,5 +1,9 @@
 import { supabase } from '@/lib/supabase/supabaseClient';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
+import {
+  areSupabaseContentWritesDisabled,
+  SUPABASE_CONTENT_WRITES_DISABLED_REASON,
+} from '@/config/env';
 
 import { CATALOG_VOD_PRIORITY_GROUPS } from './catalogCategoryGroups.service';
 
@@ -150,6 +154,13 @@ async function runCatalogVodWarmup(input: CatalogWarmupInput) {
 
 export function startCatalogVodWarmup(input?: Partial<CatalogWarmupInput>) {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (areSupabaseContentWritesDisabled()) {
+    console.info('[XANDEFLIX_CATALOG_WARMUP_SKIPPED]', {
+      reason: SUPABASE_CONTENT_WRITES_DISABLED_REASON,
+    });
     return;
   }
 

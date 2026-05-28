@@ -11,6 +11,10 @@ import {
   type AppBootstrapProgress,
 } from '@/features/bootstrap/services/appBootstrap.service';
 import { startCatalogVodWarmup } from '@/features/catalog/services/catalogWarmup.service';
+import {
+  areSupabaseContentWritesDisabled,
+  SUPABASE_CONTENT_WRITES_DISABLED_REASON,
+} from '@/config/env';
 
 const MIN_PREPARING_HOME_DELAY_MS = 900;
 
@@ -92,10 +96,16 @@ export function PreparingHomePage() {
         setBootstrapWarning(result.warnings[0] ?? null);
 
         // Chamar warmup do catálogo VOD de forma não bloqueante em background
-        void startCatalogVodWarmup({
-          licenseCode: result.licenseCode,
-          deviceIdentifier: result.deviceIdentifier,
-        });
+        if (areSupabaseContentWritesDisabled()) {
+          console.info('[XANDEFLIX_BOOTSTRAP_WARMUP_SKIPPED]', {
+            reason: SUPABASE_CONTENT_WRITES_DISABLED_REASON,
+          });
+        } else {
+          void startCatalogVodWarmup({
+            licenseCode: result.licenseCode,
+            deviceIdentifier: result.deviceIdentifier,
+          });
+        }
 
         setStep('ready');
       })

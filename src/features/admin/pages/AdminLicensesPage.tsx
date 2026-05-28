@@ -626,7 +626,9 @@ export function AdminLicensesPage() {
         [source.id]: result,
       }));
 
-      setSuccessMessage('Importação de canais concluída.');
+      setSuccessMessage(
+        result.skipped ? result.message : 'Importação de canais concluída.',
+      );
     } catch (error) {
       setErrorMessage(getImportLicenseIptvSourceChannelsErrorMessage(error));
     } finally {
@@ -1657,7 +1659,9 @@ export function AdminLicensesPage() {
                             <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                               <div>
                                 <p className="text-sm font-black text-sky-100">
-                                  Importação concluída
+                                  {importResult.skipped
+                                    ? 'Importação ignorada'
+                                    : 'Importação concluída'}
                                 </p>
                                 <p className="mt-1 text-xs text-sky-100/80">
                                   {importResult.message}

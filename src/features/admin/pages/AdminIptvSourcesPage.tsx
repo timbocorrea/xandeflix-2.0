@@ -512,17 +512,21 @@ export function AdminIptvSourcesPage() {
 
       const result = await importAdminLicenseIptvSourceChannels(row.id);
 
-      setSuccessMessage(
-        'Importacao concluida para "' +
-          row.name +
-          '". Canais recebidos: ' +
-          result.totalParsed +
-          ', importados: ' +
-          result.totalImported +
-          ', atualizados: ' +
-          result.totalUpdated +
-          '.',
-      );
+      if (result.skipped) {
+        setSuccessMessage(result.message);
+      } else {
+        setSuccessMessage(
+          'Importacao concluida para "' +
+            row.name +
+            '". Canais recebidos: ' +
+            result.totalParsed +
+            ', importados: ' +
+            result.totalImported +
+            ', atualizados: ' +
+            result.totalUpdated +
+            '.',
+        );
+      }
     } catch (error) {
       setErrorMessage(getSourceActionErrorMessage(error));
     } finally {

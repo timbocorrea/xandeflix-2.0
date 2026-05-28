@@ -1,4 +1,8 @@
 import { supabase } from '../../../lib/supabase/supabaseClient';
+import {
+  areSupabaseContentWritesDisabled,
+  SUPABASE_CONTENT_WRITES_DISABLED_REASON,
+} from '@/config/env';
 
 import type {
   License,
@@ -154,6 +158,8 @@ export interface ImportLicenseIptvSourceChannelSample {
 }
 
 export interface ImportLicenseIptvSourceChannelsResult {
+  skipped?: boolean;
+  reason?: string;
   fetched: boolean;
   parsed: boolean;
   totalParsed: number;
@@ -167,6 +173,29 @@ export interface ImportLicenseIptvSourceChannelsResult {
   limit: number;
   sampleChannels: ImportLicenseIptvSourceChannelSample[];
   message: string;
+}
+
+function createSkippedImportLicenseIptvSourceChannelsResult(
+  limit?: number,
+): ImportLicenseIptvSourceChannelsResult {
+  return {
+    skipped: true,
+    reason: SUPABASE_CONTENT_WRITES_DISABLED_REASON,
+    fetched: false,
+    parsed: false,
+    totalParsed: 0,
+    totalImported: 0,
+    totalUpdated: 0,
+    totalReactivated: 0,
+    totalSkipped: 0,
+    totalFailed: 0,
+    totalDeactivatedMissing: 0,
+    wasLimited: false,
+    limit: limit ?? 0,
+    sampleChannels: [],
+    message:
+      'Importacao ignorada: escritas de conteudo no Supabase estao desabilitadas pelo modo local.',
+  };
 }
 
 export interface ImportAdminLicenseIptvSourceChannelsResponse {
@@ -440,6 +469,10 @@ export async function importAdminLicenseIptvSourceChannels(
   sourceId: string,
   limit?: number,
 ): Promise<ImportLicenseIptvSourceChannelsResult> {
+  if (areSupabaseContentWritesDisabled()) {
+    return createSkippedImportLicenseIptvSourceChannelsResult(limit);
+  }
+
   const { data, error } =
     await supabase.functions.invoke<ImportAdminLicenseIptvSourceChannelsResponse>(
       'import-license-iptv-source-channels',
