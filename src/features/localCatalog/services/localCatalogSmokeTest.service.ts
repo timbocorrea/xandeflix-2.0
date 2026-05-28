@@ -19,7 +19,13 @@ export type LocalCatalogSmokeTestResult = {
   movieCount: number;
   seriesCount: number;
   errorMessage?: string;
+  createdAt?: string;
+  sourceId?: string;
+  storageWriteError?: string;
 };
+
+export const LOCAL_CATALOG_SMOKE_TEST_RESULT_STORAGE_KEY =
+  'xandeflix:local-catalog-smoke:last-result';
 
 const SMOKE_TEST_SOURCE_ID = 'smoke-test-source';
 const SMOKE_TEST_GROUP_TITLE = 'Smoke Test Local Catalog';
@@ -157,5 +163,23 @@ export async function runLocalCatalogSmokeTest(): Promise<LocalCatalogSmokeTestR
     };
   }
 
-  return result;
+  const finalResult: LocalCatalogSmokeTestResult = {
+    ...result,
+    createdAt: new Date().toISOString(),
+    sourceId: SMOKE_TEST_SOURCE_ID,
+  };
+
+  try {
+    window.localStorage.setItem(
+      LOCAL_CATALOG_SMOKE_TEST_RESULT_STORAGE_KEY,
+      JSON.stringify(finalResult),
+    );
+  } catch (storageError) {
+    finalResult.storageWriteError =
+      storageError instanceof Error
+        ? storageError.message
+        : 'LOCAL_STORAGE_WRITE_FAILED';
+  }
+
+  return finalResult;
 }

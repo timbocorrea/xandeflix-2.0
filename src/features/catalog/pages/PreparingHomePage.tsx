@@ -18,8 +18,6 @@ import {
 } from '@/config/env';
 
 const MIN_PREPARING_HOME_DELAY_MS = 900;
-const LOCAL_CATALOG_SMOKE_TEST_LOG_PREFIX =
-  'XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT';
 
 type PreparingStep = 'loading' | 'ready' | 'error';
 
@@ -28,19 +26,26 @@ function runLocalCatalogSmokeTestInBackground() {
     return;
   }
 
+  console.warn('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_START');
+
   void import('@/features/localCatalog/services/localCatalogSmokeTest.service')
     .then(({ runLocalCatalogSmokeTest }) => runLocalCatalogSmokeTest())
     .then((result) => {
-      console.info(LOCAL_CATALOG_SMOKE_TEST_LOG_PREFIX, result);
+      if (result.ok) {
+        console.warn('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT', JSON.stringify(result));
+      } else {
+        console.error('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT', JSON.stringify(result));
+      }
     })
     .catch((error: unknown) => {
-      console.info(LOCAL_CATALOG_SMOKE_TEST_LOG_PREFIX, {
+      const errorResult = {
         ok: false,
         errorMessage:
           error instanceof Error
             ? error.message
             : 'LOCAL_CATALOG_SMOKE_TEST_IMPORT_FAILED',
-      });
+      };
+      console.error('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT', JSON.stringify(errorResult));
     });
 }
 
