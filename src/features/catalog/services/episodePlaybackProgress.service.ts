@@ -179,7 +179,6 @@ export function updateEpisodePlaybackPosition(
   }
 }
 
-
 export function getEpisodePlaybackProgressPercent(
   input: EpisodePlaybackProgressInput,
 ) {
