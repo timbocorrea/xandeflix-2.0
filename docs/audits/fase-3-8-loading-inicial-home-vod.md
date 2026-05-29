@@ -16,7 +16,7 @@ A auditoria identificou que o travamento **não é causado por bugs no player na
 O travamento ocorre devido à combinação de três fatores críticos:
 
 1. **Volume Massivo Sem Filtro no Backend:**
-   A Edge Function `get-client-license-channels` não possui filtros para `content_kind` (live, movie, series). Ela retorna todos os canais misturados. 
+   A Edge Function `get-client-license-channels` não possui filtros para `content_kind` (live, movie, series). Ela retorna todos os canais misturados.
 2. **Ordenação Alfabética e Páginas Iniciais Vazias de VOD:**
    O backend ordena os resultados por `group_title` de forma ascendente. Como a letra "C" de "Canais" (Live TV) precede "F" de "Filmes" e "S" de "Séries", as primeiras páginas retornadas contêm **100% de canais lineares (Live TV)**. Como a Home VOD filtra e descarta canais Live TV, as primeiras 20 a 40 páginas processadas pelo frontend resultam em **zero VODs**, exibindo uma tela inicial vazia ou travada.
 3. **Carga Sequencial Redundante no Bootstrap:**
@@ -26,7 +26,7 @@ O travamento ocorre devido à combinação de três fatores críticos:
    - `loadCategoryFirstFold('filmes-lancamentos')`: pagina até 20 páginas de 500 itens = **20 requisições sequenciais** (~30 segundos).
    - `loadCategoryFirstFold('series')`: pagina até 20 páginas de 500 itens = **20 requisições sequenciais** (~30 segundos).
    - `precacheSeriesEpisodesFromHomeSections`: itera em até 8 coleções de séries, chamando novamente a API até 20 páginas por série = **até 160 requisições sequenciais** (~240 segundos).
-   
+
    **Total:** Até **260 requisições HTTP sequenciais** na carga inicial. Multiplicado pelo tempo de resposta da Edge Function (~1,3s a 2,2s), o bootloader leva **vários minutos** para inicializar sem cache local, travando o aplicativo ou estourando timeouts internos do Android.
 
 ---
@@ -81,19 +81,19 @@ sequenceDiagram
 
     App->>Boot: runAppBootstrap()
     Note over Boot: Início do Bootstrap (Sem Cache Local)
-    
+
     Boot->>AuthServ: listAuthorizedLicenseChannels(maxPages=40)
     Note over AuthServ: Carregamento para a Home VOD
     AuthServ->>DB: POST get-client-license-channels (Page 1)
     DB-->>AuthServ: 200 OK (totalPages = 198)
-    
+
     loop Page 2 até 40 (Sequencial!)
         AuthServ->>DB: POST get-client-license-channels (Page i)
         DB-->>AuthServ: 200 OK (1.5s por página)
     end
     Note over AuthServ: Total: 60s
     AuthServ-->>Boot: Retorna 20,000 itens (Apenas Live TV por causa de ordenação)
-    
+
     Boot->>AuthServ: loadLivePreviewChannels(maxPages=20)
     Note over AuthServ: Carregamento de Live TV
     loop Page 1 até 20 (Sequencial!)
@@ -101,7 +101,7 @@ sequenceDiagram
         DB-->>AuthServ: 200 OK
     end
     Note over AuthServ: Total: 30s
-    
+
     Note over Boot, DB: Repete para Filmes (30s), Séries (30s) e Precaching de Episódios (240s)...
     Note over App: Webview do Android trava/Estoura o timeout de transição
 ```

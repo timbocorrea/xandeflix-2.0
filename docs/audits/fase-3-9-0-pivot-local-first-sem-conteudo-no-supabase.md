@@ -8,7 +8,7 @@ Este documento apresenta a análise profunda e o plano de migração para o novo
 ## 1. Decisão Arquitetural e Problema do Modelo Atual
 
 ### A. A Nova Regra de Ouro do Produto
-O Xandeflix atuará exclusivamente como um **orquestrador leve e seguro**. 
+O Xandeflix atuará exclusivamente como um **orquestrador leve e seguro**.
 * O Supabase fica restrito unicamente ao controle de acesso, licenças, dispositivos autorizados, status de assinatura e configurações mínimas não sensíveis.
 * **Nenhum conteúdo da playlist IPTV (canais, filmes, séries, episódios, grupos ou URLs de reprodução) deve ser armazenado ou trafegado no banco de dados do Supabase.** Todo o catálogo e seus metadados derivados serão gerenciados de forma 100% local no dispositivo do usuário.
 
@@ -61,10 +61,10 @@ graph TD
     C --> D["Streaming Parser local (parseM3uPlaylist)"]
     D --> E["Persistência em Storage Local (IndexedDB / SQLite)"]
     E --> F["Enriquecimento TMDB Local (Background Worker)"]
-    
+
     E --> G["Catalogador Local (Home / Canais / Categorias)"]
     F --> G
-    
+
     G --> H["Player Nativo (Direct URL)"]
 ```
 

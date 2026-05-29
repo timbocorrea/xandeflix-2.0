@@ -3,8 +3,8 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Branch: `fix/vod-episode-native-player-direct`  
+Projeto: Xandeflix 2.0
+Branch: `fix/vod-episode-native-player-direct`
 Objetivo: registrar a validação visual/manual da fundação IndexedDB local no Android/WebView.
 
 A validação real disponível neste momento deve considerar tablet Android/touch, pois o dispositivo Fire Stick não está disponível para teste imediato.

@@ -96,7 +96,7 @@ A lista IPTV original tem aproximadamente **272.000** itens na playlist bruta (i
 O banco de dados (tabela `license_channels_cache`) armazena exatamente **215.000** registros de cache vinculados a esta licença.
 
 ### 3. O sistema está contemplando os ~272.000 itens?
-**Sim!** O ecossistema está contemplando a playlist completa de ponta a ponta. 
+**Sim!** O ecossistema está contemplando a playlist completa de ponta a ponta.
 
 ### 4. Se não há 272.000 linhas no banco, onde está a diferença?
 A diferença de ~57.000 itens se dá inteiramente pelas regras de **deduplicação de links** (a restrição única de banco sobre `stream_url` descarta chaves redundantes de reprodução de múltiplos servidores idênticos) e canais antigos de outras fontes que foram removidos ou marcados como inativos (`is_active: false` totaliza 111.747 itens). Isso é desejável, pois limpa e saneia o catálogo do cliente.

@@ -3,11 +3,11 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-PR: #87 — Draft: local-first catalog foundation and importer diagnostics  
-Branch original: fix/vod-episode-native-player-direct  
-Branch de integração: integration/pr87-main-reconcile-20260529-090721  
-Base aplicada: origin/main  
+Projeto: Xandeflix 2.0
+PR: #87 — Draft: local-first catalog foundation and importer diagnostics
+Branch original: fix/vod-episode-native-player-direct
+Branch de integração: integration/pr87-main-reconcile-20260529-090721
+Base aplicada: origin/main
 Objetivo: reconciliar a PR #87 com a main sem merge direto na branch original.
 
 A Fase 3.10 foi executada para resolver a divergência detectada entre a branch da PR #87 e a main. A PR #87 permaneceu Draft/Open e a reconciliação foi feita em branch separada de integração, conforme orientação do Analista Mestre.
