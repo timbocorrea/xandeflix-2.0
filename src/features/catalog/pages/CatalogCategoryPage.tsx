@@ -1417,7 +1417,7 @@ export function CatalogCategoryPage({
       window.removeEventListener('keydown', handleBackNavigation);
       void capacitorBackButtonListener.then((listener) => listener.remove());
     };
-  }, [navigate]);
+  }, [navigate, location, isSeriesDetailPage, isSeriesGroupListPage]);
 
   function resolveEpisodeTitle(item: HomeVodItem, index: number) {
     return item.episodeTitle || item.title || `Episodio ${index + 1}`;
