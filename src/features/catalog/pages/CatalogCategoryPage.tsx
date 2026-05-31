@@ -51,6 +51,20 @@ type CatalogCategoryPageProps = {
   groupSlugOverride?: string;
 };
 
+type SelectedSeriesIdentity = {
+  seriesKey: string | null;
+  seriesTmdbId: string | null;
+  seriesTmdbTitle: string | null;
+  seriesTitle: string | null;
+};
+
+type SeriesNavigationState = {
+  fromSeriesCategory?: boolean;
+  fromSeriesDetail?: boolean;
+  returnTo?: string;
+  selectedSeriesItem?: HomeVodItem;
+};
+
 function getCategoryItemFocusKey(categorySlug: string, index: number) {
   return `${CATEGORY_ITEM_FOCUS_PREFIX}-${categorySlug}-${index}`;
 }
@@ -64,6 +78,7 @@ function readInitialCategoryItems(
   seriesTmdbId: string | null,
   seriesTmdbTitle: string | null,
   seriesKey: string | null,
+  seriesTitle: string | null,
 ) {
   if (!category) {
     return [];
@@ -80,28 +95,16 @@ function readInitialCategoryItems(
     storedActivation?.deviceIdentifier || getOrCreateDeviceIdentifier();
 
   const matchesSeries = (item: HomeVodItem) => {
-    if (seriesKey) {
-      return getSeriesCollectionKey(item) === seriesKey.trim().toLowerCase();
-    }
-
-    if (!seriesTmdbId && !seriesTmdbTitle) {
+    if (!seriesKey && !seriesTmdbId && !seriesTmdbTitle && !seriesTitle) {
       return true;
     }
 
-    if (seriesTmdbId && item.tmdbId && String(item.tmdbId) === seriesTmdbId) {
-      return true;
-    }
-
-    if (
-      seriesTmdbTitle &&
-      item.tmdbTitle &&
-      item.tmdbTitle.trim().toLowerCase() ===
-        seriesTmdbTitle.trim().toLowerCase()
-    ) {
-      return true;
-    }
-
-    return false;
+    return isItemOfSelectedSeries(item, {
+      seriesKey,
+      seriesTmdbId,
+      seriesTmdbTitle,
+      seriesTitle,
+    });
   };
 
   const specificCachedEpisodes = readCachedSeriesEpisodes({
@@ -112,8 +115,11 @@ function readInitialCategoryItems(
     tmdbTitle: seriesTmdbTitle,
   });
 
-  if (specificCachedEpisodes.length > 0) {
-    return specificCachedEpisodes;
+  const filteredSpecificCachedEpisodes =
+    specificCachedEpisodes.filter(matchesSeries);
+
+  if (filteredSpecificCachedEpisodes.length > 0) {
+    return filteredSpecificCachedEpisodes;
   }
 
   const cachedItems = getCachedHomeVodCategoryItems({
@@ -181,6 +187,111 @@ function getSeriesCollectionKey(item: HomeVodItem) {
   }
 
   return (item.groupTitle || item.title).trim().toLowerCase();
+}
+
+function normalizeSeriesIdentity(value?: string | null) {
+  return normalizeSeriesCollectionTitle(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function isItemOfSelectedSeries(
+  item: HomeVodItem,
+  {
+    seriesKey,
+    seriesTmdbId,
+    seriesTmdbTitle,
+    seriesTitle,
+  }: SelectedSeriesIdentity,
+) {
+  const normalizedSeriesKey = normalizeSeriesIdentity(seriesKey);
+
+  if (
+    normalizedSeriesKey &&
+    normalizeSeriesIdentity(getSeriesCollectionKey(item)) ===
+      normalizedSeriesKey
+  ) {
+    return true;
+  }
+
+  if (
+    seriesTmdbId &&
+    item.tmdbId &&
+    String(item.tmdbId).trim() === seriesTmdbId.trim()
+  ) {
+    return true;
+  }
+
+  const normalizedTmdbTitle = normalizeSeriesIdentity(seriesTmdbTitle);
+
+  if (
+    normalizedTmdbTitle &&
+    normalizeSeriesIdentity(item.tmdbTitle) === normalizedTmdbTitle
+  ) {
+    return true;
+  }
+
+  const normalizedSeriesTitle = normalizeSeriesIdentity(seriesTitle);
+
+  if (!normalizedSeriesTitle) {
+    return false;
+  }
+
+  return [
+    item.seriesKey,
+    item.tmdbTitle,
+    item.episodeTitle,
+    item.title,
+  ].some(
+    (candidateTitle) =>
+      normalizeSeriesIdentity(candidateTitle) === normalizedSeriesTitle,
+  );
+}
+
+function createSeriesNavigationItem(item: HomeVodItem): HomeVodItem {
+  return {
+    id: item.id,
+    title: item.title,
+    episodeTitle: item.episodeTitle,
+    subtitle: item.subtitle,
+    overview: item.overview,
+    posterUrl: item.posterUrl,
+    backdropUrl: item.backdropUrl,
+    groupTitle: item.groupTitle,
+    tmdbId: item.tmdbId,
+    tmdbTitle: item.tmdbTitle,
+    tmdbGenres: item.tmdbGenres,
+    tmdbRating: item.tmdbRating,
+    tmdbReleaseYear: item.tmdbReleaseYear,
+    seriesKey: item.seriesKey,
+    episodeCount: item.episodeCount,
+    isSeriesCollection: item.isSeriesCollection,
+    kind: 'series',
+  };
+}
+
+function mergeSeriesHeroMetadata(
+  representative: HomeVodItem,
+  selectedSeriesItem: HomeVodItem | null,
+) {
+  if (!selectedSeriesItem) {
+    return representative;
+  }
+
+  return {
+    ...representative,
+    overview: selectedSeriesItem.overview ?? representative.overview,
+    posterUrl: selectedSeriesItem.posterUrl ?? representative.posterUrl,
+    backdropUrl: selectedSeriesItem.backdropUrl ?? representative.backdropUrl,
+    tmdbId: selectedSeriesItem.tmdbId ?? representative.tmdbId,
+    tmdbTitle: selectedSeriesItem.tmdbTitle ?? representative.tmdbTitle,
+    tmdbGenres: selectedSeriesItem.tmdbGenres ?? representative.tmdbGenres,
+    tmdbRating: selectedSeriesItem.tmdbRating ?? representative.tmdbRating,
+    tmdbReleaseYear:
+      selectedSeriesItem.tmdbReleaseYear ?? representative.tmdbReleaseYear,
+  };
 }
 
 function hasRepresentativeMetadataValue(value: unknown) {
@@ -879,6 +990,7 @@ export function CatalogCategoryPage({
   const seriesTmdbId = searchParams.get('tmdbId')?.trim() || null;
   const seriesTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
   const seriesKey = searchParams.get('seriesKey')?.trim() || null;
+  const navigationState = location.state as SeriesNavigationState | null;
 
   const isSeriesGroupListPage =
     (groupSlugOverride ?? params.groupSlug) === 'series-group' &&
@@ -926,8 +1038,15 @@ export function CatalogCategoryPage({
     } as CatalogCategoryDefinition;
   }, [groupSlugOverride, params.groupSlug, seriesGroupTitle, seriesTitle, isSeriesGroupListPage]);
   const initialItems = useMemo(
-    () => readInitialCategoryItems(category, seriesTmdbId, seriesTmdbTitle, seriesKey),
-    [category, seriesTmdbId, seriesTmdbTitle, seriesKey],
+    () =>
+      readInitialCategoryItems(
+        category,
+        seriesTmdbId,
+        seriesTmdbTitle,
+        seriesKey,
+        seriesTitle,
+      ),
+    [category, seriesTmdbId, seriesTmdbTitle, seriesKey, seriesTitle],
   );
 
   const [items, setItems] = useState<HomeVodItem[]>(initialItems);
@@ -967,54 +1086,6 @@ export function CatalogCategoryPage({
       behavior: 'auto',
     });
   }
-
-  // Preload seguro em background para as imagens da categoria
-  const categoryPreloadUrls = useMemo(() => {
-    if (!items || items.length === 0) {
-      return [];
-    }
-
-    const urls = new Set<string>();
-    for (const item of items) {
-      if (item.posterUrl) {
-        urls.add(item.posterUrl);
-      }
-      if (item.backdropUrl) {
-        urls.add(item.backdropUrl);
-      }
-    }
-
-    return Array.from(urls).slice(0, 300);
-  }, [items]);
-
-  useEffect(() => {
-    if (categoryPreloadUrls.length === 0) {
-      return;
-    }
-
-    let isCancelled = false;
-    const scheduleCategoryPreload = () => {
-      const scheduler =
-        typeof window !== 'undefined' && 'requestIdleCallback' in window
-          ? (window as any).requestIdleCallback
-          : (cb: () => void) => window.setTimeout(cb, 100);
-
-      scheduler(() => {
-        if (isCancelled) return;
-        for (const url of categoryPreloadUrls) {
-          if (isCancelled) break;
-          const img = new Image();
-          img.src = url;
-        }
-      });
-    };
-
-    scheduleCategoryPreload();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [categoryPreloadUrls]);
 
   const currentSeriesIdentity = useMemo(
     () =>
@@ -1067,30 +1138,18 @@ export function CatalogCategoryPage({
   }
 
   function filterSeriesEpisodes(nextItems: HomeVodItem[]) {
-    if (!seriesKey && !seriesTmdbId && !seriesTmdbTitle) {
+    if (!isSeriesDetailPage) {
       return nextItems;
     }
 
-    return nextItems.filter((item) => {
-      if (seriesKey && getSeriesCollectionKey(item) === seriesKey.trim().toLowerCase()) {
-        return true;
-      }
-
-      if (seriesTmdbId && item.tmdbId && String(item.tmdbId) === seriesTmdbId) {
-        return true;
-      }
-
-      if (
-        seriesTmdbTitle &&
-        item.tmdbTitle &&
-        item.tmdbTitle.trim().toLowerCase() ===
-          seriesTmdbTitle.trim().toLowerCase()
-      ) {
-        return true;
-      }
-
-      return false;
-    });
+    return nextItems.filter((item) =>
+      isItemOfSelectedSeries(item, {
+        seriesKey,
+        seriesTmdbId,
+        seriesTmdbTitle,
+        seriesTitle,
+      }),
+    );
   }
 
   useEffect(() => {
@@ -1173,7 +1232,11 @@ export function CatalogCategoryPage({
         }
 
         setItems((currentItems) => {
-          if (nextCategoryItems.length === 0 && currentItems.length > 0) {
+          if (
+            !isSeriesDetailPage &&
+            nextCategoryItems.length === 0 &&
+            currentItems.length > 0
+          ) {
             return currentItems;
           }
 
@@ -1181,7 +1244,11 @@ export function CatalogCategoryPage({
         });
 
         setVisibleItemCount((currentCount) => {
-          if (nextCategoryItems.length === 0 && items.length > 0) {
+          if (
+            !isSeriesDetailPage &&
+            nextCategoryItems.length === 0 &&
+            items.length > 0
+          ) {
             return currentCount;
           }
 
@@ -1207,11 +1274,34 @@ export function CatalogCategoryPage({
     return () => {
       isMounted = false;
     };
-  }, [category, items.length, seriesTmdbId, seriesTmdbTitle, seriesKey]);
+  }, [
+    category,
+    isSeriesDetailPage,
+    items.length,
+    seriesTmdbId,
+    seriesTmdbTitle,
+    seriesKey,
+    seriesTitle,
+  ]);
+
+  const seriesDetailItems = useMemo(() => {
+    if (!isSeriesDetailPage) {
+      return items;
+    }
+
+    return filterSeriesEpisodes(items);
+  }, [
+    isSeriesDetailPage,
+    items,
+    seriesKey,
+    seriesTmdbId,
+    seriesTmdbTitle,
+    seriesTitle,
+  ]);
 
   const visibleItems = useMemo(
-    () => items.slice(0, visibleItemCount),
-    [items, visibleItemCount],
+    () => seriesDetailItems.slice(0, visibleItemCount),
+    [seriesDetailItems, visibleItemCount],
   );
 
   const heroItem = useMemo(() => {
@@ -1219,8 +1309,33 @@ export function CatalogCategoryPage({
       return null;
     }
 
-    return getBestSeriesEpisodeRepresentative(items) ?? items[0] ?? visibleItems[0] ?? null;
-  }, [isSeriesDetailPage, items, visibleItems]);
+    const representative = getBestSeriesEpisodeRepresentative(seriesDetailItems);
+
+    if (!representative) {
+      return null;
+    }
+
+    const selectedSeriesItem =
+      navigationState?.selectedSeriesItem &&
+      isItemOfSelectedSeries(navigationState.selectedSeriesItem, {
+        seriesKey,
+        seriesTmdbId,
+        seriesTmdbTitle,
+        seriesTitle,
+      })
+        ? navigationState.selectedSeriesItem
+        : null;
+
+    return mergeSeriesHeroMetadata(representative, selectedSeriesItem);
+  }, [
+    isSeriesDetailPage,
+    navigationState?.selectedSeriesItem,
+    seriesDetailItems,
+    seriesKey,
+    seriesTmdbId,
+    seriesTmdbTitle,
+    seriesTitle,
+  ]);
   const isSeriesCategoryPage = !isSeriesDetailPage && category?.slug === 'series';
   const seriesCategorySections = useMemo(() => {
     if (!isSeriesCategoryPage) {
@@ -1315,11 +1430,14 @@ export function CatalogCategoryPage({
   }, [heroItem, isSeriesDetailPage]);
 
   const episodeWindowStart = isSeriesDetailPage
-    ? getEpisodeWindowStart(episodeFocusIndex, items.length)
+    ? getEpisodeWindowStart(episodeFocusIndex, seriesDetailItems.length)
     : 0;
 
   const episodeWindowItems = isSeriesDetailPage
-    ? items.slice(episodeWindowStart, episodeWindowStart + EPISODE_WINDOW_SIZE)
+    ? seriesDetailItems.slice(
+        episodeWindowStart,
+        episodeWindowStart + EPISODE_WINDOW_SIZE,
+      )
     : visibleItems;
 
 
@@ -1517,10 +1635,15 @@ export function CatalogCategoryPage({
       params.set('tmdbTitle', item.tmdbTitle);
     }
 
+    if (item.seriesKey) {
+      params.set('seriesKey', item.seriesKey);
+    }
+
     navigate(`/category/series-detail?${params.toString()}`, {
       state: {
         fromSeriesDetail: true,
         returnTo: `${location.pathname}${location.search}`,
+        selectedSeriesItem: createSeriesNavigationItem(item),
       },
     });
   }
@@ -1628,6 +1751,7 @@ export function CatalogCategoryPage({
       state: {
         fromSeriesCategory: true,
         returnTo: `${location.pathname}${location.search}`,
+        selectedSeriesItem: createSeriesNavigationItem(item),
       },
     });
   }
@@ -1944,7 +2068,7 @@ export function CatalogCategoryPage({
       if (direction === 'down') {
         const nextIndex = index + 1;
 
-        if (nextIndex >= items.length) {
+        if (nextIndex >= seriesDetailItems.length) {
           return false;
         }
 
@@ -2019,10 +2143,10 @@ export function CatalogCategoryPage({
       <main className="mx-auto w-full max-w-[1920px]">
         {isSeriesDetailPage && heroItem ? (
           <SeriesDetailHeroFrame
-            disabled={items.length === 0}
+            disabled={seriesDetailItems.length === 0}
             onEnterPress={() => {
-              if (items[0]) {
-                openEpisode(items[0], 0);
+              if (seriesDetailItems[0]) {
+                openEpisode(seriesDetailItems[0], 0);
               }
             }}
             onArrowPress={handleSeriesHeroArrowPress}
@@ -2147,16 +2271,16 @@ export function CatalogCategoryPage({
                   <h2 className="text-lg font-black tracking-[-0.03em] text-white">
                     Episodios
                     <span className="ml-2 text-sm font-bold text-zinc-400">
-                      {items.length}
+                      {seriesDetailItems.length}
                     </span>
                   </h2>
 
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                    {items.length > 0
+                    {seriesDetailItems.length > 0
                       ? `${episodeWindowStart + 1}-${Math.min(
                           episodeWindowStart + EPISODE_WINDOW_SIZE,
-                          items.length,
-                        )} de ${items.length}`
+                          seriesDetailItems.length,
+                        )} de ${seriesDetailItems.length}`
                       : '0 de 0'}
                   </p>
                 </div>
