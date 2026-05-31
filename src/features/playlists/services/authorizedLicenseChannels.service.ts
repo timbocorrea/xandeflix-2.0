@@ -97,6 +97,7 @@ function mapLicenseChannelToIptvChannel(
   channel: LicenseChannelCacheItem,
 ): IptvChannel {
   return {
+    ...channel,
     id: channel.id,
     name: channel.name,
     url: channel.stream_url,
@@ -118,6 +119,20 @@ function mapLicenseChannelToIptvChannel(
     tmdbRating: channel.tmdb_rating ?? null,
     tmdbGenres: channel.tmdb_genres ?? null,
     tmdbLastEnrichedAt: channel.tmdb_last_enriched_at ?? null,
+    stillPath: (channel as any).still_path ?? null,
+    still_path: (channel as any).still_path ?? null,
+    tmdbStillPath: (channel as any).tmdb_still_path ?? null,
+    tmdb_still_path: (channel as any).tmdb_still_path ?? null,
+    episodeStillPath: (channel as any).episode_still_path ?? null,
+    episode_still_path: (channel as any).episode_still_path ?? null,
+    fanart: (channel as any).fanart ?? null,
+    landscape: (channel as any).landscape ?? null,
+    backdropUrl: (channel as any).backdrop_url ?? null,
+    backdrop_url: (channel as any).backdrop_url ?? null,
+    backdropPath: (channel as any).backdrop_path ?? null,
+    backdrop_path: (channel as any).backdrop_path ?? null,
+    backgroundUrl: (channel as any).background_url ?? null,
+    background_url: (channel as any).background_url ?? null,
   };
 }
 

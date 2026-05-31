@@ -46,6 +46,7 @@ export type LoadHomeVodCategoryInput = {
   deviceIdentifier: string;
   groupTitles: string[];
   limit?: number;
+  slug?: string;
 };
 
 const DEFAULT_LIMIT_PER_SECTION = 20;
@@ -132,11 +133,13 @@ function createHomeVodCategoryCacheKey({
   deviceIdentifier,
   groupTitles,
   limit = DEFAULT_CATEGORY_ITEMS_LIMIT,
+  slug,
 }: LoadHomeVodCategoryInput) {
   return [
     normalizeCacheLicenseCode(licenseCode),
     normalizeCacheDeviceIdentifier(deviceIdentifier),
     limit,
+    slug ?? '',
     ...groupTitles.map(normalizeCatalogText).sort(),
   ].join('::');
 }
@@ -370,7 +373,14 @@ function normalizeTrustedTmdbImageUrl(
     return undefined;
   }
 
-  if (imageUrl.startsWith('https://image.tmdb.org/t/p/')) {
+  // Se já for uma URL completa do TMDB (http ou https)
+  if (/^https?:\/\/image\.tmdb\.org\/t\/p\//i.test(imageUrl)) {
+    // Forçar HTTPS por segurança
+    return imageUrl.replace(/^http:/i, 'https:');
+  }
+
+  // Se já for uma URL completa
+  if (imageUrl.startsWith('https://') || imageUrl.startsWith('http://')) {
     return imageUrl;
   }
 
@@ -380,6 +390,31 @@ function normalizeTrustedTmdbImageUrl(
 
   if (/^[A-Za-z0-9_-].*\.(jpg|jpeg|png|webp)$/i.test(imageUrl)) {
     return createTmdbImageUrl(`/${imageUrl}`, size);
+  }
+
+  return undefined;
+}
+
+function normalizeTrustedSeriesLogoUrl(value?: string | null) {
+  const imageUrl = value?.trim();
+
+  if (!imageUrl) {
+    return undefined;
+  }
+
+  try {
+    const parsedUrl = new URL(imageUrl);
+
+    if (parsedUrl.hostname.toLowerCase() === 'image.tmdb.org') {
+      parsedUrl.protocol = 'https:';
+      return parsedUrl.toString();
+    }
+
+    if (parsedUrl.protocol === 'https:') {
+      return parsedUrl.toString();
+    }
+  } catch {
+    return undefined;
   }
 
   return undefined;
@@ -428,7 +463,6 @@ function getChannelPosterUrl(channel: IptvChannel) {
 function getChannelBackdropUrl(channel: IptvChannel) {
   return (
     normalizeTrustedTmdbImageUrl(channel.tmdbBackdropPath, 'w780') ??
-    normalizeTrustedTmdbImageUrl(channel.tmdbPosterPath, 'w780') ??
     pickTrustedTmdbArtworkUrl(
       channel,
       [
@@ -436,12 +470,20 @@ function getChannelBackdropUrl(channel: IptvChannel) {
         'tmdb_backdrop_url',
         'tmdbBackdropPath',
         'tmdb_backdrop_path',
-        'tmdbPosterUrl',
-        'tmdb_poster_url',
-        'tmdbPosterPath',
-        'tmdb_poster_path',
-        'posterUrl',
-        'poster_url',
+        'backdropUrl',
+        'backdrop_url',
+        'backdropPath',
+        'backdrop_path',
+        'backgroundUrl',
+        'background_url',
+        'stillPath',
+        'still_path',
+        'tmdbStillPath',
+        'tmdb_still_path',
+        'episodeStillPath',
+        'episode_still_path',
+        'fanart',
+        'landscape',
       ],
       'w780',
     )
@@ -450,6 +492,8 @@ function getChannelBackdropUrl(channel: IptvChannel) {
 
 function mapChannelToHomeVodItem(channel: IptvChannel): HomeVodItem {
   const kind = inferVodKind(channel);
+  const seriesLogoUrl =
+    kind === 'series' ? normalizeTrustedSeriesLogoUrl(channel.logo) : undefined;
   const tmdbMetadata = channel as IptvChannel & {
     tmdbGenres?: string | null;
     tmdb_genres?: string | null;
@@ -466,7 +510,7 @@ function mapChannelToHomeVodItem(channel: IptvChannel): HomeVodItem {
     episodeTitle: channel.name,
     subtitle: createSubtitle(channel),
     overview: channel.tmdbOverview ?? undefined,
-    posterUrl: getChannelPosterUrl(channel),
+    posterUrl: getChannelPosterUrl(channel) ?? seriesLogoUrl,
     backdropUrl: getChannelBackdropUrl(channel),
     streamUrl: channel.url,
     groupTitle: channel.groupTitle ?? undefined,
@@ -911,6 +955,7 @@ export async function loadHomeVodCategoryItems({
   deviceIdentifier,
   groupTitles,
   limit = DEFAULT_CATEGORY_ITEMS_LIMIT,
+  slug,
 }: LoadHomeVodCategoryInput): Promise<HomeVodItem[]> {
   const normalizedGroupTitles = groupTitles.filter((groupTitle) =>
     Boolean(normalizeCatalogText(groupTitle)),
@@ -925,6 +970,7 @@ export async function loadHomeVodCategoryItems({
     deviceIdentifier,
     groupTitles: normalizedGroupTitles,
     limit,
+    slug,
   });
 
   if (cachedItems) {
@@ -948,82 +994,173 @@ export async function loadHomeVodCategoryItems({
     categoryContentKinds = ['series'];
   }
 
-  // 1. Buscar primeiro canais que possuem poster no TMDB
-  const posterChannels = await listAuthorizedLicenseChannels({
-    licenseCode,
-    deviceIdentifier,
-    pageSize: 100,
-    maxPages: 8,
-    requireTmdbMatched: true,
-    requireTmdbPoster: true,
-    contentKinds: categoryContentKinds,
-    groupTitles: normalizedGroupTitles,
-  });
+  const isSeriesCategory =
+    slug === 'series' ||
+    slug === 'series-group' ||
+    (hasSeriesKeywords && !hasMovieKeywords && normalizedGroupTitles.length > 2);
 
-  const posterItems = posterChannels
-    .filter(isVodChannelForHome)
-    .map(mapChannelToHomeVodItem)
-    .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
+  let mergedItems: HomeVodItem[] = [];
 
-  // 2. Buscar restante dos canais sem exigir poster
-  const fallbackChannels = await listAuthorizedLicenseChannels({
-    licenseCode,
-    deviceIdentifier,
-    pageSize: 100,
-    maxPages: 8,
-    requireTmdbMatched: false,
-    requireTmdbPoster: false,
-    contentKinds: categoryContentKinds,
-    groupTitles: normalizedGroupTitles,
-  });
+  if (isSeriesCategory) {
+    // Specialized parallel flow for Series Category to prevent alphabetical saturation
+    // For series category rows, we need to load enough raw episodes to guarantee at least 15 unique series/novelas after deduplication!
+    // Since some series/novelas have dozens of episodes, we fetch:
+    // - Bootstrap (limit < 100): up to 250 raw items per group (extremely fast and guarantees 15 series)
+    // - Full load (limit >= 100): up to 600 raw items per group for landing page, and 1200 raw items for a single dedicated group page.
+    const limitPerGroup =
+      slug === 'series-group'
+        ? (limit < 100 ? 250 : 1200)
+        : (limit < 100 ? 250 : 600);
 
-  const fallbackItems = fallbackChannels
-    .filter(isVodChannelForHome)
-    .map(mapChannelToHomeVodItem)
-    .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
+    // Do not decide row completeness by raw episode count.
+    // Some VOD groups contain hundreds of sequential episodes from the same title.
+    // For the full series landing page, fetch extra raw pages and let the page-level
+    // dedupe produce enough grouped titles before the visual slice(0, 15).
+    const seriesRawFetchMaxPages =
+      slug === 'series-group'
+        ? (limit < 100 ? 1 : 4)
+        : (limit < 100 ? 1 : 3);
+    const seriesRawReturnLimit = limitPerGroup * seriesRawFetchMaxPages;
 
-  // 3. Mesclar removendo duplicados por id
-  const mergedItemsMap = new Map<string, HomeVodItem>();
-  for (const item of posterItems) {
-    mergedItemsMap.set(item.id, item);
-  }
-  for (const item of fallbackItems) {
-    if (!mergedItemsMap.has(item.id)) {
+    const groupItemsList = await mapWithConcurrency(
+      normalizedGroupTitles,
+      4,
+      async (groupTitle) => {
+        try {
+          // 1. Fetch posterized items first
+          const posterChannels = await listAuthorizedLicenseChannels({
+            licenseCode,
+            deviceIdentifier,
+            pageSize: limitPerGroup,
+            maxPages: 1,
+            requireTmdbMatched: true,
+            requireTmdbPoster: true,
+            contentKinds: ['series'],
+            groupTitle,
+          });
+
+          const posterItems = posterChannels
+            .filter(isVodChannelForHome)
+            .map(mapChannelToHomeVodItem);
+
+          // 2. Fetch fallbacks as well.
+          // A full posterized raw page can still represent only a few grouped titles.
+          const fallbackChannels = await listAuthorizedLicenseChannels({
+            licenseCode,
+            deviceIdentifier,
+            pageSize: limitPerGroup,
+            maxPages: seriesRawFetchMaxPages,
+            requireTmdbMatched: false,
+            requireTmdbPoster: false,
+            contentKinds: ['series'],
+            groupTitle,
+          });
+
+          const fallbackItems = fallbackChannels
+            .filter(isVodChannelForHome)
+            .map(mapChannelToHomeVodItem);
+
+          const mergedMap = new Map<string, HomeVodItem>();
+          for (const item of posterItems) {
+            mergedMap.set(item.id, item);
+          }
+          for (const item of fallbackItems) {
+            if (!mergedMap.has(item.id)) {
+              mergedMap.set(item.id, item);
+            }
+          }
+
+          const merged = Array.from(mergedMap.values());
+          merged.sort((a, b) => {
+            const aHasPoster = Boolean(a.posterUrl || a.backdropUrl);
+            const bHasPoster = Boolean(b.posterUrl || b.backdropUrl);
+            if (aHasPoster !== bHasPoster) return aHasPoster ? -1 : 1;
+
+            const aHasTmdb = Boolean(a.tmdbId || a.tmdbTitle);
+            const bHasTmdb = Boolean(b.tmdbId || b.tmdbTitle);
+            if (aHasTmdb !== bHasTmdb) return aHasTmdb ? -1 : 1;
+
+            return a.title.localeCompare(b.title, 'pt-BR');
+          });
+
+          return merged.slice(0, seriesRawReturnLimit);
+        } catch (error) {
+          console.warn(`[XANDEFLIX_SERIES_GROUP_ERROR] group: ${groupTitle}`, error);
+          return [];
+        }
+      }
+    );
+
+    mergedItems = groupItemsList.flat();
+  } else {
+    // Original high-performance single-query flow for other categories
+    const posterChannels = await listAuthorizedLicenseChannels({
+      licenseCode,
+      deviceIdentifier,
+      pageSize: 100,
+      maxPages: 8,
+      requireTmdbMatched: true,
+      requireTmdbPoster: true,
+      contentKinds: categoryContentKinds,
+      groupTitles: normalizedGroupTitles,
+    });
+
+    const posterItems = posterChannels
+      .filter(isVodChannelForHome)
+      .map(mapChannelToHomeVodItem)
+      .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
+
+    const fallbackChannels = await listAuthorizedLicenseChannels({
+      licenseCode,
+      deviceIdentifier,
+      pageSize: 100,
+      maxPages: 8,
+      requireTmdbMatched: false,
+      requireTmdbPoster: false,
+      contentKinds: categoryContentKinds,
+      groupTitles: normalizedGroupTitles,
+    });
+
+    const fallbackItems = fallbackChannels
+      .filter(isVodChannelForHome)
+      .map(mapChannelToHomeVodItem)
+      .filter((item) => matchesAnyGroupTitle(item, normalizedGroupTitles));
+
+    const mergedItemsMap = new Map<string, HomeVodItem>();
+    for (const item of posterItems) {
       mergedItemsMap.set(item.id, item);
     }
+    for (const item of fallbackItems) {
+      if (!mergedItemsMap.has(item.id)) {
+        mergedItemsMap.set(item.id, item);
+      }
+    }
+
+    mergedItems = Array.from(mergedItemsMap.values());
+
+    const shouldSortMostRecent = normalizedGroupTitles.some((groupTitle) =>
+      normalizeCatalogText(groupTitle).includes('lancamento'),
+    );
+
+    mergedItems.sort((a, b) => {
+      const aHasPoster = Boolean(a.posterUrl || a.backdropUrl);
+      const bHasPoster = Boolean(b.posterUrl || b.backdropUrl);
+      if (aHasPoster !== bHasPoster) return aHasPoster ? -1 : 1;
+
+      const aHasTmdb = Boolean(a.tmdbId || a.tmdbTitle);
+      const bHasTmdb = Boolean(b.tmdbId || b.tmdbTitle);
+      if (aHasTmdb !== bHasTmdb) return aHasTmdb ? -1 : 1;
+
+      if (shouldSortMostRecent) {
+        return sortMostRecentHomeItems(a, b);
+      }
+
+      return a.title.localeCompare(b.title, 'pt-BR');
+    });
   }
 
-  const mergedItems = Array.from(mergedItemsMap.values());
-
-  // 4. Ordenar com prioridade
-  const shouldSortMostRecent = normalizedGroupTitles.some((groupTitle) =>
-    normalizeCatalogText(groupTitle).includes('lancamento'),
-  );
-
-  mergedItems.sort((a, b) => {
-    // a. posterUrl/backdropUrl primeiro
-    const aHasPoster = Boolean(a.posterUrl || a.backdropUrl);
-    const bHasPoster = Boolean(b.posterUrl || b.backdropUrl);
-    if (aHasPoster !== bHasPoster) {
-      return aHasPoster ? -1 : 1;
-    }
-
-    // b. tmdbId/tmdbTitle depois
-    const aHasTmdb = Boolean(a.tmdbId || a.tmdbTitle);
-    const bHasTmdb = Boolean(b.tmdbId || b.tmdbTitle);
-    if (aHasTmdb !== bHasTmdb) {
-      return aHasTmdb ? -1 : 1;
-    }
-
-    if (shouldSortMostRecent) {
-      return sortMostRecentHomeItems(a, b);
-    }
-
-    // c. title depois
-    return a.title.localeCompare(b.title, 'pt-BR');
-  });
-
-  const limitedItems = mergedItems.slice(0, limit);
+  // Bypass slice operation for the series category to prevent truncating trailing rows
+  const limitedItems = isSeriesCategory ? mergedItems : mergedItems.slice(0, limit);
 
   homeVodCategoryItemsCache.set(
     createHomeVodCategoryCacheKey({
@@ -1031,6 +1168,7 @@ export async function loadHomeVodCategoryItems({
       deviceIdentifier,
       groupTitles: normalizedGroupTitles,
       limit,
+      slug,
     }),
     {
       createdAt: Date.now(),

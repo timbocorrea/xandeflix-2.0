@@ -6,6 +6,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { useAuth } from '../../../app/providers/AuthProvider';
 import { AppShell } from '../../../components/layout/AppShell';
 import { MediaCard } from '../../../components/media/MediaCard';
+import { FocusableButton } from '../../../components/tv/FocusableButton';
 import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
@@ -22,6 +23,7 @@ import {
   loadHomeVodSections,
   type HomeVodItem,
 } from '../services/homeVod.service';
+import { enrichSeriesHeroHighlights } from '../services/seriesHeroTmdb.service';
 import {
   readCachedSeriesEpisodes,
   storeCachedSeriesEpisodes,
@@ -41,6 +43,9 @@ const BOOTSTRAP_CATEGORY_ITEM_LIMIT = INITIAL_VISIBLE_ITEMS;
 const CATEGORY_ITEM_FOCUS_PREFIX = 'category-grid-item';
 const SERIES_DETAIL_HERO_FOCUS_KEY = 'series-detail-hero';
 const SIMILAR_ITEM_FOCUS_PREFIX = 'series-similar-item';
+const SERIES_HERO_HIGHLIGHT_LIMIT = 10;
+const SERIES_HERO_ROTATION_INTERVAL_MS = 8000;
+const SERIES_CATEGORY_ROW_VISIBLE_LIMIT = 15;
 
 type CatalogCategoryPageProps = {
   groupSlugOverride?: string;
@@ -55,9 +60,10 @@ function getSimilarItemFocusKey(categorySlug: string, index: number) {
 }
 
 function readInitialCategoryItems(
-  category: { groupTitles: string[] } | null,
+  category: CatalogCategoryDefinition | null,
   seriesTmdbId: string | null,
   seriesTmdbTitle: string | null,
+  seriesKey: string | null,
 ) {
   if (!category) {
     return [];
@@ -74,6 +80,10 @@ function readInitialCategoryItems(
     storedActivation?.deviceIdentifier || getOrCreateDeviceIdentifier();
 
   const matchesSeries = (item: HomeVodItem) => {
+    if (seriesKey) {
+      return getSeriesCollectionKey(item) === seriesKey.trim().toLowerCase();
+    }
+
     if (!seriesTmdbId && !seriesTmdbTitle) {
       return true;
     }
@@ -111,6 +121,7 @@ function readInitialCategoryItems(
     deviceIdentifier,
     groupTitles: category.groupTitles,
     limit: BOOTSTRAP_CATEGORY_ITEM_LIMIT,
+    slug: category.slug,
   });
 
   const filteredCategoryItems = (cachedItems ?? []).filter(matchesSeries);
@@ -141,36 +152,221 @@ function resolveVisibleCount(totalItems: number) {
   return Math.min(totalItems, INITIAL_VISIBLE_ITEMS);
 }
 
+function normalizeSeriesCollectionTitle(value?: string | null) {
+  return (value ?? '')
+    .replace(/\s*S\d{1,3}\s*E\d{1,4}.*$/i, '')
+    .replace(/\s*S\d{1,3}\s*-\s*E\d{1,4}.*$/i, '')
+    .replace(/\s*T\d{1,3}\s*E\d{1,4}.*$/i, '')
+    .replace(/\s*T\d{1,3}\s*-\s*E\d{1,4}.*$/i, '')
+    .replace(/\s*\d{1,3}x\d{1,4}.*$/i, '')
+    .replace(/\s*-\s*Epis[oó]dio\s*\d+.*$/i, '')
+    .replace(/\s*Ep\.?\s*\d+.*$/i, '')
+    .replace(/\s*Epis[oó]dio\s*\d+.*$/i, '')
+    .trim();
+}
+
 function getSeriesCollectionKey(item: HomeVodItem) {
-  return (
-    item.seriesKey ||
-    item.tmdbId ||
-    item.tmdbTitle ||
-    item.groupTitle ||
-    item.title
-  )
-    .trim()
-    .toLowerCase();
+  const titleIdentity =
+    normalizeSeriesCollectionTitle(item.episodeTitle) ||
+    normalizeSeriesCollectionTitle(item.title);
+
+  if (titleIdentity) {
+    return titleIdentity.trim().toLowerCase();
+  }
+
+  const explicitIdentity = item.seriesKey || item.tmdbId || item.tmdbTitle;
+
+  if (explicitIdentity) {
+    return String(explicitIdentity).trim().toLowerCase();
+  }
+
+  return (item.groupTitle || item.title).trim().toLowerCase();
+}
+
+function hasRepresentativeMetadataValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+
+  return Boolean(value);
+}
+
+function getRepresentativeScore(item: HomeVodItem): number {
+  const metadata = item as HomeVodItem & {
+    overview?: string | null;
+    tmdbOverview?: string | null;
+    tmdbRating?: number | string | null;
+    tmdbVoteAverage?: number | string | null;
+    tmdbReleaseYear?: number | string | null;
+    releaseYear?: number | string | null;
+    tmdbGenres?: string[] | string | null;
+    genres?: string[] | string | null;
+  };
+
+  let score = 0;
+
+  if (hasRepresentativeMetadataValue(item.posterUrl)) score += 1000;
+  if (hasRepresentativeMetadataValue(item.backdropUrl)) score += 600;
+
+  if (
+    hasRepresentativeMetadataValue(metadata.tmdbOverview) ||
+    hasRepresentativeMetadataValue(metadata.overview)
+  ) {
+    score += 300;
+  }
+
+  if (hasRepresentativeMetadataValue(item.tmdbTitle)) score += 120;
+  if (hasRepresentativeMetadataValue(item.tmdbId)) score += 100;
+
+  if (
+    hasRepresentativeMetadataValue(metadata.tmdbRating) ||
+    hasRepresentativeMetadataValue(metadata.tmdbVoteAverage)
+  ) {
+    score += 40;
+  }
+
+  if (
+    hasRepresentativeMetadataValue(metadata.tmdbReleaseYear) ||
+    hasRepresentativeMetadataValue(metadata.releaseYear)
+  ) {
+    score += 40;
+  }
+
+  if (
+    hasRepresentativeMetadataValue(metadata.tmdbGenres) ||
+    hasRepresentativeMetadataValue(metadata.genres)
+  ) {
+    score += 30;
+  }
+
+  return score;
+}
+
+function createSeriesCollectionItem(item: HomeVodItem, key: string): HomeVodItem {
+  const collectionTitle =
+    normalizeSeriesCollectionTitle(item.episodeTitle) ||
+    normalizeSeriesCollectionTitle(item.title);
+
+  return {
+    ...item,
+    title: collectionTitle || item.tmdbTitle || item.title,
+    kind: 'series',
+    seriesKey: key,
+    isSeriesCollection: true,
+  };
+}
+
+function getBestSeriesEpisodeRepresentative(items: HomeVodItem[]) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return items.reduce((bestItem, item) =>
+    getRepresentativeScore(item) > getRepresentativeScore(bestItem)
+      ? item
+      : bestItem,
+  );
 }
 
 function dedupeSeriesCollections(items: HomeVodItem[]) {
   const byCollection = new Map<string, HomeVodItem>();
+  const episodeCounts = new Map<string, number>();
 
   for (const item of items) {
     const key = getSeriesCollectionKey(item);
 
-    if (!key || byCollection.has(key)) {
+    if (!key) {
       continue;
     }
 
-    byCollection.set(key, {
-      ...item,
-      kind: 'series',
-      isSeriesCollection: true,
-    });
+    episodeCounts.set(key, (episodeCounts.get(key) ?? 0) + (item.episodeCount ?? 1));
+
+    const existing = byCollection.get(key);
+    const nextCollectionItem = createSeriesCollectionItem(item, key);
+
+    if (!existing) {
+      byCollection.set(key, nextCollectionItem);
+      continue;
+    }
+
+    if (getRepresentativeScore(nextCollectionItem) > getRepresentativeScore(existing)) {
+      byCollection.set(key, nextCollectionItem);
+    }
   }
 
-  return Array.from(byCollection.values());
+  return Array.from(byCollection.entries()).map(([key, item]) => ({
+    ...item,
+    episodeCount: episodeCounts.get(key) ?? item.episodeCount,
+  }));
+}
+
+type SeriesCategorySection = {
+  id: string;
+  title: string;
+  items: HomeVodItem[];
+};
+
+function slugifySeriesSectionId(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildSeriesCategorySections(
+  items: HomeVodItem[],
+  orderedGroupTitles: string[],
+): SeriesCategorySection[] {
+  const orderByGroup = new Map(
+    orderedGroupTitles.map((groupTitle, index) => [
+      groupTitle.trim().toLowerCase(),
+      index,
+    ]),
+  );
+
+  const groupedItems = new Map<string, HomeVodItem[]>();
+
+  for (const item of items) {
+    const groupTitle = item.groupTitle?.trim() || 'Outras séries';
+    const nextItems = groupedItems.get(groupTitle) ?? [];
+    nextItems.push(item);
+    groupedItems.set(groupTitle, nextItems);
+  }
+
+  return Array.from(groupedItems.entries())
+    .sort(([leftGroup], [rightGroup]) => {
+      const leftOrder =
+        orderByGroup.get(leftGroup.trim().toLowerCase()) ??
+        Number.MAX_SAFE_INTEGER;
+      const rightOrder =
+        orderByGroup.get(rightGroup.trim().toLowerCase()) ??
+        Number.MAX_SAFE_INTEGER;
+
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return leftGroup.localeCompare(rightGroup, 'pt-BR', {
+        sensitivity: 'base',
+      });
+    })
+    .map(([groupTitle, groupItems]) => ({
+      id: `series-row-${slugifySeriesSectionId(groupTitle) || 'outros'}`,
+      title: groupTitle,
+      items: groupItems.sort((left, right) =>
+        left.title.localeCompare(right.title, 'pt-BR', {
+          sensitivity: 'base',
+        }),
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 }
 
 function getSeriesHeroItem(items: HomeVodItem[]) {
@@ -181,60 +377,259 @@ function getSeriesHeroItem(items: HomeVodItem[]) {
   );
 }
 
+function getSeriesHeroOverview(item: HomeVodItem) {
+  const metadata = item as HomeVodItem & {
+    tmdbOverview?: string | null;
+  };
+
+  return metadata.tmdbOverview?.trim() || item.overview?.trim() || null;
+}
+
+function buildSeriesHeroHighlights(sections: SeriesCategorySection[]) {
+  const uniqueHighlights = new Map<string, HomeVodItem>();
+
+  for (const item of sections.flatMap((section) => section.items)) {
+    const key = item.seriesKey || getSeriesCollectionKey(item);
+    const currentHighlight = uniqueHighlights.get(key);
+
+    if (
+      !currentHighlight ||
+      getRepresentativeScore(item) > getRepresentativeScore(currentHighlight)
+    ) {
+      uniqueHighlights.set(key, item);
+    }
+  }
+
+  return Array.from(uniqueHighlights.values())
+    .sort((left, right) => {
+      const backdropScore =
+        Number(Boolean(right.backdropUrl)) - Number(Boolean(left.backdropUrl));
+
+      if (backdropScore !== 0) {
+        return backdropScore;
+      }
+
+      const posterScore =
+        Number(Boolean(right.posterUrl)) - Number(Boolean(left.posterUrl));
+
+      if (posterScore !== 0) {
+        return posterScore;
+      }
+
+      const overviewScore =
+        Number(Boolean(getSeriesHeroOverview(right))) -
+        Number(Boolean(getSeriesHeroOverview(left)));
+
+      if (overviewScore !== 0) {
+        return overviewScore;
+      }
+
+      const episodeCountScore =
+        (right.episodeCount ?? 0) - (left.episodeCount ?? 0);
+
+      if (episodeCountScore !== 0) {
+        return episodeCountScore;
+      }
+
+      const representativeScore =
+        getRepresentativeScore(right) - getRepresentativeScore(left);
+
+      if (representativeScore !== 0) {
+        return representativeScore;
+      }
+
+      return left.title.localeCompare(right.title, 'pt-BR', {
+        sensitivity: 'base',
+      });
+    })
+    .slice(0, SERIES_HERO_HIGHLIGHT_LIMIT);
+}
+
+function buildSeriesHeroMetadata(item: HomeVodItem) {
+  return [
+    item.tmdbReleaseYear,
+    item.tmdbRating ? `Nota ${formatHeroRating(item.tmdbRating)}` : null,
+    item.tmdbGenres,
+    item.episodeCount ? `${item.episodeCount} episódio(s)` : null,
+    item.groupTitle,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' | ');
+}
+
 function SeriesCategoryHero({
   item,
   totalItems,
+  heroIndex,
+  heroTotal,
+  onOpenItem,
+  onButtonArrowPress,
 }: {
   item: HomeVodItem | null;
   totalItems: number;
+  heroIndex: number;
+  heroTotal: number;
+  onOpenItem: (item: HomeVodItem) => void;
+  onButtonArrowPress: (
+    direction: string,
+    buttonPosition: 'play' | 'info',
+  ) => boolean;
 }) {
-  const backgroundUrl = item?.backdropUrl || item?.posterUrl || null;
+  const backgroundUrl = item?.backdropUrl || null;
+  const metadata = item ? buildSeriesHeroMetadata(item) : null;
+  const overview =
+    (item && getSeriesHeroOverview(item)) ||
+    'Séries, novelas, doramas e temporadas liberadas para esta licença.';
 
   return (
-    <section className="relative mb-7 min-h-[21rem] overflow-hidden rounded-[1rem] border border-white/10 bg-zinc-950 px-7 py-7 shadow-2xl">
+    <section
+      data-xf-series-category-hero="true"
+      data-nav-id={FOCUS_KEYS.CATALOG_HERO_SECTION}
+      data-focus-key={FOCUS_KEYS.CATALOG_HERO_SECTION}
+      data-xf-focus-key={FOCUS_KEYS.CATALOG_HERO_SECTION}
+      style={
+        backgroundUrl
+          ? {
+              aspectRatio: '16 / 7',
+              height: 'auto',
+            }
+          : undefined
+      }
+      className="relative mb-6 box-border flex min-h-[18.75rem] w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black px-5 py-5 shadow-2xl ring-0 ring-inset ring-transparent md:min-h-[22rem] md:px-7 md:py-6 lg:min-h-[25.5rem] xl:min-h-[28.5rem]"
+    >
       {backgroundUrl ? (
         <img
+          key={backgroundUrl}
           src={backgroundUrl}
-          alt={item?.title ?? 'Séries'}
-          className="absolute inset-0 size-full object-cover opacity-35"
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover opacity-100"
+          loading="eager"
+          decoding="async"
         />
       ) : null}
 
-      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/85 to-black/25" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/25 to-transparent" />
+      <div
+        data-xf-hero-radial-backdrop="true"
+        className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(circle_at_18%_76%,rgba(0,0,0,0.78)_0%,rgba(0,0,0,0.58)_18%,rgba(0,0,0,0.36)_34%,rgba(0,0,0,0.16)_50%,rgba(0,0,0,0.06)_62%,rgba(0,0,0,0)_74%)]"
+      />
 
-      <div className="relative z-10 flex min-h-[17rem] max-w-3xl flex-col justify-end">
-        <p className="mb-2 text-xs font-black uppercase tracking-[0.34em] text-xf-red">
-          Catálogo
-        </p>
+      <div className="relative z-10 grid w-full gap-5">
+        <div
+          className="flex max-w-[54rem] flex-1 flex-col justify-end self-stretch pb-[clamp(0.35rem,0.9vh,0.85rem)]"
+          style={{
+            transform: 'scale(0.8)',
+            transformOrigin: 'left bottom',
+          }}
+        >
+          <p
+            data-xf-hero-eyebrow="true"
+            className="mb-3 text-[clamp(0.625rem,0.84vw,0.8rem)] font-black uppercase tracking-[0.35em] text-xf-red"
+          >
+            Séries / Novelas
+          </p>
 
-        <h1 className="text-5xl font-black leading-none text-white drop-shadow-lg md:text-6xl">
-          Séries
-        </h1>
+          <h1
+            key={`series-hero-title-${heroIndex}-${item?.title ?? 'Séries'}`}
+            data-xf-hero-title="true"
+            className="font-display text-[clamp(1.6rem,3vw,3.24rem)] font-black leading-[0.94] text-white"
+            style={{
+              fontFamily: "'Bebas Neue', 'Arial Narrow', sans-serif",
+              letterSpacing: '0.035em',
+            }}
+          >
+            {item?.title ?? 'Séries'}
+          </h1>
 
-        <p className="mt-4 max-w-2xl text-lg font-semibold leading-snug text-zinc-200">
-          Séries, novelas, doramas e temporadas liberadas para esta licença.
-        </p>
+          {metadata ? (
+            <p
+              key={`series-hero-metadata-${heroIndex}-${metadata}`}
+              data-xf-hero-metadata="true"
+              className="mt-1.5 max-w-xl text-[clamp(0.5rem,0.66vw,0.62rem)] font-bold uppercase tracking-[0.16em] text-white/90"
+            >
+              {metadata}
+            </p>
+          ) : null}
 
-        {item ? (
-          <div className="mt-5 flex flex-wrap items-center gap-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
-            <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">
-              Destaque
-            </span>
+          <p
+            key={`series-hero-description-${heroIndex}-${overview}`}
+            data-xf-hero-description="true"
+            className="mt-2 max-w-xl text-[clamp(0.62rem,0.82vw,0.77rem)] leading-[1.45] text-zinc-200"
+            style={{
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 3,
+              overflow: 'hidden',
+            }}
+          >
+            {overview}
+          </p>
 
-            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1">
-              {item.title}
-            </span>
+          {item ? (
+            <>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-4">
+                <FocusableButton
+                  focusKey={FOCUS_KEYS.HERO_PLAY_BUTTON}
+                  focusScrollTarget="closest-section"
+                  focusScrollOptions={{
+                    behavior: 'auto',
+                    block: 'center',
+                    inline: 'nearest',
+                  }}
+                  className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+                  onClick={() => onOpenItem(item)}
+                  onEnterPress={() => onOpenItem(item)}
+                  onArrowPress={(direction) =>
+                    onButtonArrowPress(direction, 'play')
+                  }
+                >
+                  Assistir agora
+                </FocusableButton>
 
-            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1">
-              {totalItems} títulos
-            </span>
-          </div>
-        ) : (
-          <div className="mt-5 inline-flex w-fit rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
-            Carregando séries...
-          </div>
-        )}
+                <FocusableButton
+                  focusKey={FOCUS_KEYS.HERO_INFO_BUTTON}
+                  focusScrollTarget="closest-section"
+                  focusScrollOptions={{
+                    behavior: 'auto',
+                    block: 'center',
+                    inline: 'nearest',
+                  }}
+                  className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+                  onClick={() => onOpenItem(item)}
+                  onEnterPress={() => onOpenItem(item)}
+                  onArrowPress={(direction) =>
+                    onButtonArrowPress(direction, 'info')
+                  }
+                >
+                  Mais informações
+                </FocusableButton>
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[0.5rem] font-bold uppercase tracking-[0.18em] text-white/80">
+                  {totalItems} títulos agrupados
+                </span>
+
+                {heroTotal > 1
+                  ? Array.from({ length: heroTotal }).map((_, index) => (
+                      <span
+                        key={`series-hero-indicator-${index}`}
+                        className={
+                          'h-1.5 rounded-full transition-all ' +
+                          (index === heroIndex ? 'w-7 bg-white' : 'w-2.5 bg-white/35')
+                        }
+                        aria-hidden="true"
+                      />
+                    ))
+                  : null}
+              </div>
+            </>
+          ) : (
+            <div className="mt-5 inline-flex w-fit rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
+              Carregando séries...
+            </div>
+          )}
+        </div>
+
       </div>
     </section>
   );
@@ -483,14 +878,33 @@ export function CatalogCategoryPage({
   const seriesTitle = searchParams.get('title')?.trim() || null;
   const seriesTmdbId = searchParams.get('tmdbId')?.trim() || null;
   const seriesTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
-  const isSeriesDetailPage = Boolean(
-    seriesGroupTitle &&
-      ((groupSlugOverride ?? params.groupSlug) === 'series-detail' ||
-        seriesTmdbId ||
-        seriesTmdbTitle),
-  );
+  const seriesKey = searchParams.get('seriesKey')?.trim() || null;
+
+  const isSeriesGroupListPage =
+    (groupSlugOverride ?? params.groupSlug) === 'series-group' &&
+    Boolean(seriesGroupTitle);
+
+  const isSeriesDetailPage =
+    !isSeriesGroupListPage &&
+    Boolean(
+      seriesGroupTitle &&
+        ((groupSlugOverride ?? params.groupSlug) === 'series-detail' ||
+          seriesTmdbId ||
+          seriesTmdbTitle ||
+          seriesKey),
+    );
 
   const category = useMemo<CatalogCategoryDefinition | null>(() => {
+    if (isSeriesGroupListPage && seriesGroupTitle) {
+      return {
+        slug: 'series-group',
+        title: seriesGroupTitle,
+        description: `Títulos disponíveis em ${seriesGroupTitle}.`,
+        groupTitles: [seriesGroupTitle],
+        path: '/category/series-group',
+      } as CatalogCategoryDefinition;
+    }
+
     const definition = getCatalogCategoryDefinition(
       groupSlugOverride ?? params.groupSlug,
     );
@@ -510,10 +924,10 @@ export function CatalogCategoryPage({
       groupTitles: [seriesGroupTitle],
       path: '/category/series-detail',
     } as CatalogCategoryDefinition;
-  }, [groupSlugOverride, params.groupSlug, seriesGroupTitle, seriesTitle]);
+  }, [groupSlugOverride, params.groupSlug, seriesGroupTitle, seriesTitle, isSeriesGroupListPage]);
   const initialItems = useMemo(
-    () => readInitialCategoryItems(category, seriesTmdbId, seriesTmdbTitle),
-    [category, seriesTmdbId, seriesTmdbTitle],
+    () => readInitialCategoryItems(category, seriesTmdbId, seriesTmdbTitle, seriesKey),
+    [category, seriesTmdbId, seriesTmdbTitle, seriesKey],
   );
 
   const [items, setItems] = useState<HomeVodItem[]>(initialItems);
@@ -521,9 +935,38 @@ export function CatalogCategoryPage({
     resolveVisibleCount(initialItems.length),
   );
   const [episodeFocusIndex, setEpisodeFocusIndex] = useState(0);
+  const [seriesHeroIndex, setSeriesHeroIndex] = useState(0);
+  const [locallyEnrichedSeriesHeroHighlights, setLocallyEnrichedSeriesHeroHighlights] =
+    useState<HomeVodItem[]>([]);
   const [similarItems, setSimilarItems] = useState<HomeVodItem[]>([]);
   const [isLoading, setIsLoading] = useState(initialItems.length === 0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  function scrollSeriesHeroIntoSafeView() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
+    }
+    const hero = document.querySelector<HTMLElement>(
+      '[data-xf-series-category-hero="true"]',
+    );
+
+    if (!hero) {
+      return;
+    }
+
+    hero.scrollIntoView({
+      behavior: 'auto',
+      block: 'start',
+      inline: 'nearest',
+    });
+
+    const headerOffset = 96; // Ajustado para o tamanho real do header fixo
+    window.scrollBy({
+      top: -headerOffset,
+      left: 0,
+      behavior: 'auto',
+    });
+  }
 
   // Preload seguro em background para as imagens da categoria
   const categoryPreloadUrls = useMemo(() => {
@@ -579,9 +1022,10 @@ export function CatalogCategoryPage({
         seriesGroupTitle ?? '',
         seriesTmdbId ?? '',
         seriesTmdbTitle ?? '',
+        seriesKey ?? '',
         seriesTitle ?? '',
       ].join('::'),
-    [seriesGroupTitle, seriesTmdbId, seriesTmdbTitle, seriesTitle],
+    [seriesGroupTitle, seriesTmdbId, seriesTmdbTitle, seriesKey, seriesTitle],
   );
 
   function pickSimilarCollectionsFromSections(
@@ -623,11 +1067,15 @@ export function CatalogCategoryPage({
   }
 
   function filterSeriesEpisodes(nextItems: HomeVodItem[]) {
-    if (!seriesTmdbId && !seriesTmdbTitle) {
+    if (!seriesKey && !seriesTmdbId && !seriesTmdbTitle) {
       return nextItems;
     }
 
     return nextItems.filter((item) => {
+      if (seriesKey && getSeriesCollectionKey(item) === seriesKey.trim().toLowerCase()) {
+        return true;
+      }
+
       if (seriesTmdbId && item.tmdbId && String(item.tmdbId) === seriesTmdbId) {
         return true;
       }
@@ -675,12 +1123,13 @@ export function CatalogCategoryPage({
           deviceIdentifier,
           groupTitles: category.groupTitles,
           limit: BOOTSTRAP_CATEGORY_ITEM_LIMIT,
+          slug: category.slug,
         });
 
         if (cachedItems?.length) {
           const filteredCachedItems = filterSeriesEpisodes(cachedItems);
           const nextCachedItems =
-            category.slug === 'series'
+            category.slug === 'series' || category.slug === 'series-group'
               ? dedupeSeriesCollections(filteredCachedItems)
               : filteredCachedItems;
 
@@ -697,6 +1146,7 @@ export function CatalogCategoryPage({
           deviceIdentifier,
           groupTitles: category.groupTitles,
           limit: CATEGORY_ITEM_LIMIT,
+          slug: category.slug,
         });
 
         if (!isMounted) {
@@ -705,7 +1155,7 @@ export function CatalogCategoryPage({
 
         const filteredNextItems = filterSeriesEpisodes(nextItems);
         const nextCategoryItems =
-          category.slug === 'series'
+          category.slug === 'series' || category.slug === 'series-group'
             ? dedupeSeriesCollections(filteredNextItems)
             : filteredNextItems;
 
@@ -757,16 +1207,104 @@ export function CatalogCategoryPage({
     return () => {
       isMounted = false;
     };
-  }, [category, items.length, seriesTmdbId, seriesTmdbTitle]);
+  }, [category, items.length, seriesTmdbId, seriesTmdbTitle, seriesKey]);
 
   const visibleItems = useMemo(
     () => items.slice(0, visibleItemCount),
     [items, visibleItemCount],
   );
 
-  const heroItem = isSeriesDetailPage ? items[0] ?? visibleItems[0] : null;
+  const heroItem = useMemo(() => {
+    if (!isSeriesDetailPage) {
+      return null;
+    }
+
+    return getBestSeriesEpisodeRepresentative(items) ?? items[0] ?? visibleItems[0] ?? null;
+  }, [isSeriesDetailPage, items, visibleItems]);
   const isSeriesCategoryPage = !isSeriesDetailPage && category?.slug === 'series';
-  const seriesHeroItem = isSeriesCategoryPage ? getSeriesHeroItem(items) : null;
+  const seriesCategorySections = useMemo(() => {
+    if (!isSeriesCategoryPage) {
+      return [];
+    }
+
+    const groupedItems = dedupeSeriesCollections(items);
+
+    return buildSeriesCategorySections(groupedItems, category?.groupTitles ?? []);
+  }, [category?.groupTitles, isSeriesCategoryPage, items]);
+  const seriesHeroHighlights = useMemo(
+    () => buildSeriesHeroHighlights(seriesCategorySections),
+    [seriesCategorySections],
+  );
+  const effectiveSeriesHeroHighlights = useMemo(() => {
+    if (
+      locallyEnrichedSeriesHeroHighlights.length !== seriesHeroHighlights.length ||
+      locallyEnrichedSeriesHeroHighlights.some(
+        (item, index) => item.id !== seriesHeroHighlights[index]?.id,
+      )
+    ) {
+      return seriesHeroHighlights;
+    }
+
+    return locallyEnrichedSeriesHeroHighlights;
+  }, [locallyEnrichedSeriesHeroHighlights, seriesHeroHighlights]);
+  const seriesHeroItem = useMemo(() => {
+    if (!isSeriesCategoryPage) {
+      return null;
+    }
+
+    return getSeriesHeroItem(
+      seriesCategorySections.flatMap((section) => section.items),
+    );
+  }, [isSeriesCategoryPage, seriesCategorySections]);
+  const activeSeriesHeroIndex =
+    effectiveSeriesHeroHighlights.length > 0
+      ? seriesHeroIndex % effectiveSeriesHeroHighlights.length
+      : 0;
+  const activeSeriesHeroItem =
+    effectiveSeriesHeroHighlights[activeSeriesHeroIndex] ?? seriesHeroItem;
+  const seriesCollectionCount = seriesCategorySections.reduce(
+    (total, section) => total + section.items.length,
+    0,
+  );
+
+  useEffect(() => {
+    if (!isSeriesCategoryPage || seriesHeroHighlights.length === 0) {
+      setLocallyEnrichedSeriesHeroHighlights([]);
+      return;
+    }
+
+    let isCancelled = false;
+
+    void enrichSeriesHeroHighlights(seriesHeroHighlights).then(
+      (enrichedHighlights) => {
+        if (!isCancelled) {
+          setLocallyEnrichedSeriesHeroHighlights(enrichedHighlights);
+        }
+      },
+    );
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isSeriesCategoryPage, seriesHeroHighlights]);
+
+  useEffect(() => {
+    setSeriesHeroIndex(0);
+  }, [seriesHeroHighlights]);
+
+  useEffect(() => {
+    if (!isSeriesCategoryPage || seriesHeroHighlights.length <= 1) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setSeriesHeroIndex((currentIndex) => {
+        return (currentIndex + 1) % seriesHeroHighlights.length;
+      });
+    }, SERIES_HERO_ROTATION_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [isSeriesCategoryPage, seriesHeroHighlights.length]);
 
   useEffect(() => {
     if (!isSeriesDetailPage) {
@@ -798,29 +1336,55 @@ export function CatalogCategoryPage({
         return;
       }
 
+      if (isSeriesCategoryPage && seriesCategorySections[0]?.items.length) {
+        scrollSeriesHeroIntoSafeView();
+        setFocus(FOCUS_KEYS.HERO_PLAY_BUTTON);
+        return;
+      }
+
       setFocus(getCategoryItemFocusKey(category.slug, 0));
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [category, currentSeriesIdentity, isSeriesDetailPage, visibleItems.length]);
+  }, [
+    category,
+    currentSeriesIdentity,
+    isSeriesCategoryPage,
+    isSeriesDetailPage,
+    seriesCategorySections,
+    visibleItems.length,
+  ]);
+
+  useEffect(() => {
+    if (!isLoading && visibleItems.length > 0 && category && isSeriesGroupListPage) {
+      const timer = window.setTimeout(() => {
+        setFocus(getCategoryItemFocusKey(category.slug, 0));
+      }, 50);
+      return () => window.clearTimeout(timer);
+    }
+  }, [isLoading, visibleItems.length, category, isSeriesGroupListPage]);
 
   useEffect(() => {
     function goBackToHome() {
       const navigationState = location.state as
-        | { fromSeriesDetail?: boolean; returnTo?: string }
+        | { fromSeriesDetail?: boolean; fromSeriesCategory?: boolean; returnTo?: string }
         | null;
 
       if (
-        isSeriesDetailPage &&
-        navigationState?.fromSeriesDetail &&
-        navigationState.returnTo
+        (isSeriesDetailPage || isSeriesGroupListPage) &&
+        navigationState?.returnTo
       ) {
         navigate(navigationState.returnTo, { replace: true });
         return;
       }
 
-      if (isSeriesDetailPage && window.history.length > 1) {
+      if ((isSeriesDetailPage || isSeriesGroupListPage) && window.history.length > 1) {
         navigate(-1);
+        return;
+      }
+
+      if (isSeriesGroupListPage) {
+        navigate('/category/series');
         return;
       }
 
@@ -1042,6 +1606,60 @@ export function CatalogCategoryPage({
     return false;
   }
 
+  function openSeriesCollection(item: HomeVodItem) {
+    const params = new URLSearchParams({
+      groupTitle: item.groupTitle ?? category?.groupTitles[0] ?? '',
+      title: item.tmdbTitle ?? item.title,
+    });
+
+    if (item.seriesKey) {
+      params.set('seriesKey', item.seriesKey);
+    }
+
+    if (item.tmdbId) {
+      params.set('tmdbId', item.tmdbId);
+    }
+
+    if (item.tmdbTitle) {
+      params.set('tmdbTitle', item.tmdbTitle);
+    }
+
+    navigate(`/category/series-detail?${params.toString()}`, {
+      state: {
+        fromSeriesCategory: true,
+        returnTo: `${location.pathname}${location.search}`,
+      },
+    });
+  }
+
+  function openSeriesGroupPage(section: SeriesCategorySection) {
+    const params = new URLSearchParams({
+      groupTitle: section.title,
+    });
+
+    navigate(`/category/series-group?${params.toString()}`, {
+      state: {
+        fromSeriesCategory: true,
+        returnTo: `${location.pathname}${location.search}`,
+      },
+    });
+  }
+
+  function openCategoryItem(item: HomeVodItem, index: number) {
+    const shouldOpenSeriesDetail =
+      category?.slug === 'series' ||
+      category?.slug === 'series-group' ||
+      item.isSeriesCollection ||
+      Boolean(item.seriesKey);
+
+    if (shouldOpenSeriesDetail) {
+      openSeriesCollection(item);
+      return;
+    }
+
+    openEpisode(item, index);
+  }
+
   function openEpisode(item: HomeVodItem, index: number) {
     spatialDebug('catalog-grid', 'Abrir episodio:', item.title);
 
@@ -1096,12 +1714,57 @@ export function CatalogCategoryPage({
 
     if (direction === 'down' && items.length > 0) {
       setEpisodeFocusIndex(0);
+
+      if (isSeriesCategoryPage && seriesCategorySections[0]?.items.length) {
+        setFocus(getCategoryItemFocusKey(seriesCategorySections[0].id, 0));
+        return false;
+      }
+
       setFocus(getCategoryItemFocusKey(category.slug, 0));
       return false;
     }
 
     if (direction === 'left') {
       setFocus(FOCUS_KEYS.SIDEBAR_HOME);
+      return false;
+    }
+
+    return false;
+  }
+
+  function focusFirstSeriesCategoryRow() {
+    const firstSection = seriesCategorySections[0];
+
+    if (!firstSection?.items.length) {
+      return false;
+    }
+
+    setFocus(getCategoryItemFocusKey(firstSection.id, 0));
+    return false;
+  }
+
+  function handleSeriesCategoryHeroButtonArrowPress(
+    direction: string,
+    buttonPosition: 'play' | 'info',
+  ) {
+    if (direction === 'down') {
+      return focusFirstSeriesCategoryRow();
+    }
+
+    if (direction === 'left') {
+      setFocus(
+        buttonPosition === 'info'
+          ? FOCUS_KEYS.HERO_PLAY_BUTTON
+          : FOCUS_KEYS.SIDEBAR_HOME,
+      );
+      return false;
+    }
+
+    if (direction === 'right') {
+      if (buttonPosition === 'play') {
+        setFocus(FOCUS_KEYS.HERO_INFO_BUTTON);
+      }
+
       return false;
     }
 
@@ -1124,7 +1787,127 @@ export function CatalogCategoryPage({
 
     window.setTimeout(() => {
       setFocus(getCategoryItemFocusKey(category.slug, targetIndex));
-    }, 0);
+    }, 50);
+
+    return false;
+  }
+
+  function handleSeriesCategoryRowCardArrowPress(
+    direction: string,
+    sectionIndex: number,
+    itemIndex: number,
+  ) {
+    const section = seriesCategorySections[sectionIndex];
+
+    if (!section) {
+      return false;
+    }
+
+    const visibleItemsCount = Math.min(SERIES_CATEGORY_ROW_VISIBLE_LIMIT, section.items.length);
+
+    if (direction === 'left') {
+      if (itemIndex === 0) {
+        setFocus(FOCUS_KEYS.SIDEBAR_HOME);
+        return false;
+      }
+
+      setFocus(getCategoryItemFocusKey(section.id, itemIndex - 1));
+      return false;
+    }
+
+    if (direction === 'right') {
+      const nextIndex = itemIndex + 1;
+
+      if (nextIndex >= visibleItemsCount) {
+        setFocus(`series-row-btn-${section.id}`);
+        return false;
+      }
+
+      setFocus(getCategoryItemFocusKey(section.id, nextIndex));
+      return false;
+    }
+
+    if (direction === 'up') {
+      if (sectionIndex === 0) {
+        window.setTimeout(() => {
+          scrollSeriesHeroIntoSafeView();
+          setFocus(FOCUS_KEYS.HERO_PLAY_BUTTON);
+        }, 0);
+        return false;
+      }
+
+      const previousSection = seriesCategorySections[sectionIndex - 1];
+      const previousVisibleCount = Math.min(SERIES_CATEGORY_ROW_VISIBLE_LIMIT, previousSection.items.length);
+      const previousIndex = Math.min(
+        itemIndex,
+        Math.max(0, previousVisibleCount - 1),
+      );
+
+      setFocus(getCategoryItemFocusKey(previousSection.id, previousIndex));
+      return false;
+    }
+
+    if (direction === 'down') {
+      const nextSection = seriesCategorySections[sectionIndex + 1];
+
+      if (!nextSection) {
+        return false;
+      }
+
+      const nextVisibleCount = Math.min(SERIES_CATEGORY_ROW_VISIBLE_LIMIT, nextSection.items.length);
+      const nextIndex = Math.min(
+        itemIndex,
+        Math.max(0, nextVisibleCount - 1),
+      );
+
+      setFocus(getCategoryItemFocusKey(nextSection.id, nextIndex));
+      return false;
+    }
+
+    return false;
+  }
+
+  function handleSeriesRowButtonArrowPress(
+    direction: string,
+    sectionIndex: number,
+  ) {
+    const section = seriesCategorySections[sectionIndex];
+    if (!section) {
+      return false;
+    }
+
+    const visibleItemsCount = Math.min(SERIES_CATEGORY_ROW_VISIBLE_LIMIT, section.items.length);
+
+    if (direction === 'left') {
+      setFocus(getCategoryItemFocusKey(section.id, visibleItemsCount - 1));
+      return false;
+    }
+
+    if (direction === 'up') {
+      if (sectionIndex === 0) {
+        window.setTimeout(() => {
+          scrollSeriesHeroIntoSafeView();
+          setFocus(FOCUS_KEYS.HERO_PLAY_BUTTON);
+        }, 0);
+        return false;
+      }
+
+      const previousSection = seriesCategorySections[sectionIndex - 1];
+      const previousVisibleCount = Math.min(SERIES_CATEGORY_ROW_VISIBLE_LIMIT, previousSection.items.length);
+      setFocus(getCategoryItemFocusKey(previousSection.id, previousVisibleCount - 1));
+      return false;
+    }
+
+    if (direction === 'down') {
+      const nextSection = seriesCategorySections[sectionIndex + 1];
+      if (!nextSection) {
+        return false;
+      }
+
+      const nextVisibleCount = Math.min(SERIES_CATEGORY_ROW_VISIBLE_LIMIT, nextSection.items.length);
+      setFocus(getCategoryItemFocusKey(nextSection.id, nextVisibleCount - 1));
+      return false;
+    }
 
     return false;
   }
@@ -1209,6 +1992,16 @@ export function CatalogCategoryPage({
 
     if (direction === 'down') {
       if (nextRowIndex >= items.length) {
+        // Se a próxima linha existe, mas está incompleta e não tem esta coluna,
+        // vamos focar no último elemento disponível dessa próxima linha!
+        const totalRows = Math.ceil(items.length / GRID_COLUMNS);
+        const currentRow = Math.floor(index / GRID_COLUMNS);
+        const nextRow = currentRow + 1;
+
+        if (nextRow < totalRows) {
+          const lastIndex = items.length - 1;
+          return revealMoreItems(lastIndex);
+        }
         return false;
       }
 
@@ -1305,20 +2098,25 @@ export function CatalogCategoryPage({
           <>
             {isSeriesCategoryPage ? (
               <SeriesCategoryHero
-                item={seriesHeroItem}
-                totalItems={items.length}
+                item={activeSeriesHeroItem}
+                totalItems={seriesCollectionCount}
+                heroIndex={activeSeriesHeroIndex}
+                heroTotal={seriesHeroHighlights.length}
+                onOpenItem={openSeriesCollection}
+                onButtonArrowPress={handleSeriesCategoryHeroButtonArrowPress}
               />
             ) : (
               <header className="mb-6">
                 <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
-                  Catalogo
+                  {category?.slug === 'series-group' ? 'Séries / Novelas' : 'Catalogo'}
                 </p>
                 <h1 className="mt-2 text-[1.7rem] font-black tracking-[-0.03em] text-white md:text-[2.35rem]">
                   {category?.title ?? 'Categoria'}
                 </h1>
                 <p className="mt-2 max-w-3xl text-sm font-semibold text-zinc-300">
-                  {category?.description ??
-                    'Categoria indisponivel neste momento.'}
+                  {category?.slug === 'series-group'
+                    ? `Ver todos · ${items.length} títulos agrupados`
+                    : category?.description ?? 'Categoria indisponivel neste momento.'}
                 </p>
               </header>
             )}
@@ -1385,7 +2183,7 @@ export function CatalogCategoryPage({
                             category?.slug ?? 'category',
                             absoluteIndex,
                           )}
-                          onEnterPress={() => openEpisode(item, absoluteIndex)}
+                          onEnterPress={() => openCategoryItem(item, absoluteIndex)}
                           onArrowPress={(direction: string) =>
                             handleCategoryCardArrowPress(
                               direction,
@@ -1430,6 +2228,66 @@ export function CatalogCategoryPage({
                 )}
               </aside>
             </section>
+          ) : isSeriesCategoryPage ? (
+            <section className="space-y-7 pb-12">
+              {seriesCategorySections.map((section, sectionIndex) => (
+                <section key={section.id} className="min-w-0">
+                  <div className="mb-3 flex items-end justify-between gap-3">
+                    <div>
+                      <h2 className="text-[0.92rem] font-black uppercase tracking-[0.08em] text-white/95 md:text-[1rem] lg:text-[1.05rem]">
+                        {section.title}
+                      </h2>
+                    </div>
+
+                    <FocusableButton
+                      focusKey={`series-row-btn-${section.id}`}
+                      className="rounded-full border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-black uppercase tracking-[0.08em] text-zinc-500 transition duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+                      style={{ fontSize: '0.58rem', lineHeight: 1 }}
+                      onClick={() => openSeriesGroupPage(section)}
+                      onEnterPress={() => openSeriesGroupPage(section)}
+                      onArrowPress={(direction) =>
+                        handleSeriesRowButtonArrowPress(direction, sectionIndex)
+                      }
+                    >
+                      Ver todos
+                    </FocusableButton>
+                  </div>
+
+                  <div className="xf-carousel-row flex gap-3 overflow-x-auto overflow-y-visible pb-5 pr-10 scroll-auto">
+                    {section.items.slice(0, SERIES_CATEGORY_ROW_VISIBLE_LIMIT).map((item, itemIndex) => (
+                      <MediaCard
+                        key={item.id}
+                        title={item.title}
+                        subtitle={
+                          item.episodeCount
+                            ? `${item.episodeCount} episódio(s)`
+                            : item.subtitle
+                        }
+                        posterUrl={item.posterUrl}
+                        eagerLoad={sectionIndex === 0 && itemIndex < 8}
+                        index={itemIndex}
+                        focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
+                        onEnterPress={() => openSeriesCollection(item)}
+                        onArrowPress={(direction: string) =>
+                          handleSeriesCategoryRowCardArrowPress(
+                            direction,
+                            sectionIndex,
+                            itemIndex,
+                          )
+                        }
+                        focusScrollOptions={{
+                          behavior: 'auto',
+                          block: 'center',
+                          inline: 'nearest',
+                        }}
+                        hideTextOverlay
+                        sizeScale="large"
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </section>
           ) : (
             <section className="grid grid-cols-5 gap-3 pb-12">
               {visibleItems.map((item, index) => (
@@ -1444,7 +2302,7 @@ export function CatalogCategoryPage({
                     category?.slug ?? 'category',
                     index,
                   )}
-                  onEnterPress={() => openEpisode(item, index)}
+                  onEnterPress={() => openCategoryItem(item, index)}
                   onArrowPress={(direction: string) =>
                     handleCategoryCardArrowPress(direction, index)
                   }

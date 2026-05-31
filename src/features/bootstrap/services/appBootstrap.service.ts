@@ -367,6 +367,7 @@ async function loadCategoryFirstFold({
     deviceIdentifier,
     groupTitles: category.groupTitles,
     limit: CATEGORY_FIRST_FOLD_LIMIT,
+    slug,
   });
 }
 

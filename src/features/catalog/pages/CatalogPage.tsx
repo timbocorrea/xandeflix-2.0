@@ -665,6 +665,8 @@ export function CatalogPage() {
                         subtitle={item.subtitle}
                         posterUrl={item.posterUrl}
                         eagerLoad={true}
+                        hideTextOverlay
+                        sizeScale="large"
                         index={itemIndex}
                         focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
                         onEnterPress={() => {
