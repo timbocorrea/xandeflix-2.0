@@ -139,3 +139,18 @@ Resultado informado após instalação no celular Samsung:
 Conclusão da validação mobile:
 
 A correção mobile/Home/TMDB foi aprovada no celular Android real para o escopo desta fase.
+
+## Validação visual em Fire Stick / Android TV
+
+Resultado informado após instalação e abertura no Fire Stick:
+
+- App abriu no Fire Stick: sim.
+- Home carregou: sim.
+- D-pad continua navegando: sim.
+- Hero e cards aparecem: sim.
+- Live TV ainda abre: sim.
+- Crash, tela branca ou travamento: não.
+
+Conclusão da validação Fire Stick:
+
+A correção mobile/Home/TMDB não quebrou o fluxo principal validado no Fire Stick. Home, D-pad, Hero, cards e Live TV permaneceram funcionais.
