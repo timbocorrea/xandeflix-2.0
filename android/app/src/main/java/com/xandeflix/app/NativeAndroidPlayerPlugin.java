@@ -151,7 +151,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 inlinePreviewView.setBackgroundColor(Color.BLACK);
                 inlinePreviewView.setShutterBackgroundColor(Color.BLACK);
                 inlinePreviewView.setKeepScreenOn(true);
-                inlinePreviewView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
+                inlinePreviewView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FILL);
                 inlinePreviewView.setFocusable(false);
                 inlinePreviewView.setFocusableInTouchMode(false);
 
@@ -233,6 +233,70 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 stopInlinePreviewInternal();
                 Log.e(TAG, "Erro ao iniciar preview inline nativo.", error);
                 call.reject("Erro ao iniciar preview inline nativo: " + error.getMessage());
+            }
+        });
+    }
+
+    @PluginMethod
+    public void updatePreview(PluginCall call) {
+        Integer x = call.getInt("x");
+        Integer y = call.getInt("y");
+        Integer width = call.getInt("width");
+        Integer height = call.getInt("height");
+
+        if (x == null || y == null || width == null || height == null || width <= 0 || height <= 0) {
+            call.reject("Layout inválido para atualizar preview inline.");
+            return;
+        }
+
+        Activity activity = getActivity();
+
+        if (activity == null) {
+            call.reject("Activity Android indisponível para atualizar preview inline.");
+            return;
+        }
+
+        activity.runOnUiThread(() -> {
+            try {
+                if (inlinePreviewView == null) {
+                    JSObject result = new JSObject();
+                    result.put("updated", false);
+                    call.resolve(result);
+                    return;
+                }
+
+                FrameLayout.LayoutParams layoutParams;
+
+                if (inlinePreviewView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    layoutParams = (FrameLayout.LayoutParams) inlinePreviewView.getLayoutParams();
+                } else {
+                    layoutParams = new FrameLayout.LayoutParams(
+                            Math.max(2, width),
+                            Math.max(2, height)
+                    );
+                }
+
+                layoutParams.width = Math.max(2, width);
+                layoutParams.height = Math.max(2, height);
+                layoutParams.leftMargin = x;
+                layoutParams.topMargin = y;
+                layoutParams.gravity = Gravity.TOP | Gravity.START;
+
+                inlinePreviewView.setLayoutParams(layoutParams);
+                inlinePreviewView.requestLayout();
+                inlinePreviewView.bringToFront();
+
+                Log.i(
+                        TAG,
+                        "Preview inline nativo reposicionado. x=" + x + " y=" + y + " width=" + width + " height=" + height
+                );
+
+                JSObject result = new JSObject();
+                result.put("updated", true);
+                call.resolve(result);
+            } catch (Exception error) {
+                Log.e(TAG, "Erro ao atualizar preview inline nativo.", error);
+                call.reject("Erro ao atualizar preview inline nativo: " + error.getMessage());
             }
         });
     }

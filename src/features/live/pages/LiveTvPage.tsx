@@ -16,6 +16,7 @@ import {
   addNativeAndroidPlayerResumeListener,
   startNativeAndroidInlinePreview,
   stopNativeAndroidInlinePreview,
+  updateNativeAndroidInlinePreview,
 } from "@/features/player/lib/nativeAndroidPlayerBridge";
 import { createNativeVideoAdapter } from "@/features/player/lib/nativeVideoAdapter";
 import { detectStreamKind } from "@/features/player/lib/detectStreamKind";
@@ -203,6 +204,8 @@ export default function LiveTvPage() {
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const previewAdapterRef = useRef<UniversalPlayerAdapter | null>(null);
   const previewRequestIdRef = useRef(0);
+  const nativeInlinePreviewActiveRef = useRef(false);
+  const nativeInlinePreviewLayoutKeyRef = useRef<string | null>(null);
   const nativeFullscreenReturnRef = useRef(false);
   const lastChannelActivationRef = useRef<{
     channelKey: string;
@@ -214,6 +217,10 @@ export default function LiveTvPage() {
   const [previewStatus, setPreviewStatus] =
     useState<PreviewStatus>("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isPreviewMuted, setIsPreviewMuted] = useState(false);
+  const [isPreviewControlBusy, setIsPreviewControlBusy] = useState(false);
+  const [isNativeInlinePreviewActive, setIsNativeInlinePreviewActive] =
+    useState(false);
 
   useRouteInitialFocus();
 
@@ -581,6 +588,9 @@ export default function LiveTvPage() {
   );
 
   const destroyPreviewAdapter = useCallback(() => {
+    nativeInlinePreviewActiveRef.current = false;
+    nativeInlinePreviewLayoutKeyRef.current = null;
+    setIsNativeInlinePreviewActive(false);
     void stopNativeAndroidInlinePreview().catch(() => undefined);
     previewAdapterRef.current?.destroy();
     previewAdapterRef.current = null;
@@ -720,6 +730,15 @@ export default function LiveTvPage() {
             return;
           }
 
+          nativeInlinePreviewActiveRef.current = true;
+          nativeInlinePreviewLayoutKeyRef.current = [
+            previewLayout.x,
+            previewLayout.y,
+            previewLayout.width,
+            previewLayout.height,
+          ].join(":");
+          setIsNativeInlinePreviewActive(true);
+
           setPreviewStatus("playing");
           setPreviewError(null);
 
@@ -731,6 +750,10 @@ export default function LiveTvPage() {
           });
           return;
         }
+
+        nativeInlinePreviewActiveRef.current = false;
+        nativeInlinePreviewLayoutKeyRef.current = null;
+        setIsNativeInlinePreviewActive(false);
 
         videoElement.muted = false;
         videoElement.autoplay = true;
@@ -766,6 +789,10 @@ export default function LiveTvPage() {
           return;
         }
 
+        nativeInlinePreviewActiveRef.current = false;
+        nativeInlinePreviewLayoutKeyRef.current = null;
+        setIsNativeInlinePreviewActive(false);
+
         const message = summarizeUnknownError(previewLoadError);
         setPreviewStatus("error");
         setPreviewError(message);
@@ -779,6 +806,83 @@ export default function LiveTvPage() {
     },
     [destroyPreviewAdapter, handlePreviewTelemetryEvent, selectChannel],
   );
+
+  const syncNativeInlinePreviewLayout = useCallback(() => {
+    if (!nativeInlinePreviewActiveRef.current) {
+      return;
+    }
+
+    const previewContainer = previewContainerRef.current;
+
+    if (!previewContainer || typeof window === "undefined") {
+      return;
+    }
+
+    const previewRect = previewContainer.getBoundingClientRect();
+    const previewScale = window.devicePixelRatio || 1;
+
+    const nextLayout = {
+      x: Math.round(previewRect.left * previewScale),
+      y: Math.round(previewRect.top * previewScale),
+      width: Math.round(previewRect.width * previewScale),
+      height: Math.round(previewRect.height * previewScale),
+    };
+
+    if (nextLayout.width <= 0 || nextLayout.height <= 0) {
+      return;
+    }
+
+    const nextLayoutKey = [
+      nextLayout.x,
+      nextLayout.y,
+      nextLayout.width,
+      nextLayout.height,
+    ].join(":");
+
+    if (nextLayoutKey === nativeInlinePreviewLayoutKeyRef.current) {
+      return;
+    }
+
+    nativeInlinePreviewLayoutKeyRef.current = nextLayoutKey;
+
+    void updateNativeAndroidInlinePreview(nextLayout).catch((error) => {
+      console.warn("[XANDEFLIX_LIVE_PREVIEW_NATIVE_INLINE_UPDATE_ERROR]", {
+        error: summarizeUnknownError(error),
+        layout: nextLayout,
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (previewStatus !== "playing") {
+      return;
+    }
+
+    let animationFrameId = 0;
+
+    const scheduleSync = () => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(() => {
+        syncNativeInlinePreviewLayout();
+      });
+    };
+
+    scheduleSync();
+
+    const intervalId = window.setInterval(scheduleSync, 350);
+
+    window.addEventListener("scroll", scheduleSync, true);
+    window.addEventListener("resize", scheduleSync);
+    window.addEventListener("orientationchange", scheduleSync);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.clearInterval(intervalId);
+      window.removeEventListener("scroll", scheduleSync, true);
+      window.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("orientationchange", scheduleSync);
+    };
+  }, [previewStatus, previewChannel, syncNativeInlinePreviewLayout]);
 
   useEffect(() => {
     const restorePreviewAfterNativeFullscreen = () => {
@@ -886,6 +990,49 @@ export default function LiveTvPage() {
     };
   }, [destroyPreviewAdapter]);
 
+  const handleToggleInlinePreviewPlayback = useCallback(() => {
+    const activePreviewChannel = previewChannel ?? selectedChannel;
+
+    if (!activePreviewChannel) {
+      return;
+    }
+
+    if (previewStatus === "playing" || previewStatus === "loading") {
+      destroyPreviewAdapter();
+      setPreviewStatus("idle");
+      return;
+    }
+
+    void startChannelPreview(activePreviewChannel);
+  }, [
+    destroyPreviewAdapter,
+    previewChannel,
+    previewStatus,
+    selectedChannel,
+    startChannelPreview,
+  ]);
+
+  const handleOpenInlinePreviewFullscreen = useCallback(() => {
+    const activePreviewChannel = previewChannel ?? selectedChannel;
+
+    if (!activePreviewChannel || isPreviewControlBusy) {
+      return;
+    }
+
+    setIsPreviewControlBusy(true);
+
+    void openChannelFullscreen(activePreviewChannel).finally(() => {
+      window.setTimeout(() => {
+        setIsPreviewControlBusy(false);
+      }, 450);
+    });
+  }, [
+    isPreviewControlBusy,
+    openChannelFullscreen,
+    previewChannel,
+    selectedChannel,
+  ]);
+
   const isLoading = status === "loading" && liveTvChannels.length === 0;
   const shouldShowInitialLiveTvLoading =
     isLoading ||
@@ -903,14 +1050,111 @@ export default function LiveTvPage() {
 
 
 
+  const currentPreviewChannelKey = currentPreviewChannel
+    ? getChannelKey(currentPreviewChannel)
+    : "";
+  const selectedMobileChannelKey = activeGroupChannels.some(
+    (channel) => getChannelKey(channel) === currentPreviewChannelKey,
+  )
+    ? currentPreviewChannelKey
+    : "";
+
   return (
     <AppShell
       onSignOut={() => void signOut()}
       hideHeaderOnTv
       mainClassName="px-0 pt-0 pb-0 pr-0 md:px-0 md:pt-0 md:pb-0 md:pr-0 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-0"
     >
-      <section className="xf-live-tv-page xf-live-tv-layout grid min-h-screen gap-x-0 gap-y-4 overflow-hidden bg-black text-white">
-        <aside className="xf-live-tv-groups-column flex h-screen min-h-screen flex-col border-r border-white/10 bg-black/80 shadow-2xl">
+      <section className="xf-live-tv-page xf-live-tv-layout flex min-h-screen w-full max-w-[100vw] flex-col gap-y-4 overflow-x-hidden overflow-y-auto bg-black pb-24 text-white min-[560px]:grid min-[560px]:gap-x-0 min-[560px]:overflow-hidden min-[560px]:pb-0">
+        <div className="order-2 space-y-4 px-5 pt-3 pb-4 min-[560px]:hidden">
+          <label className="block">
+            <span className="mb-2 block text-[0.68rem] font-black uppercase tracking-[0.28em] text-xf-red">
+              Grupos de canais
+            </span>
+            <select
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-bold text-white outline-none"
+              value={activeGroupName ?? ""}
+              onChange={(event) => handleSelectGroup(event.target.value)}
+            >
+              {groups.map((group) => (
+                <option key={group.name} value={group.name} className="bg-black text-white">
+                  {group.name} ({group.count})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-[0.68rem] font-black uppercase tracking-[0.28em] text-xf-red">
+              Canal selecionado
+            </span>
+            <select
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-bold text-white outline-none"
+              value={selectedMobileChannelKey}
+              onChange={(event) => {
+                const nextChannel = activeGroupChannels.find(
+                  (channel) => getChannelKey(channel) === event.target.value,
+                );
+
+                if (nextChannel) {
+                  handleSelectChannel(nextChannel);
+                }
+              }}
+            >
+              <option value="" className="bg-black text-white">
+                Selecione um canal
+              </option>
+              {activeGroupChannels.map((channel) => {
+                const channelKey = getChannelKey(channel);
+
+                return (
+                  <option key={channelKey} value={channelKey} className="bg-black text-white">
+                    {channel.name}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+
+          {currentPreviewChannel ? (
+            <div className="rounded-3xl border border-white/10 bg-black/75 p-4 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/10">
+                  {currentPreviewChannel.logo ? (
+                    <img
+                      src={currentPreviewChannel.logo}
+                      alt=""
+                      className="max-h-full max-w-full object-contain"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="text-xs font-black text-white">TV</span>
+                  )}
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-[0.65rem] font-black uppercase tracking-[0.28em] text-xf-red">
+                    Agora na prévia
+                  </p>
+                  <h3 className="mt-1 truncate text-base font-black text-white">
+                    {currentPreviewChannel.name}
+                  </h3>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+                <p className="text-[0.68rem] font-black uppercase tracking-[0.25em] text-white/70">
+                  Grade de programação EPG
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-xf-muted">
+                  Guia de programação indisponível no momento.
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <aside className="xf-live-tv-groups-column hidden h-screen min-h-screen flex-col border-r border-white/10 bg-black/80 shadow-2xl min-[560px]:flex">
           <p className="xf-live-tv-column-title font-black uppercase tracking-[0.35em] text-xf-red">
             Grupos
           </p>
@@ -950,7 +1194,7 @@ export default function LiveTvPage() {
           </div>
         </aside>
 
-        <aside className="xf-live-tv-channels-column flex h-screen min-h-screen flex-col border-r border-white/10 bg-black/75 shadow-2xl">
+        <aside className="xf-live-tv-channels-column hidden h-screen min-h-screen flex-col border-r border-white/10 bg-black/75 shadow-2xl min-[560px]:flex">
           <p className="xf-live-tv-column-title font-black uppercase tracking-[0.35em] text-xf-red">
             Canais
           </p>
@@ -1020,16 +1264,50 @@ export default function LiveTvPage() {
           </div>
         </aside>
 
-        <section className="xf-live-tv-preview flex min-h-screen min-w-0 flex-col">
-          <div
-            ref={previewContainerRef}
-            className="xf-live-tv-preview-frame relative aspect-video overflow-hidden bg-black shadow-2xl"
-          >
+        <section className="xf-live-tv-preview order-1 flex min-h-0 w-full max-w-[100vw] min-w-0 flex-col overflow-x-hidden min-[560px]:order-none min-[560px]:min-h-screen">
+          <div className="xf-live-tv-mobile-fixed-top w-full max-w-[100vw] overflow-x-hidden bg-black pt-[calc(env(safe-area-inset-top)+0.55rem)] pb-3 shadow-xl min-[560px]:max-w-none min-[560px]:overflow-visible min-[560px]:bg-transparent min-[560px]:pt-0 min-[560px]:pb-0 min-[560px]:shadow-none">
+            <div className="relative z-30 px-5 pb-3 min-[560px]:hidden">
+              <div className="grid grid-cols-3 gap-2 rounded-[1.6rem] border border-white/10 bg-white/[0.04] p-1">
+                <button
+                  type="button"
+                  className="whitespace-nowrap rounded-[1.25rem] bg-xf-red px-2 py-2 text-[0.72rem] font-black uppercase tracking-[0.08em] text-white shadow-lg"
+                  aria-current="page"
+                >
+                  Ao Vivo
+                </button>
+
+                <button
+                  type="button"
+                  className="whitespace-nowrap rounded-[1.25rem] px-2 py-2 text-[0.72rem] font-black uppercase tracking-[0.08em] text-white/75 transition hover:bg-white/10 hover:text-white"
+                  onClick={() => navigate("/category/filmes")}
+                >
+                  Filmes
+                </button>
+
+                <button
+                  type="button"
+                  className="whitespace-nowrap rounded-[1.25rem] px-2 py-2 text-[0.72rem] font-black uppercase tracking-[0.08em] text-white/75 transition hover:bg-white/10 hover:text-white"
+                  onClick={() => navigate("/category/series")}
+                >
+                  Séries
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={previewContainerRef}
+              className="xf-live-tv-preview-frame relative ml-[calc(50%_-_50dvw_-_7px)] mt-10 aspect-video w-[100dvw] max-w-[100dvw] overflow-hidden border-y border-black bg-black shadow-none min-[560px]:ml-0 min-[560px]:mt-0 min-[560px]:w-full min-[560px]:max-w-full min-[560px]:border-white/10 min-[560px]:shadow-2xl"
+            >
             <video
               ref={previewVideoRef}
-              className="absolute inset-0 h-full w-full bg-black object-contain"
+              className={
+                isNativeInlinePreviewActive
+                  ? "hidden"
+                  : "absolute inset-0 h-full w-full object-contain"
+              }
               playsInline
               autoPlay
+                muted={isPreviewMuted}
               controls={false}
               onPlaying={() => setPreviewStatus("playing")}
               onError={() => {
@@ -1043,7 +1321,7 @@ export default function LiveTvPage() {
             />
 
             {previewStatus !== "playing" ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+              <div className="absolute inset-0 flex items-center justify-center bg-black">
                 <div className="max-w-xl p-8 text-center">
                   <p className="text-xs font-black uppercase tracking-[0.4em] text-xf-red">
                     Xandeflix Live
@@ -1075,10 +1353,42 @@ export default function LiveTvPage() {
                 </div>
               </div>
             ) : null}
+            </div>
+
+            <div className="xf-live-tv-preview-mobile-controls mx-auto mt-1 grid w-fit max-w-[calc(100dvw-1rem)] grid-cols-[auto_auto_auto] items-center justify-center gap-2 overflow-visible px-0 min-[560px]:hidden">
+              <button
+                type="button"
+                className="rounded-2xl border border-white/15 bg-black/70 px-2.5 py-2 text-[0.68rem] font-black uppercase tracking-[0.06em] text-white shadow-lg disabled:opacity-60"
+                onClick={handleToggleInlinePreviewPlayback}
+                disabled={!currentPreviewChannel}
+              >
+                {previewStatus === "playing" ? "Pausar" : "Play"}
+              </button>
+
+              <div className="contents">
+                <button
+                  type="button"
+                  className="rounded-2xl border border-white/15 bg-black/70 px-2.5 py-2 text-[0.68rem] font-black uppercase tracking-[0.06em] text-white/85 shadow-lg"
+                  onClick={() => setIsPreviewMuted((current) => !current)}
+                >
+                  {isPreviewMuted ? "Som" : "Mudo"}
+                </button>
+
+                <button
+                  type="button"
+                  className="rounded-2xl bg-xf-red px-2.5 py-2 text-[0.68rem] font-black uppercase tracking-[0.06em] text-white shadow-lg disabled:opacity-60"
+                  onClick={handleOpenInlinePreviewFullscreen}
+                  disabled={!currentPreviewChannel || isPreviewControlBusy}
+                >
+                  Fullscreen
+                </button>
+              </div>
+            </div>
+
           </div>
 
           {currentPreviewChannel ? (
-            <div className="xf-live-tv-preview-info bg-black/75 shadow-2xl">
+            <div className="xf-live-tv-preview-info hidden bg-black/75 shadow-2xl min-[560px]:block">
               <h3 className="xf-live-tv-preview-title rounded-2xl bg-xf-red/20 px-4 py-3 font-black text-white">
                 {currentPreviewChannel.name}
               </h3>
@@ -1093,4 +1403,3 @@ export default function LiveTvPage() {
     </AppShell>
   );
 }
-

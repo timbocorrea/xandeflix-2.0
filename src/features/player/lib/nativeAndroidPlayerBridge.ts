@@ -25,6 +25,15 @@ type NativeAndroidInlinePreviewStartResult = {
   started: boolean;
 };
 
+type NativeAndroidInlinePreviewUpdateOptions = Pick<
+  NativeAndroidInlinePreviewOptions,
+  'x' | 'y' | 'width' | 'height'
+>;
+
+type NativeAndroidInlinePreviewUpdateResult = {
+  updated: boolean;
+};
+
 type NativeAndroidInlinePreviewStopResult = {
   stopped: boolean;
 };
@@ -43,6 +52,9 @@ type NativeAndroidPlayerPlugin = {
   startPreview: (
     options: NativeAndroidInlinePreviewOptions,
   ) => Promise<NativeAndroidInlinePreviewStartResult>;
+  updatePreview: (
+    options: NativeAndroidInlinePreviewUpdateOptions,
+  ) => Promise<NativeAndroidInlinePreviewUpdateResult>;
   stopPreview: () => Promise<NativeAndroidInlinePreviewStopResult>;
   addListener: (
     eventName: 'resume',
@@ -64,6 +76,12 @@ export async function startNativeAndroidInlinePreview(
   options: NativeAndroidInlinePreviewOptions,
 ) {
   return NativeAndroidPlayer.startPreview(options);
+}
+
+export async function updateNativeAndroidInlinePreview(
+  options: NativeAndroidInlinePreviewUpdateOptions,
+) {
+  return NativeAndroidPlayer.updatePreview(options);
 }
 
 export async function stopNativeAndroidInlinePreview() {
