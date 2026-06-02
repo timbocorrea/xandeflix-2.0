@@ -42,6 +42,9 @@ type CatalogPageItem = (typeof catalogSections)[number]['items'][number] & {
   groupTitle?: string;
   tmdbId?: string;
   tmdbTitle?: string;
+  tmdbGenres?: string;
+  tmdbRating?: string;
+  tmdbReleaseYear?: string;
   seriesKey?: string;
   episodeCount?: number;
   isSeriesCollection?: boolean;
@@ -91,6 +94,9 @@ function mapHomeVodSectionsToCatalogSections(
       groupTitle: item.groupTitle,
       tmdbId: item.tmdbId,
       tmdbTitle: item.tmdbTitle,
+      tmdbGenres: item.tmdbGenres,
+      tmdbRating: item.tmdbRating,
+      tmdbReleaseYear: item.tmdbReleaseYear,
       seriesKey: item.seriesKey,
       episodeCount: item.episodeCount,
       isSeriesCollection: item.isSeriesCollection,
@@ -126,6 +132,31 @@ function isRenderableVodHomeSection(section: HomeVodSection) {
 
 function filterRenderableVodHomeSections(sections?: HomeVodSection[] | null) {
   return sections?.filter(isRenderableVodHomeSection) ?? [];
+}
+
+function buildMobileHomeHeroMetadata(item?: CatalogPageItem) {
+  const genres = Array.isArray(item?.tmdbGenres)
+    ? item.tmdbGenres.join(', ')
+    : item?.tmdbGenres
+        ?.split(',')
+        .map((genre) => genre.trim())
+        .filter(Boolean)
+        .join(', ');
+  const rawRating = item?.tmdbRating?.trim();
+  const numericRating = Number(rawRating);
+  const rating = rawRating
+    ? Number.isFinite(numericRating)
+      ? numericRating.toFixed(1)
+      : rawRating
+    : null;
+
+  return [
+    genres,
+    item?.tmdbReleaseYear,
+    rating ? `★ ${rating}` : null,
+  ]
+    .filter(Boolean)
+    .join(' • ');
 }
 
 function createHomeVodLoadInput(
@@ -510,6 +541,29 @@ export function CatalogPage() {
       mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
       <section className="mx-auto w-full max-w-[1920px]">
+        {isMobile ? (
+          <nav
+            data-xf-mobile-home-top-chips="true"
+            aria-label="Navegação rápida"
+            className="mb-3 flex items-center justify-center gap-2"
+          >
+            {[
+              { label: 'Ao Vivo', path: '/live' },
+              { label: 'Filmes', path: '/category/filmes-lancamentos' },
+              { label: 'Séries', path: '/category/series' },
+            ].map((item) => (
+              <button
+                key={item.path}
+                type="button"
+                className="rounded-full border border-white/35 bg-black/35 px-3.5 py-1.5 font-bold text-white backdrop-blur-sm transition-colors active:bg-white/20"
+                style={{ fontSize: '0.72rem' }}
+                onClick={() => navigate(item.path)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        ) : null}
 
         <CatalogHero
           title={heroItem?.title}
@@ -518,7 +572,8 @@ export function CatalogPage() {
             heroItem?.subtitle ??
             'Conteudos recomendados para sua licenca.'
           }
-          posterUrl={heroItem?.backdropUrl ?? heroItem?.posterUrl}
+          metadata={isMobile ? buildMobileHomeHeroMetadata(heroItem) : undefined}
+          posterUrl={isMobile ? (heroItem?.posterUrl ?? heroItem?.backdropUrl) : (heroItem?.backdropUrl ?? heroItem?.posterUrl)}
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
           onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
@@ -592,7 +647,7 @@ export function CatalogPage() {
                   inline: 'nearest',
                   behavior: 'auto',
                 }}
-                className="mb-6 border-0 bg-transparent px-0 py-0"
+                className="mb-2 border-0 bg-transparent px-0 py-0"
                 onArrowPress={(direction) =>
                   spatialNavigation.handleCategorySectionArrowPress(
                     direction,
@@ -623,7 +678,8 @@ export function CatalogPage() {
                   {shouldShowSeeAll(section) && !isMobile && (
                     <FocusableButton
                       focusKey={getCategorySeeAllFocusKey(section.id)}
-                      className="inline-flex rounded-full border border-white/20 bg-xf-surface px-5 py-3 text-sm font-bold text-white"
+                      className="rounded-full border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-black uppercase tracking-[0.08em] text-zinc-500 transition duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+                      style={{ fontSize: '0.58rem', lineHeight: 1 }}
                       onClick={() => {
                         spatialDebug('catalog-grid', 'Ver tudo:', section.title);
 
@@ -651,13 +707,13 @@ export function CatalogPage() {
                         )
                       }
                     >
-                      Ver tudo
+                      Ver todos
                     </FocusableButton>
                   )}
                 </div>
 
                 {sectionItems.length > 0 ? (
-                  <div className="xf-carousel-row flex gap-2 overflow-x-auto overflow-y-visible pb-6 pr-10 scroll-auto md:gap-2.5 lg:gap-3">
+                  <div className="xf-carousel-row flex gap-[0.2rem] overflow-x-auto overflow-y-visible pb-0 pr-10 scroll-auto md:gap-[0.25rem] lg:gap-1.5">
                     {sectionItems.map((item, itemIndex) => (
                       <MediaCard
                         key={item.id}
@@ -713,21 +769,23 @@ export function CatalogPage() {
                           navigate(`/player?${params.toString()}`);
                         }}
                         onArrowPress={(direction) => {
-                          const isLaunchesSection =
-                            section.id === 'home-vod-launches';
-                          const isLastVisibleLaunchCard =
+                          const isLastVisibleCard =
                             itemIndex === sectionItems.length - 1;
 
                           if (
-                            isLaunchesSection &&
                             direction === 'right' &&
-                            isLastVisibleLaunchCard
+                            shouldShowSeeAll(section) &&
+                            isLastVisibleCard
                           ) {
                             setFocus(getCategorySeeAllFocusKey(section.id));
                             return false;
                           }
 
-                          if (isLaunchesSection && direction === 'up') {
+                          if (
+                            direction === 'up' &&
+                            shouldShowSeeAll(section) &&
+                            isLastVisibleCard
+                          ) {
                             setFocus(getCategorySeeAllFocusKey(section.id));
                             return false;
                           }

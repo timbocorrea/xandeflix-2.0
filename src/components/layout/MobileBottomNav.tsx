@@ -1,4 +1,4 @@
-import { Home, Search, Settings, Tv } from 'lucide-react';
+import { Home, Search, Settings, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
@@ -18,16 +18,15 @@ const mobileItems = [
     navId: 'mobile-search',
   },
   {
-    label: 'Canais',
-    icon: Tv,
-    navId: 'mobile-channels',
-    path: '/live',
-  },
-  {
     label: 'Ajustes',
     icon: Settings,
     navId: 'mobile-settings',
     path: '/settings',
+  },
+  {
+    label: 'Perfil',
+    icon: UserRound,
+    navId: 'mobile-profile',
   },
 ];
 

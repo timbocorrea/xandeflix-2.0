@@ -146,6 +146,31 @@ function getFreshCachedMetadata(key: string) {
   return entry.metadata;
 }
 
+export function getCachedSeriesHeroBackdropUrls(limit: number) {
+  const currentTime = Date.now();
+
+  return Array.from(
+    new Set(
+      Object.values(readCache())
+        .filter(
+          (entry) =>
+            currentTime - entry.createdAt < SERIES_HERO_TMDB_CACHE_TTL_MS,
+        )
+        .map((entry) => entry.metadata?.backdropUrl)
+        .filter((url): url is string => Boolean(url)),
+    ),
+  ).slice(0, limit);
+}
+
+export function hydrateSeriesHeroHighlightsFromCache(items: HomeVodItem[]) {
+  return items.map((item) => {
+    const key = getSeriesHeroTmdbCacheKey(item);
+    const metadata = key ? getFreshCachedMetadata(key) : undefined;
+
+    return metadata ? { ...item, ...metadata } : item;
+  });
+}
+
 function createImageUrl(path: string | null | undefined, size: 'w500' | 'w780') {
   return path ? `${TMDB_IMAGE_BASE_URL}/${size}${path}` : undefined;
 }

@@ -13,6 +13,7 @@ import {
   type HomeVodItem,
   type HomeVodSection,
 } from '@/features/catalog/services/homeVod.service';
+import { getCachedSeriesHeroBackdropUrls } from '@/features/catalog/services/seriesHeroTmdb.service';
 import { storeCachedSeriesEpisodes } from '@/features/catalog/services/seriesEpisodesCache.service';
 import { getCatalogCategoryDefinition } from '@/features/catalog/services/catalogCategoryGroups.service';
 import { storeCachedLiveTvCriticalChannels } from '@/features/live/services/liveTvCriticalCache.service';
@@ -74,9 +75,71 @@ const SERIES_EPISODES_PRECACHE_LIMIT = 500;
 const SERIES_COLLECTIONS_PRECACHE_LIMIT = 4;
 const LIVE_PREVIEW_PAGE_SIZE = 200;
 const LIVE_PREVIEW_MAX_PAGES = 5;
-const IMAGE_PRELOAD_LIMIT = 90;
+const IMAGE_PRELOAD_LIMIT = 60;
 const IMAGE_PRELOAD_CONCURRENCY = 6;
 const IMAGE_PRELOAD_TIMEOUT_MS = 2500;
+const HOME_HERO_PRELOAD_ITEM_LIMIT = 5;
+const SERIES_HERO_PRELOAD_ITEM_LIMIT = 10;
+const SERIES_VISIBLE_CARD_PRELOAD_LIMIT = 15;
+const HOME_VISIBLE_CARD_PRELOAD_LIMIT = 15;
+const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v1:';
+
+type StoredSeriesLandingItemsEntry = {
+  createdAt: number;
+  items: HomeVodItem[];
+};
+
+function createSeriesLandingItemsCacheKey({
+  licenseCode,
+  deviceIdentifier,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+}) {
+  return [
+    licenseCode.trim().toUpperCase(),
+    deviceIdentifier.trim(),
+  ].join('::');
+}
+
+function cloneSeriesLandingItems(items: HomeVodItem[]) {
+  return items.map((item) => {
+    const clonedItem = { ...item };
+    delete clonedItem.streamUrl;
+    return clonedItem;
+  });
+}
+
+function writeStoredSeriesLandingItemsForInitialOpen({
+  licenseCode,
+  deviceIdentifier,
+  items,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+  items: HomeVodItem[];
+}) {
+  if (typeof window === 'undefined' || items.length === 0) {
+    return;
+  }
+
+  const storageKey = `${SERIES_LANDING_ITEMS_STORAGE_PREFIX}${createSeriesLandingItemsCacheKey({
+    licenseCode,
+    deviceIdentifier,
+  })}`;
+
+  try {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        createdAt: Date.now(),
+        items: cloneSeriesLandingItems(items),
+      } satisfies StoredSeriesLandingItemsEntry),
+    );
+  } catch {
+    // Cache local é otimização. Falha não deve impedir a abertura do app.
+  }
+}
 
 const TOTAL_BOOTSTRAP_STEPS = 7;
 
@@ -106,11 +169,22 @@ function cloneBootstrapResult(result: AppBootstrapResult): AppBootstrapResult {
       ...channel,
     })),
     movieItems: result.movieItems.map((item) => ({ ...item })),
-    seriesItems: result.seriesItems.map((item) => ({ ...item })),
+    seriesItems: cloneSeriesLandingItems(result.seriesItems),
     warnings: [...result.warnings],
     seriesEpisodesPrecache: result.seriesEpisodesPrecache
       ? { ...result.seriesEpisodesPrecache }
       : undefined,
+  };
+}
+
+function createStoredBootstrapResult(result: AppBootstrapResult) {
+  return {
+    ...cloneBootstrapResult(result),
+    // These datasets already have dedicated local caches and do not need to be
+    // duplicated inside the bootstrap marker.
+    livePreviewChannels: [],
+    movieItems: [],
+    seriesItems: [],
   };
 }
 
@@ -171,7 +245,7 @@ function writeStoredBootstrapResult(result: AppBootstrapResult) {
       APP_BOOTSTRAP_STORAGE_KEY,
       JSON.stringify({
         createdAt: Date.now(),
-        result: cloneBootstrapResult(result),
+        result: createStoredBootstrapResult(result),
       }),
     );
   } catch {
@@ -222,6 +296,44 @@ function collectImageUrlsFromHomeSections(sections: HomeVodSection[]) {
 
 function collectImageUrlsFromItems(items: HomeVodItem[]) {
   return items.flatMap((item) => [item.backdropUrl, item.posterUrl]);
+}
+
+function collectHomeHeroImageUrls(sections: HomeVodSection[]) {
+  const uniqueItems = new Map<string, HomeVodItem>();
+
+  for (const item of sections.flatMap((section) => section.items)) {
+    if (!uniqueItems.has(item.id)) {
+      uniqueItems.set(item.id, item);
+    }
+  }
+
+  return Array.from(uniqueItems.values())
+    .sort(
+      (left, right) =>
+        Number(Boolean(right.backdropUrl)) - Number(Boolean(left.backdropUrl)),
+    )
+    .slice(0, HOME_HERO_PRELOAD_ITEM_LIMIT)
+    .flatMap((item) => [item.backdropUrl, item.posterUrl]);
+}
+
+function collectSeriesHeroImageUrls(items: HomeVodItem[]) {
+  return [...items]
+    .sort(
+      (left, right) =>
+        Number(Boolean(right.backdropUrl)) - Number(Boolean(left.backdropUrl)),
+    )
+    .slice(0, SERIES_HERO_PRELOAD_ITEM_LIMIT)
+    .flatMap((item) => [item.backdropUrl, item.posterUrl]);
+}
+
+function collectPosterImageUrlsFromItems(items: HomeVodItem[], limit: number) {
+  return Array.from(
+    new Set(
+      items
+        .map((item) => item.posterUrl?.trim())
+        .filter((url): url is string => Boolean(url)),
+    ),
+  ).slice(0, limit);
 }
 
 function collectImageUrlsFromChannels(channels: IptvChannel[]) {
@@ -602,6 +714,12 @@ export async function runAppBootstrap({
     deviceIdentifier: normalizedDeviceIdentifier,
   });
 
+  writeStoredSeriesLandingItemsForInitialOpen({
+    licenseCode: normalizedLicenseCode,
+    deviceIdentifier: normalizedDeviceIdentifier,
+    items: seriesItems,
+  });
+
   const seriesEpisodesPrecacheResult = {
     candidates: 0,
     storedSeriesCount: 0,
@@ -627,6 +745,17 @@ export async function runAppBootstrap({
   });
 
   const imageUrls = uniqueImageUrls([
+    ...collectHomeHeroImageUrls(homeSections),
+    ...getCachedSeriesHeroBackdropUrls(SERIES_HERO_PRELOAD_ITEM_LIMIT),
+    ...collectSeriesHeroImageUrls(seriesItems),
+    ...collectPosterImageUrlsFromItems(
+      seriesItems,
+      SERIES_VISIBLE_CARD_PRELOAD_LIMIT,
+    ),
+    ...collectPosterImageUrlsFromItems(
+      homeSections.flatMap((section) => section.items),
+      HOME_VISIBLE_CARD_PRELOAD_LIMIT,
+    ),
     ...collectImageUrlsFromHomeSections(homeSections),
     ...collectImageUrlsFromItems(movieItems),
     ...collectImageUrlsFromItems(seriesItems),

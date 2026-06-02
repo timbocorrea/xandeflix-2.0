@@ -23,7 +23,10 @@ import {
   loadHomeVodSections,
   type HomeVodItem,
 } from '../services/homeVod.service';
-import { enrichSeriesHeroHighlights } from '../services/seriesHeroTmdb.service';
+import {
+  enrichSeriesHeroHighlights,
+  hydrateSeriesHeroHighlightsFromCache,
+} from '../services/seriesHeroTmdb.service';
 import {
   readCachedSeriesEpisodes,
   storeCachedSeriesEpisodes,
@@ -64,6 +67,111 @@ type SeriesNavigationState = {
   returnTo?: string;
   selectedSeriesItem?: HomeVodItem;
 };
+
+const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v1:';
+const SERIES_LANDING_ITEMS_TTL_MS = 12 * 60 * 60 * 1000;
+
+type StoredSeriesLandingItemsEntry = {
+  createdAt: number;
+  items: HomeVodItem[];
+};
+
+function createSeriesLandingItemsCacheKey({
+  licenseCode,
+  deviceIdentifier,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+}) {
+  return [
+    licenseCode.trim().toUpperCase(),
+    deviceIdentifier.trim(),
+  ].join('::');
+}
+
+function cloneSeriesLandingItems(items: HomeVodItem[]) {
+  return items.map((item) => {
+    const clonedItem = { ...item };
+    delete clonedItem.streamUrl;
+    return clonedItem;
+  });
+}
+
+function readStoredSeriesLandingItems({
+  licenseCode,
+  deviceIdentifier,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+}) {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  const cacheKey = createSeriesLandingItemsCacheKey({
+    licenseCode,
+    deviceIdentifier,
+  });
+  const storageKey = `${SERIES_LANDING_ITEMS_STORAGE_PREFIX}${cacheKey}`;
+
+  try {
+    const rawValue = window.localStorage.getItem(storageKey);
+
+    if (!rawValue) {
+      return [];
+    }
+
+    const entry = JSON.parse(rawValue) as StoredSeriesLandingItemsEntry;
+
+    if (!entry?.createdAt || !Array.isArray(entry.items)) {
+      window.localStorage.removeItem(storageKey);
+      return [];
+    }
+
+    if (Date.now() - entry.createdAt >= SERIES_LANDING_ITEMS_TTL_MS) {
+      window.localStorage.removeItem(storageKey);
+      return [];
+    }
+
+    return cloneSeriesLandingItems(entry.items);
+  } catch {
+    window.localStorage.removeItem(storageKey);
+    return [];
+  }
+}
+
+function writeStoredSeriesLandingItems({
+  licenseCode,
+  deviceIdentifier,
+  items,
+}: {
+  licenseCode: string;
+  deviceIdentifier: string;
+  items: HomeVodItem[];
+}) {
+  if (typeof window === 'undefined' || items.length === 0) {
+    return;
+  }
+
+  const cacheKey = createSeriesLandingItemsCacheKey({
+    licenseCode,
+    deviceIdentifier,
+  });
+  const storageKey = `${SERIES_LANDING_ITEMS_STORAGE_PREFIX}${cacheKey}`;
+
+  try {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        createdAt: Date.now(),
+        items: cloneSeriesLandingItems(items),
+      } satisfies StoredSeriesLandingItemsEntry),
+    );
+  } catch {
+    // Cache local é otimização. Falha não deve impedir a página Séries.
+  }
+}
+
 
 function getCategoryItemFocusKey(categorySlug: string, index: number) {
   return `${CATEGORY_ITEM_FOCUS_PREFIX}-${categorySlug}-${index}`;
@@ -106,6 +214,24 @@ function readInitialCategoryItems(
       seriesTitle,
     });
   };
+
+  const shouldUseStoredSeriesLandingItems =
+    category.slug === 'series' &&
+    !seriesKey &&
+    !seriesTmdbId &&
+    !seriesTmdbTitle &&
+    !seriesTitle;
+
+  if (shouldUseStoredSeriesLandingItems) {
+    const storedSeriesLandingItems = readStoredSeriesLandingItems({
+      licenseCode,
+      deviceIdentifier,
+    }).filter((item) => (!item.kind || item.kind === 'series') && matchesSeries(item));
+
+    if (storedSeriesLandingItems.length > 0) {
+      return storedSeriesLandingItems;
+    }
+  }
 
   const specificCachedEpisodes = readCachedSeriesEpisodes({
     licenseCode,
@@ -1346,8 +1472,38 @@ export function CatalogCategoryPage({
 
     return buildSeriesCategorySections(groupedItems, category?.groupTitles ?? []);
   }, [category?.groupTitles, isSeriesCategoryPage, items]);
+  useEffect(() => {
+    if (
+      !isSeriesCategoryPage ||
+      isLoading ||
+      items.length === 0 ||
+      seriesCategorySections.length === 0
+    ) {
+      return;
+    }
+
+    const storedActivation = getStoredLicenseActivation();
+    const licenseCode = storedActivation?.licenseCode?.trim();
+
+    if (!licenseCode) {
+      return;
+    }
+
+    const deviceIdentifier =
+      storedActivation?.deviceIdentifier || getOrCreateDeviceIdentifier();
+
+    writeStoredSeriesLandingItems({
+      licenseCode,
+      deviceIdentifier,
+      items,
+    });
+  }, [isSeriesCategoryPage, isLoading, items, seriesCategorySections.length]);
+
   const seriesHeroHighlights = useMemo(
-    () => buildSeriesHeroHighlights(seriesCategorySections),
+    () =>
+      hydrateSeriesHeroHighlightsFromCache(
+        buildSeriesHeroHighlights(seriesCategorySections),
+      ),
     [seriesCategorySections],
   );
   const effectiveSeriesHeroHighlights = useMemo(() => {
@@ -2356,9 +2512,9 @@ export function CatalogCategoryPage({
             <section className="space-y-7 pb-12">
               {seriesCategorySections.map((section, sectionIndex) => (
                 <section key={section.id} className="min-w-0">
-                  <div className="mb-3 flex items-end justify-between gap-3">
+                  <div className="mb-0 flex items-end justify-between gap-2">
                     <div>
-                      <h2 className="text-[0.92rem] font-black uppercase tracking-[0.08em] text-white/95 md:text-[1rem] lg:text-[1.05rem]">
+                      <h2 className="text-[0.72rem] font-black uppercase tracking-[0.055em] text-white/90 md:text-[0.78rem] lg:text-[0.82rem]">
                         {section.title}
                       </h2>
                     </div>
@@ -2377,7 +2533,7 @@ export function CatalogCategoryPage({
                     </FocusableButton>
                   </div>
 
-                  <div className="xf-carousel-row flex gap-3 overflow-x-auto overflow-y-visible pb-5 pr-10 scroll-auto">
+                  <div className="xf-carousel-row flex gap-[0.2rem] overflow-x-auto overflow-y-visible pb-5 pr-10 scroll-auto md:gap-[0.25rem] lg:gap-[0.25rem]">
                     {section.items.slice(0, SERIES_CATEGORY_ROW_VISIBLE_LIMIT).map((item, itemIndex) => (
                       <MediaCard
                         key={item.id}
@@ -2413,7 +2569,7 @@ export function CatalogCategoryPage({
               ))}
             </section>
           ) : (
-            <section className="grid grid-cols-5 gap-3 pb-12">
+            <section className="grid grid-cols-5 gap-[0.25rem] pb-12">
               {visibleItems.map((item, index) => (
                 <MediaCard
                   key={item.id}

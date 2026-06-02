@@ -21,7 +21,7 @@ export function AppHeader({
   navigation,
 }: AppHeaderProps) {
   const { isMobile, isTv } = useDeviceType();
-  const shouldShowActions = !isTv;
+  const shouldShowActions = !isMobile && !isTv;
 
   if (!shouldShowActions) {
     return null;
