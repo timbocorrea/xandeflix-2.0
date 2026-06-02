@@ -125,3 +125,17 @@ Resultado informado após instalação no celular Samsung:
 Conclusão da validação mobile:
 
 A correção mobile/Home/TMDB foi aprovada no celular Android real para o escopo desta fase.
+
+## Validação visual em celular Android real
+
+Resultado informado após instalação no celular Samsung:
+
+- Home carregou: sim.
+- Hero aparece com imagem/texto: sim.
+- Cards aparecem com capas: sim.
+- Rodapé mostra Início / Buscar / Ajustes / Perfil: sim.
+- Buscar ou Perfil não quebram a tela: apenas permanecem no app.
+
+Conclusão da validação mobile:
+
+A correção mobile/Home/TMDB foi aprovada no celular Android real para o escopo desta fase.
