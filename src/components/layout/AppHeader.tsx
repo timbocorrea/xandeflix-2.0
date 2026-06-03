@@ -1,4 +1,5 @@
 import { Search, UserRound, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
@@ -20,8 +21,48 @@ export function AppHeader({
   onSignOut,
   navigation,
 }: AppHeaderProps) {
-  const { isMobile, isTv } = useDeviceType();
-  const shouldShowActions = !isMobile && !isTv;
+  const navigate = useNavigate();
+  const { isMobile, isTablet, isTv } = useDeviceType();
+
+  if (isTablet && !isTv) {
+    return (
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-center bg-gradient-to-b from-black via-xf-bg to-transparent px-4">
+        <FocusableSection
+          focusKey="tablet-header-primary-nav"
+          className="grid w-full max-w-xl grid-cols-3 gap-2"
+        >
+          <FocusableButton
+            focusKey="tablet-header-live"
+            className="inline-flex min-h-11 items-center justify-center rounded-full bg-white/10 px-3 text-sm font-black uppercase tracking-[0.16em] text-white"
+            onEnterPress={() => navigate('/live')}
+            onClick={() => navigate('/live')}
+          >
+            Ao Vivo
+          </FocusableButton>
+
+          <FocusableButton
+            focusKey="tablet-header-movies"
+            className="inline-flex min-h-11 items-center justify-center rounded-full bg-white/10 px-3 text-sm font-black uppercase tracking-[0.16em] text-white"
+            onEnterPress={() => navigate('/launches')}
+            onClick={() => navigate('/launches')}
+          >
+            Filmes
+          </FocusableButton>
+
+          <FocusableButton
+            focusKey="tablet-header-series"
+            className="inline-flex min-h-11 items-center justify-center rounded-full bg-white/10 px-3 text-sm font-black uppercase tracking-[0.16em] text-white"
+            onEnterPress={() => navigate('/category/series')}
+            onClick={() => navigate('/category/series')}
+          >
+            Séries
+          </FocusableButton>
+        </FocusableSection>
+      </header>
+    );
+  }
+
+  const shouldShowActions = !isMobile && !isTablet && !isTv;
 
   if (!shouldShowActions) {
     return null;
