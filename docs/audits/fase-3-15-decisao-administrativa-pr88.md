@@ -3,13 +3,13 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-Repositório: xandeflix4/xandeflix-2.0  
-PR principal: #88 — Draft: reconcile PR87 local-first foundation with main  
-Branch: integration/pr87-main-reconcile-20260529-090721  
-Head validado: 32e4053e971f2a46290cfcb5759dc978c9730f7f  
-Base: main  
-Head da main no ciclo: 7210a7516f4f025736d7082b77cdf4d135cfd6b4  
+Projeto: Xandeflix 2.0
+Repositório: xandeflix4/xandeflix-2.0
+PR principal: #88 — Draft: reconcile PR87 local-first foundation with main
+Branch: integration/pr87-main-reconcile-20260529-090721
+Head validado: 32e4053e971f2a46290cfcb5759dc978c9730f7f
+Base: main
+Head da main no ciclo: 7210a7516f4f025736d7082b77cdf4d135cfd6b4
 
 Objetivo da fase: executar decisão administrativa da PR #88 antes de qualquer novo desenvolvimento, merge ou Ready for Review.
 
@@ -374,4 +374,3 @@ Ordem preliminar sugerida:
 A Fase 3.15 conclui que a PR #88 deve permanecer como Draft e não deve ser mergeada no estado atual. A PR é útil como branch de integração validada, mas é ampla demais para entrar na main em um único merge.
 
 A decisão mais segura é preservar a PR #88 como referência consolidada e iniciar fase posterior para dividir o conteúdo em PRs menores, revisáveis e com validação independente.
-
