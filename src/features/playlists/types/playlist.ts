@@ -27,6 +27,20 @@ export type IptvChannel = {
   tmdbRating?: number | null;
   tmdbGenres?: string[] | null;
   tmdbLastEnrichedAt?: string | null;
+  stillPath?: string | null;
+  still_path?: string | null;
+  tmdbStillPath?: string | null;
+  tmdb_still_path?: string | null;
+  episodeStillPath?: string | null;
+  episode_still_path?: string | null;
+  fanart?: string | null;
+  landscape?: string | null;
+  backdropUrl?: string | null;
+  backdrop_url?: string | null;
+  backdropPath?: string | null;
+  backdrop_path?: string | null;
+  backgroundUrl?: string | null;
+  background_url?: string | null;
 };
 
 export type PlaylistDiagnostics = {
