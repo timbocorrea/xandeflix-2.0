@@ -10,6 +10,8 @@ interface MediaCardProps {
   onEnterPress?: () => void;
   onArrowPress?: (direction: string) => boolean;
   focusScrollOptions?: ScrollIntoViewOptions;
+  hideTextOverlay?: boolean;
+  sizeScale?: 'default' | 'large';
 }
 
 export function MediaCard({
@@ -22,6 +24,8 @@ export function MediaCard({
   onEnterPress,
   onArrowPress,
   focusScrollOptions,
+  hideTextOverlay = false,
+  sizeScale = 'default',
 }: MediaCardProps) {
   return (
     <FocusableMediaCard
@@ -33,6 +37,8 @@ export function MediaCard({
       onEnterPress={onEnterPress}
       onArrowPress={onArrowPress}
       focusScrollOptions={focusScrollOptions}
+      hideTextOverlay={hideTextOverlay}
+      sizeScale={sizeScale}
     />
   );
 }
