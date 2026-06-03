@@ -214,20 +214,20 @@ export default function SettingsPage() {
             </p>
 
             <h2 className="mt-3 text-2xl font-black">
-              IndexedDB local
+              Diagnóstico IndexedDB local
             </h2>
 
-            <p className="mt-3 max-w-3xl text-sm text-xf-muted">
-              Executa a tela interna de smoke test do catálogo local sem trocar Home, Live TV, VOD ou Player para IndexedDB.
+            <p className="mt-3 max-w-3xl text-sm text-sky-100/80">
+              Executar smoke test local sem Supabase.
             </p>
 
             <FocusableButton
               focusKey="settings-local-catalog-smoke-button"
-              className="mt-5 rounded-xl border border-sky-300/40 bg-sky-400/20 px-6 py-4 text-lg font-black text-sky-50"
+              className="mt-5 rounded-xl bg-sky-500 px-6 py-4 text-base font-black text-white transition hover:bg-sky-400"
               onEnterPress={() => navigate('/debug/local-catalog-smoke')}
               onClick={() => navigate('/debug/local-catalog-smoke')}
             >
-              Abrir diagnóstico IndexedDB
+              Abrir diagnóstico
             </FocusableButton>
           </section>
         ) : null}
