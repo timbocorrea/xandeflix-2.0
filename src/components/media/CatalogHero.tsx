@@ -102,6 +102,85 @@ export function CatalogHero({
           {`
             @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
 
+
+            /* XF_MOBILE_NETFLIX_HERO_SAFE_PATCH */
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero="catalog"] {
+              width: calc(100vw - 28px);
+              height: min(72vh, 620px) !important;
+              min-height: min(72vh, 620px) !important;
+              aspect-ratio: 9 / 14 !important;
+              margin-left: auto;
+              margin-right: auto;
+              padding: 1rem;
+              border-radius: 16px;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-content="true"] {
+              display: flex;
+              height: 100%;
+              align-items: flex-end;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-radial-backdrop="true"] {
+              background:
+                radial-gradient(circle at 50% 88%, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.48) 34%, rgba(0, 0, 0, 0) 68%),
+                linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.62) 22%, rgba(0, 0, 0, 0.28) 48%, rgba(0, 0, 0, 0) 72%);
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-copy="true"] {
+              width: 100%;
+              max-width: 100%;
+              align-items: center;
+              text-align: center;
+              transform: none !important;
+              transform-origin: center bottom !important;
+              padding-bottom: 0.25rem;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-eyebrow="true"] {
+              margin-bottom: 0.35rem;
+              font-size: 0.72rem;
+              letter-spacing: 0.26em;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-title="true"] {
+              max-width: 100%;
+              font-size: clamp(1.75rem, 8.5vw, 3.1rem);
+              line-height: 0.9;
+              text-align: center;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-metadata="true"] {
+              margin-top: 0.5rem;
+              max-width: 100%;
+              font-size: 0.72rem;
+              line-height: 1.25;
+              text-align: center;
+              letter-spacing: 0.06em;
+              max-height: 1.1rem;
+              overflow: hidden;
+              white-space: nowrap;
+              text-overflow: ellipsis;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-description="true"] {
+              display: none !important;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-actions="true"] {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 0.6rem;
+              width: 100%;
+              margin-top: 0.9rem;
+            }
+
+            .xf-app[data-device-form-factor="mobile"] [data-xf-hero-actions="true"] button {
+              min-height: 48px;
+              border-radius: 0.28rem;
+              font-size: 0.95rem;
+            }
+
             @keyframes xfHeroFadeIn {
               from {
                 opacity: 0;
@@ -133,9 +212,9 @@ export function CatalogHero({
         />
 
 
-      <div className="relative z-10 grid w-full gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,15rem)]">
+      <div data-xf-hero-content="true" className="relative z-10 grid w-full gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,15rem)]">
         <div
-          className="flex max-w-[54rem] flex-1 flex-col justify-end self-stretch pb-[clamp(0.35rem,0.9vh,0.85rem)]"
+          data-xf-hero-copy="true" className="flex max-w-[54rem] flex-1 flex-col justify-end self-stretch pb-[clamp(0.35rem,0.9vh,0.85rem)]"
           style={{
             transform: 'scale(0.8)',
             transformOrigin: 'left bottom',
@@ -191,7 +270,7 @@ export function CatalogHero({
             {description}
           </p>
 
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-4">
+          <div data-xf-hero-actions="true" className="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-4">
             <FocusableButton
               focusKey={FOCUS_KEYS.HERO_PLAY_BUTTON}
               focusScrollTarget="closest-section"

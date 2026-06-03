@@ -12,6 +12,8 @@ interface FocusableMediaCardProps {
   onEnterPress?: () => void;
   onArrowPress?: (direction: string) => boolean;
   focusScrollOptions?: ScrollIntoViewOptions;
+  hideTextOverlay?: boolean;
+  sizeScale?: 'default' | 'large';
 }
 
 type CardPalette = {
@@ -45,11 +47,21 @@ export function FocusableMediaCard({
   onEnterPress,
   onArrowPress,
   focusScrollOptions,
+  hideTextOverlay = false,
+  sizeScale = 'default',
 }: FocusableMediaCardProps) {
   const [hasPosterError, setHasPosterError] = useState(false);
   const shouldShowPoster = Boolean(posterUrl) && !hasPosterError;
 
   const fallbackPalette = useMemo(() => getFallbackPalette(title), [title]);
+  const cardSizeClass =
+    sizeScale === 'large'
+      ? 'w-[9.4rem] md:w-[10.4rem] lg:w-[11.4rem] xl:w-[12.2rem]'
+      : 'w-[8.65rem] md:w-[9.85rem] lg:w-[10.85rem] xl:w-[11.65rem]';
+  const cardSizeStyle =
+    sizeScale === 'large'
+      ? { width: '12.2rem', minWidth: '12.2rem' }
+      : undefined;
 
   const { ref, focused } = useFocusable({
     focusKey,
@@ -73,13 +85,14 @@ export function FocusableMediaCard({
   return (
     <button
       ref={ref}
-      className="media-card tv-focusable group relative aspect-[2/3] w-[8.65rem] shrink-0 overflow-hidden rounded-[0.12rem] border border-transparent bg-[#141414] text-left shadow-none outline-none transition-[border-color,box-shadow,filter] duration-100 data-[focused=true]:z-10 data-[focused=true]:border-[#e50914] data-[focused=true]:ring-2 data-[focused=true]:ring-inset data-[focused=true]:ring-[#e50914] data-[focused=true]:shadow-none md:w-[9.85rem] lg:w-[10.85rem] xl:w-[11.65rem]"
+      className={`media-card tv-focusable group relative aspect-[2/3] ${cardSizeClass} shrink-0 overflow-hidden rounded-[0.12rem] border border-transparent bg-[#141414] text-left shadow-none outline-none transition-[border-color,box-shadow,filter] duration-100 data-[focused=true]:z-10 data-[focused=true]:border-[#e50914] data-[focused=true]:ring-2 data-[focused=true]:ring-inset data-[focused=true]:ring-[#e50914] data-[focused=true]:shadow-none`}
       style={
         shouldShowPoster
-          ? { borderRadius: CARD_RADIUS }
+          ? { borderRadius: CARD_RADIUS, ...cardSizeStyle }
           : {
               borderRadius: CARD_RADIUS,
               backgroundImage: `linear-gradient(165deg, ${fallbackPalette.accent}33 0%, ${fallbackPalette.background} 48%, #050505 100%)`,
+              ...cardSizeStyle,
             }
       }
       type="button"
@@ -106,10 +119,26 @@ export function FocusableMediaCard({
         />
       )}
 
-      <div
-        className="absolute inset-0 bg-gradient-to-t from-black/62 via-black/5 to-transparent opacity-0 transition-opacity duration-150 group-data-[focused=true]:opacity-100"
-        style={{ borderRadius: 'inherit' }}
-      />
+      {!hideTextOverlay ? (
+        <>
+          <div
+            className="absolute inset-0 bg-gradient-to-t from-black/78 via-black/20 to-transparent opacity-100 transition-opacity duration-150 group-data-[focused=true]:opacity-100"
+            style={{ borderRadius: 'inherit' }}
+          />
+
+          <div className="absolute inset-x-0 bottom-0 z-10 px-2 pb-2 pt-8">
+            <h3 className="line-clamp-2 text-[0.72rem] font-black leading-tight text-white drop-shadow md:text-[0.78rem]">
+              {title}
+            </h3>
+
+            {subtitle ? (
+              <p className="mt-1 line-clamp-1 text-[0.58rem] font-bold uppercase tracking-[0.08em] text-zinc-300 drop-shadow">
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </button>
   );
 }
