@@ -33,7 +33,6 @@ import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
 import { env } from '../config/env';
 // Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
-// import { startCatalogVodWarmup } from '../features/catalog/services/catalogWarmup.service';
 
 const LocalCatalogSmokeTestPage = lazy(
   () => import('../features/localCatalog/pages/LocalCatalogSmokeTestPage'),
