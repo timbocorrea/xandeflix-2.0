@@ -29,7 +29,7 @@ export function AppHeader({
       <header className="sticky top-0 z-30 flex h-16 items-center justify-center bg-gradient-to-b from-black via-xf-bg to-transparent px-4">
         <FocusableSection
           focusKey="tablet-header-primary-nav"
-          className="grid w-full max-w-xl grid-cols-3 gap-2"
+          className="grid w-full max-w-md grid-cols-2 gap-2"
         >
           <FocusableButton
             focusKey="tablet-header-live"
@@ -47,15 +47,6 @@ export function AppHeader({
             onClick={() => navigate('/launches')}
           >
             Filmes
-          </FocusableButton>
-
-          <FocusableButton
-            focusKey="tablet-header-series"
-            className="inline-flex min-h-11 items-center justify-center rounded-full bg-white/10 px-3 text-sm font-black uppercase tracking-[0.16em] text-white"
-            onEnterPress={() => navigate('/category/series')}
-            onClick={() => navigate('/category/series')}
-          >
-            Séries
           </FocusableButton>
         </FocusableSection>
       </header>
