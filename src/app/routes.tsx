@@ -31,8 +31,13 @@ import { CatalogLaunchesPage } from '../features/catalog/pages/CatalogLaunchesPa
 import { CatalogCategoryPage } from '../features/catalog/pages/CatalogCategoryPage';
 import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
+import { env } from '../config/env';
 // Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
 // import { startCatalogVodWarmup } from '../features/catalog/services/catalogWarmup.service';
+
+const LocalCatalogSmokeTestPage = lazy(
+  () => import('../features/localCatalog/pages/LocalCatalogSmokeTestPage'),
+);
 
 const UniversalPlayerPage = lazy(
   () => import('../features/player/pages/UniversalPlayerPage'),
@@ -148,6 +153,13 @@ export function AppRoutes() {
             <Route path="/admin/login" element={<AdminLoginPage />} />
 
             <Route path="/preparing-home" element={<PreparingHomePage />} />
+
+            {env.localCatalogSmokeTestEnabled && (
+              <Route
+                path="/debug/local-catalog-smoke"
+                element={<LocalCatalogSmokeTestPage />}
+              />
+            )}
 
             <Route
               path="/"
