@@ -3,11 +3,11 @@
 
 ## 1. Contexto
 
-Projeto: Xandeflix 2.0  
-PR: #88  
-Branch: `integration/pr87-main-reconcile-20260529-090721`  
-Base: `main`  
-Head final validado: `48ebdd6b373c6dfba55c6804066c37ec82db49ef`  
+Projeto: Xandeflix 2.0
+PR: #88
+Branch: `integration/pr87-main-reconcile-20260529-090721`
+Base: `main`
+Head final validado: `48ebdd6b373c6dfba55c6804066c37ec82db49ef`
 
 A Fase 3.14.2J teve como objetivo auditar a PR #88 após os checkpoints recentes de Home/TMDB mobile e Live TV mobile preview inline, validar tablet em retrato e paisagem, corrigir eventual regressão visual encontrada e consolidar decisão segura antes de qualquer merge ou Ready for Review.
 
