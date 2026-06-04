@@ -49,6 +49,7 @@ const SIMILAR_ITEM_FOCUS_PREFIX = 'series-similar-item';
 const SERIES_HERO_HIGHLIGHT_LIMIT = 10;
 const SERIES_HERO_ROTATION_INTERVAL_MS = 8000;
 const SERIES_CATEGORY_ROW_VISIBLE_LIMIT = 15;
+const MOVIES_CATEGORY_ROW_VISIBLE_LIMIT = 15;
 
 type CatalogCategoryPageProps = {
   groupSlugOverride?: string;
@@ -692,6 +693,303 @@ function buildSeriesHeroMetadata(item: HomeVodItem) {
   ]
     .filter((value): value is string => Boolean(value))
     .join(' | ');
+}
+
+
+type MoviesCategorySection = {
+  id: string;
+  title: string;
+  items: HomeVodItem[];
+};
+
+function slugifyMoviesSectionId(value: string) {
+  return slugifySeriesSectionId(value);
+}
+
+function buildMoviesCategorySections(
+  items: HomeVodItem[],
+  orderedGroupTitles: string[],
+): MoviesCategorySection[] {
+  const orderByGroup = new Map(
+    orderedGroupTitles.map((groupTitle, index) => [
+      groupTitle.trim().toLowerCase(),
+      index,
+    ]),
+  );
+
+  const groupedItems = new Map<string, HomeVodItem[]>();
+
+  for (const item of items) {
+    const groupTitle = item.groupTitle?.trim() || 'Outros filmes';
+    const nextItems = groupedItems.get(groupTitle) ?? [];
+    nextItems.push(item);
+    groupedItems.set(groupTitle, nextItems);
+  }
+
+  return Array.from(groupedItems.entries())
+    .sort(([leftGroup], [rightGroup]) => {
+      const leftOrder =
+        orderByGroup.get(leftGroup.trim().toLowerCase()) ??
+        Number.MAX_SAFE_INTEGER;
+      const rightOrder =
+        orderByGroup.get(rightGroup.trim().toLowerCase()) ??
+        Number.MAX_SAFE_INTEGER;
+
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return leftGroup.localeCompare(rightGroup, 'pt-BR', {
+        sensitivity: 'base',
+      });
+    })
+    .map(([groupTitle, groupItems]) => ({
+      id: `movies-row-${slugifyMoviesSectionId(groupTitle) || 'outros'}`,
+      title: groupTitle,
+      items: groupItems.sort((left, right) =>
+        left.title.localeCompare(right.title, 'pt-BR', {
+          sensitivity: 'base',
+        }),
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+function getMovieHeroItem(items: HomeVodItem[]) {
+  return (
+    items.find((item) => item.backdropUrl || item.posterUrl) ??
+    items[0] ??
+    null
+  );
+}
+
+function getMovieHeroOverview(item: HomeVodItem) {
+  const metadata = item as HomeVodItem & {
+    tmdbOverview?: string | null;
+  };
+
+  return metadata.tmdbOverview?.trim() || item.overview?.trim() || null;
+}
+
+function buildMovieHeroHighlights(sections: MoviesCategorySection[]) {
+  const uniqueHighlights = new Map<string, HomeVodItem>();
+
+  for (const item of sections.flatMap((section) => section.items)) {
+    const key = item.tmdbId || item.tmdbTitle || item.title;
+    const currentHighlight = uniqueHighlights.get(key);
+
+    if (
+      !currentHighlight ||
+      getRepresentativeScore(item) > getRepresentativeScore(currentHighlight)
+    ) {
+      uniqueHighlights.set(key, item);
+    }
+  }
+
+  return Array.from(uniqueHighlights.values())
+    .sort((left, right) => {
+      const backdropScore =
+        Number(Boolean(right.backdropUrl)) - Number(Boolean(left.backdropUrl));
+
+      if (backdropScore !== 0) {
+        return backdropScore;
+      }
+
+      const posterScore =
+        Number(Boolean(right.posterUrl)) - Number(Boolean(left.posterUrl));
+
+      if (posterScore !== 0) {
+        return posterScore;
+      }
+
+      const overviewScore =
+        Number(Boolean(getMovieHeroOverview(right))) -
+        Number(Boolean(getMovieHeroOverview(left)));
+
+      if (overviewScore !== 0) {
+        return overviewScore;
+      }
+
+      const representativeScore =
+        getRepresentativeScore(right) - getRepresentativeScore(left);
+
+      if (representativeScore !== 0) {
+        return representativeScore;
+      }
+
+      return left.title.localeCompare(right.title, 'pt-BR', {
+        sensitivity: 'base',
+      });
+    })
+    .slice(0, SERIES_HERO_HIGHLIGHT_LIMIT);
+}
+
+function buildMovieHeroMetadata(item: HomeVodItem) {
+  return [
+    item.tmdbReleaseYear,
+    item.tmdbRating ? `Nota ${formatHeroRating(item.tmdbRating)}` : null,
+    item.tmdbGenres,
+    item.groupTitle,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' | ');
+}
+
+function MovieCategoryHero({
+  item,
+  totalItems,
+  onOpenItem,
+  onButtonArrowPress,
+}: {
+  item: HomeVodItem | null;
+  totalItems: number;
+  onOpenItem: (item: HomeVodItem, index: number) => void;
+  onButtonArrowPress: (
+    direction: string,
+    buttonPosition: 'play' | 'info',
+  ) => boolean;
+}) {
+  const backgroundUrl = item?.backdropUrl || item?.posterUrl || null;
+  const metadata = item ? buildMovieHeroMetadata(item) : null;
+  const overview =
+    (item && getMovieHeroOverview(item)) ||
+    'Filmes organizados por categorias liberadas para esta licença.';
+
+  return (
+    <section
+      data-xf-series-category-hero="true"
+      data-nav-id={FOCUS_KEYS.CATALOG_HERO_SECTION}
+      data-focus-key={FOCUS_KEYS.CATALOG_HERO_SECTION}
+      data-xf-focus-key={FOCUS_KEYS.CATALOG_HERO_SECTION}
+      style={
+        backgroundUrl
+          ? {
+              aspectRatio: '16 / 7',
+              height: 'auto',
+            }
+          : undefined
+      }
+      className="relative mb-6 box-border flex min-h-[18.75rem] w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black px-5 py-5 shadow-2xl ring-0 ring-inset ring-transparent md:min-h-[22rem] md:px-7 md:py-6 lg:min-h-[25.5rem] xl:min-h-[28.5rem]"
+    >
+      {backgroundUrl ? (
+        <img
+          key={backgroundUrl}
+          src={backgroundUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover opacity-100"
+          loading="eager"
+          decoding="async"
+        />
+      ) : null}
+
+      <div
+        data-xf-hero-radial-backdrop="true"
+        className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(circle_at_18%_76%,rgba(0,0,0,0.78)_0%,rgba(0,0,0,0.58)_18%,rgba(0,0,0,0.36)_34%,rgba(0,0,0,0.16)_50%,rgba(0,0,0,0.06)_62%,rgba(0,0,0,0)_74%)]"
+      />
+
+      <div className="relative z-10 grid w-full gap-5">
+        <div
+          className="flex max-w-[54rem] flex-1 flex-col justify-end self-stretch pb-[clamp(0.35rem,0.9vh,0.85rem)]"
+          style={{
+            transform: 'scale(0.8)',
+            transformOrigin: 'left bottom',
+          }}
+        >
+          <p
+            data-xf-hero-eyebrow="true"
+            className="mb-3 text-[clamp(0.625rem,0.84vw,0.8rem)] font-black uppercase tracking-[0.35em] text-xf-red"
+          >
+            Filmes
+          </p>
+
+          <h1
+            data-xf-hero-title="true"
+            className="font-display text-[clamp(1.6rem,3vw,3.24rem)] font-black leading-[0.94] text-white"
+            style={{
+              fontFamily: "'Bebas Neue', 'Arial Narrow', sans-serif",
+              letterSpacing: '0.035em',
+            }}
+          >
+            {item?.title ?? 'Filmes'}
+          </h1>
+
+          {metadata ? (
+            <p
+              data-xf-hero-metadata="true"
+              className="mt-1.5 max-w-xl text-[clamp(0.5rem,0.66vw,0.62rem)] font-bold uppercase tracking-[0.16em] text-white/90"
+            >
+              {metadata}
+            </p>
+          ) : null}
+
+          <p
+            data-xf-hero-description="true"
+            className="mt-2 max-w-xl text-[clamp(0.62rem,0.82vw,0.77rem)] leading-[1.45] text-zinc-200"
+            style={{
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 3,
+              overflow: 'hidden',
+            }}
+          >
+            {overview}
+          </p>
+
+          {item ? (
+            <>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-4">
+                <FocusableButton
+                  focusKey={FOCUS_KEYS.HERO_PLAY_BUTTON}
+                  focusScrollTarget="closest-section"
+                  focusScrollOptions={{
+                    behavior: 'auto',
+                    block: 'center',
+                    inline: 'nearest',
+                  }}
+                  className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+                  onClick={() => onOpenItem(item, 0)}
+                  onEnterPress={() => onOpenItem(item, 0)}
+                  onArrowPress={(direction) =>
+                    onButtonArrowPress(direction, 'play')
+                  }
+                >
+                  Assistir agora
+                </FocusableButton>
+
+                <FocusableButton
+                  focusKey={FOCUS_KEYS.HERO_INFO_BUTTON}
+                  focusScrollTarget="closest-section"
+                  focusScrollOptions={{
+                    behavior: 'auto',
+                    block: 'center',
+                    inline: 'nearest',
+                  }}
+                  className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+                  onClick={() => onOpenItem(item, 0)}
+                  onEnterPress={() => onOpenItem(item, 0)}
+                  onArrowPress={(direction) =>
+                    onButtonArrowPress(direction, 'info')
+                  }
+                >
+                  Mais informações
+                </FocusableButton>
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="rounded-full border border-white/15 bg-black/35 px-2.5 py-1 text-[0.5rem] font-bold uppercase tracking-[0.18em] text-white/80">
+                  {totalItems} filmes agrupados
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="mt-5 inline-flex w-fit rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
+              Carregando filmes...
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function SeriesCategoryHero({
@@ -1463,6 +1761,7 @@ export function CatalogCategoryPage({
     seriesTitle,
   ]);
   const isSeriesCategoryPage = !isSeriesDetailPage && category?.slug === 'series';
+  const isMoviesCategoryPage = !isSeriesDetailPage && category?.slug === 'filmes';
   const seriesCategorySections = useMemo(() => {
     if (!isSeriesCategoryPage) {
       return [];
@@ -1472,6 +1771,36 @@ export function CatalogCategoryPage({
 
     return buildSeriesCategorySections(groupedItems, category?.groupTitles ?? []);
   }, [category?.groupTitles, isSeriesCategoryPage, items]);
+
+  const moviesCategorySections = useMemo(() => {
+    if (!isMoviesCategoryPage) {
+      return [];
+    }
+
+    return buildMoviesCategorySections(items, category?.groupTitles ?? []);
+  }, [category?.groupTitles, isMoviesCategoryPage, items]);
+
+  const movieHeroHighlights = useMemo(
+    () => buildMovieHeroHighlights(moviesCategorySections),
+    [moviesCategorySections],
+  );
+
+  const movieHeroItem = useMemo(() => {
+    if (!isMoviesCategoryPage) {
+      return null;
+    }
+
+    return getMovieHeroItem(
+      moviesCategorySections.flatMap((section) => section.items),
+    );
+  }, [isMoviesCategoryPage, moviesCategorySections]);
+
+  const activeMovieHeroItem = movieHeroHighlights[0] ?? movieHeroItem;
+  const movieCollectionCount = moviesCategorySections.reduce(
+    (total, section) => total + section.items.length,
+    0,
+  );
+
   useEffect(() => {
     if (
       !isSeriesCategoryPage ||
@@ -1611,6 +1940,12 @@ export function CatalogCategoryPage({
       }
 
       if (isSeriesCategoryPage && seriesCategorySections[0]?.items.length) {
+        scrollSeriesHeroIntoSafeView();
+        setFocus(FOCUS_KEYS.HERO_PLAY_BUTTON);
+        return;
+      }
+
+      if (isMoviesCategoryPage && moviesCategorySections[0]?.items.length) {
         scrollSeriesHeroIntoSafeView();
         setFocus(FOCUS_KEYS.HERO_PLAY_BUTTON);
         return;
@@ -2023,6 +2358,128 @@ export function CatalogCategoryPage({
     return false;
   }
 
+  function focusFirstMoviesCategoryRow() {
+    const firstSection = moviesCategorySections[0];
+
+    if (!firstSection?.items.length) {
+      return false;
+    }
+
+    setFocus(getCategoryItemFocusKey(firstSection.id, 0));
+    return false;
+  }
+
+  function handleMoviesCategoryHeroButtonArrowPress(
+    direction: string,
+    buttonPosition: 'play' | 'info',
+  ) {
+    if (direction === 'down') {
+      return focusFirstMoviesCategoryRow();
+    }
+
+    if (direction === 'left') {
+      setFocus(
+        buttonPosition === 'info'
+          ? FOCUS_KEYS.HERO_PLAY_BUTTON
+          : FOCUS_KEYS.SIDEBAR_HOME,
+      );
+      return false;
+    }
+
+    if (direction === 'right') {
+      if (buttonPosition === 'play') {
+        setFocus(FOCUS_KEYS.HERO_INFO_BUTTON);
+      }
+
+      return false;
+    }
+
+    return false;
+  }
+
+  function handleMoviesCategoryRowCardArrowPress(
+    direction: string,
+    sectionIndex: number,
+    itemIndex: number,
+  ) {
+    const section = moviesCategorySections[sectionIndex];
+
+    if (!section) {
+      return false;
+    }
+
+    const visibleItemsCount = Math.min(
+      MOVIES_CATEGORY_ROW_VISIBLE_LIMIT,
+      section.items.length,
+    );
+
+    if (direction === 'left') {
+      if (itemIndex === 0) {
+        setFocus(FOCUS_KEYS.SIDEBAR_HOME);
+        return false;
+      }
+
+      setFocus(getCategoryItemFocusKey(section.id, itemIndex - 1));
+      return false;
+    }
+
+    if (direction === 'right') {
+      const nextIndex = itemIndex + 1;
+
+      if (nextIndex >= visibleItemsCount) {
+        return false;
+      }
+
+      setFocus(getCategoryItemFocusKey(section.id, nextIndex));
+      return false;
+    }
+
+    if (direction === 'up') {
+      if (sectionIndex === 0) {
+        window.setTimeout(() => {
+          scrollSeriesHeroIntoSafeView();
+          setFocus(FOCUS_KEYS.HERO_PLAY_BUTTON);
+        }, 0);
+        return false;
+      }
+
+      const previousSection = moviesCategorySections[sectionIndex - 1];
+      const previousVisibleCount = Math.min(
+        MOVIES_CATEGORY_ROW_VISIBLE_LIMIT,
+        previousSection.items.length,
+      );
+      const previousIndex = Math.min(
+        itemIndex,
+        Math.max(0, previousVisibleCount - 1),
+      );
+
+      setFocus(getCategoryItemFocusKey(previousSection.id, previousIndex));
+      return false;
+    }
+
+    if (direction === 'down') {
+      const nextSection = moviesCategorySections[sectionIndex + 1];
+
+      if (!nextSection) {
+        return false;
+      }
+
+      const nextVisibleCount = Math.min(
+        MOVIES_CATEGORY_ROW_VISIBLE_LIMIT,
+        nextSection.items.length,
+      );
+      const nextIndex = Math.min(
+        itemIndex,
+        Math.max(0, nextVisibleCount - 1),
+      );
+
+      setFocus(getCategoryItemFocusKey(nextSection.id, nextIndex));
+      return false;
+    }
+
+    return false;
+  }
+
   function handleSeriesCategoryHeroButtonArrowPress(
     direction: string,
     buttonPosition: 'play' | 'info',
@@ -2385,6 +2842,14 @@ export function CatalogCategoryPage({
                 onOpenItem={openSeriesCollection}
                 onButtonArrowPress={handleSeriesCategoryHeroButtonArrowPress}
               />
+            ) : isMoviesCategoryPage ? (
+              <MovieCategoryHero
+                item={activeMovieHeroItem}
+                totalItems={movieCollectionCount}
+                onOpenItem={openCategoryItem}
+                onButtonArrowPress={handleMoviesCategoryHeroButtonArrowPress}
+              />
+
             ) : (
               <header className="mb-6">
                 <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
@@ -2568,6 +3033,50 @@ export function CatalogCategoryPage({
                 </section>
               ))}
             </section>
+          ) : isMoviesCategoryPage ? (
+            <section className="space-y-7 pb-12">
+              {moviesCategorySections.map((section, sectionIndex) => (
+                <section key={section.id} className="min-w-0">
+                  <div className="mb-0 flex items-end justify-between gap-2">
+                    <div>
+                      <h2 className="text-[0.72rem] font-black uppercase tracking-[0.055em] text-white/90 md:text-[0.78rem] lg:text-[0.82rem]">
+                        {section.title}
+                      </h2>
+                    </div>
+                  </div>
+
+                  <div className="xf-carousel-row flex gap-[0.2rem] overflow-x-auto overflow-y-visible pb-5 pr-10 scroll-auto md:gap-[0.25rem] lg:gap-[0.25rem]">
+                    {section.items.slice(0, MOVIES_CATEGORY_ROW_VISIBLE_LIMIT).map((item, itemIndex) => (
+                      <MediaCard
+                        key={item.id}
+                        title={item.title}
+                        subtitle={item.subtitle}
+                        posterUrl={item.posterUrl}
+                        eagerLoad={sectionIndex === 0 && itemIndex < 8}
+                        index={itemIndex}
+                        focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
+                        onEnterPress={() => openCategoryItem(item, itemIndex)}
+                        onArrowPress={(direction: string) =>
+                          handleMoviesCategoryRowCardArrowPress(
+                            direction,
+                            sectionIndex,
+                            itemIndex,
+                          )
+                        }
+                        focusScrollOptions={{
+                          behavior: 'auto',
+                          block: 'center',
+                          inline: 'nearest',
+                        }}
+                        hideTextOverlay
+                        sizeScale="large"
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </section>
+
           ) : (
             <section className="grid grid-cols-5 gap-[0.25rem] pb-12">
               {visibleItems.map((item, index) => (

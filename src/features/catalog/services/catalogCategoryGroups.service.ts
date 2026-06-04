@@ -20,6 +20,42 @@ export const CATALOG_VOD_PRIORITY_GROUPS = [
 
 export const CATALOG_CATEGORY_DEFINITIONS: CatalogCategoryDefinition[] = [
   {
+    slug: 'filmes',
+    title: 'Filmes',
+    description:
+      'Filmes organizados por categorias liberadas para esta licença.',
+    groupTitles: [
+      'Filmes | Lancamentos',
+      'Filmes | Lançamentos',
+      'Filmes | Cinema',
+      'Filmes | Ação',
+      'Filmes | Acao',
+      'Filmes | Comédia',
+      'Filmes | Comedia',
+      'Filmes | Terror',
+      'Filmes | Drama',
+      'Filmes | Animação',
+      'Filmes | Animacao',
+      'Filmes | Legendados',
+      'Filmes | Suspense',
+      'Filmes | Romance',
+      'Filmes | Documentarios',
+      'Filmes | Documentários',
+      'Filmes | Nacionais',
+      'Filmes | Fantasia',
+      'Filmes | Crime',
+      'Filmes | Ficção',
+      'Filmes | Ficcao',
+      'Filmes | Faroeste',
+      'Filmes | Religiosos',
+      'Filmes | Guerra',
+      'Filmes | Aventura',
+      'Filmes | Família',
+      'Filmes | Familia',
+    ],
+    homeSectionIds: ['home-vod-launches'],
+  },
+  {
     slug: 'filmes-lancamentos',
     title: 'Lançamentos',
     description:
@@ -195,9 +231,7 @@ export function getCategoryRouteByHomeSectionId(sectionId: string) {
     return null;
   }
 
-  return definition.slug === 'filmes-lancamentos'
-    ? '/launches'
-    : `/category/${definition.slug}`;
+  return `/category/${definition.slug}`;
 }
 
 export function getSlugByGroupTitle(groupTitle: string): string {

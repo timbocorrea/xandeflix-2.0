@@ -42,7 +42,7 @@ const menuItems = [
     label: 'Filmes',
     icon: Clapperboard,
     navId: 'sidebar-movies',
-    path: '/launches',
+    path: '/category/filmes',
   },
   {
     label: 'Séries',
