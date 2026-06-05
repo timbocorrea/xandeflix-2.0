@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -16,6 +16,7 @@ import {
   getCatalogCategoryDefinition,
   type CatalogCategoryDefinition,
 } from '../services/catalogCategoryGroups.service';
+
 import {
   getCachedHomeVodCategoryItems,
   getCachedHomeVodSections,
@@ -180,6 +181,10 @@ function getCategoryItemFocusKey(categorySlug: string, index: number) {
 
 function getSimilarItemFocusKey(categorySlug: string, index: number) {
   return `${SIMILAR_ITEM_FOCUS_PREFIX}-${categorySlug}-${index}`;
+}
+
+function getMovieSimilarItemFocusKey(movieFocusSlug: string, index: number) {
+  return `movie-similar-${movieFocusSlug}-${index}`;
 }
 
 function readInitialCategoryItems(
@@ -396,6 +401,26 @@ function createSeriesNavigationItem(item: HomeVodItem): HomeVodItem {
     episodeCount: item.episodeCount,
     isSeriesCollection: item.isSeriesCollection,
     kind: 'series',
+  };
+}
+
+function createMovieNavigationItem(item: HomeVodItem): HomeVodItem {
+  return {
+    id: item.id,
+    title: item.title,
+    episodeTitle: item.episodeTitle,
+    subtitle: item.subtitle,
+    overview: item.overview,
+    posterUrl: item.posterUrl,
+    backdropUrl: item.backdropUrl,
+    groupTitle: item.groupTitle,
+    tmdbId: item.tmdbId,
+    tmdbTitle: item.tmdbTitle,
+    tmdbGenres: item.tmdbGenres,
+    tmdbRating: item.tmdbRating,
+    tmdbReleaseYear: item.tmdbReleaseYear,
+    streamUrl: item.streamUrl,
+    kind: 'movie',
   };
 }
 
@@ -824,15 +849,50 @@ function buildMovieHeroHighlights(sections: MoviesCategorySection[]) {
     .slice(0, SERIES_HERO_HIGHLIGHT_LIMIT);
 }
 
+function getFirstMovieGenre(item: HomeVodItem) {
+  const rawGenres = item.tmdbGenres as unknown;
+
+  const normalizedGenres = Array.isArray(rawGenres)
+    ? rawGenres.join(' | ')
+    : typeof rawGenres === 'string'
+      ? rawGenres
+      : null;
+
+  return (
+    normalizedGenres
+      ?.split(/[|,]/)
+      .map((genre) => genre.trim())
+      .filter(Boolean)[0] ?? null
+  );
+}
+
 function buildMovieHeroMetadata(item: HomeVodItem) {
+  const firstGenre = getFirstMovieGenre(item);
+
   return [
-    item.tmdbReleaseYear,
+    item.tmdbReleaseYear ? String(item.tmdbReleaseYear) : null,
     item.tmdbRating ? `Nota ${formatHeroRating(item.tmdbRating)}` : null,
-    item.tmdbGenres,
-    item.groupTitle,
+    firstGenre,
   ]
     .filter((value): value is string => Boolean(value))
     .join(' | ');
+}
+
+function buildMovieDetailMetadataItems(item: HomeVodItem) {
+  const firstGenre = getFirstMovieGenre(item);
+  const normalizedGenre = firstGenre?.trim().toLowerCase() ?? null;
+  const normalizedGroupTitle = item.groupTitle?.trim().toLowerCase() ?? null;
+  const shouldShowGroupTitle =
+    Boolean(item.groupTitle?.trim()) &&
+    normalizedGroupTitle !== normalizedGenre &&
+    normalizedGroupTitle !== 'filmes';
+
+  return [
+    item.tmdbReleaseYear ? String(item.tmdbReleaseYear) : null,
+    item.tmdbRating ? `Nota ${formatHeroRating(item.tmdbRating)}` : null,
+    firstGenre,
+    shouldShowGroupTitle ? item.groupTitle?.trim() ?? null : null,
+  ].filter((value): value is string => Boolean(value));
 }
 
 function MovieCategoryHero({
@@ -858,6 +918,7 @@ function MovieCategoryHero({
   return (
     <section
       data-xf-series-category-hero="true"
+      data-xf-movie-category-hero="true"
       data-nav-id={FOCUS_KEYS.CATALOG_HERO_SECTION}
       data-focus-key={FOCUS_KEYS.CATALOG_HERO_SECTION}
       data-xf-focus-key={FOCUS_KEYS.CATALOG_HERO_SECTION}
@@ -1414,7 +1475,21 @@ export function CatalogCategoryPage({
   const seriesTmdbId = searchParams.get('tmdbId')?.trim() || null;
   const seriesTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
   const seriesKey = searchParams.get('seriesKey')?.trim() || null;
+  const movieTitle = searchParams.get('title')?.trim() || null;
+  const movieTmdbId = searchParams.get('tmdbId')?.trim() || null;
+  const movieTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
   const navigationState = location.state as SeriesNavigationState | null;
+  const movieNavigationState = location.state as {
+    fromMoviesCategory?: boolean;
+    fromMovieDetail?: boolean;
+    returnTo?: string;
+    selectedMovieItem?: HomeVodItem;
+    movieSimilarSeedItems?: HomeVodItem[];
+  } | null;
+  const movieGroupTitle =
+    searchParams.get('groupTitle')?.trim() ||
+    movieNavigationState?.selectedMovieItem?.groupTitle ||
+    null;
 
   const isSeriesGroupListPage =
     (groupSlugOverride ?? params.groupSlug) === 'series-group' &&
@@ -1429,6 +1504,11 @@ export function CatalogCategoryPage({
           seriesTmdbTitle ||
           seriesKey),
     );
+
+  const isMovieDetailPage =
+    !isSeriesGroupListPage &&
+    (groupSlugOverride ?? params.groupSlug) === 'movie-detail' &&
+    Boolean(movieTitle || movieTmdbId || movieTmdbTitle);
 
   const category = useMemo<CatalogCategoryDefinition | null>(() => {
     if (isSeriesGroupListPage && seriesGroupTitle) {
@@ -1449,6 +1529,16 @@ export function CatalogCategoryPage({
       return definition;
     }
 
+    if (isMovieDetailPage) {
+      return {
+        slug: 'movie-detail',
+        title: movieTitle ?? movieTmdbTitle ?? 'Filme',
+        description: 'Detalhes do filme selecionado.',
+        groupTitles: [movieGroupTitle ?? 'Filmes'],
+        path: '/category/movie-detail',
+      } as CatalogCategoryDefinition;
+    }
+
     if (!seriesGroupTitle) {
       return null;
     }
@@ -1460,7 +1550,17 @@ export function CatalogCategoryPage({
       groupTitles: [seriesGroupTitle],
       path: '/category/series-detail',
     } as CatalogCategoryDefinition;
-  }, [groupSlugOverride, params.groupSlug, seriesGroupTitle, seriesTitle, isSeriesGroupListPage]);
+  }, [
+    groupSlugOverride,
+    params.groupSlug,
+    seriesGroupTitle,
+    seriesTitle,
+    isSeriesGroupListPage,
+    isMovieDetailPage,
+    movieTitle,
+    movieTmdbTitle,
+    movieGroupTitle,
+  ]);
   const initialItems = useMemo(
     () =>
       readInitialCategoryItems(
@@ -1484,6 +1584,39 @@ export function CatalogCategoryPage({
   const [similarItems, setSimilarItems] = useState<HomeVodItem[]>([]);
   const [isLoading, setIsLoading] = useState(initialItems.length === 0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const categoryRenderKey = useMemo(
+    () =>
+      [
+        location.pathname,
+        location.search,
+        category?.slug ?? '',
+        category?.title ?? '',
+        category?.groupTitles.join('|') ?? '',
+        isSeriesDetailPage ? 'series-detail' : '',
+        isMovieDetailPage ? 'movie-detail' : '',
+      ].join('::'),
+    [
+      location.pathname,
+      location.search,
+      category?.slug,
+      category?.title,
+      category?.groupTitles,
+      isSeriesDetailPage,
+      isMovieDetailPage,
+    ],
+  );
+
+  useLayoutEffect(() => {
+    setItems(initialItems);
+    setVisibleItemCount(resolveVisibleCount(initialItems.length));
+    setIsLoading(initialItems.length === 0);
+    setErrorMessage(null);
+    setSeriesHeroIndex(0);
+    setEpisodeFocusIndex(0);
+    setSimilarItems([]);
+    setLocallyEnrichedSeriesHeroHighlights([]);
+  }, [categoryRenderKey, initialItems]);
 
   function scrollSeriesHeroIntoSafeView() {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -1580,7 +1713,7 @@ export function CatalogCategoryPage({
     let isMounted = true;
 
     async function loadCategoryItems() {
-      setIsLoading(items.length === 0);
+      setIsLoading(initialItems.length === 0);
       setErrorMessage(null);
 
       if (!category) {
@@ -1595,6 +1728,7 @@ export function CatalogCategoryPage({
 
         if (!licenseCode) {
           setItems([]);
+          setVisibleItemCount(0);
           return;
         }
 
@@ -1619,7 +1753,7 @@ export function CatalogCategoryPage({
           setItems(nextCachedItems);
           setVisibleItemCount(resolveVisibleCount(nextCachedItems.length));
           setIsLoading(nextCachedItems.length === 0);
-        } else if (items.length === 0) {
+        } else if (initialItems.length === 0) {
           setItems([]);
           setVisibleItemCount(0);
         }
@@ -1655,36 +1789,24 @@ export function CatalogCategoryPage({
           );
         }
 
-        setItems((currentItems) => {
-          if (
-            !isSeriesDetailPage &&
-            nextCategoryItems.length === 0 &&
-            currentItems.length > 0
-          ) {
-            return currentItems;
-          }
-
-          return nextCategoryItems;
-        });
-
-        setVisibleItemCount((currentCount) => {
-          if (
-            !isSeriesDetailPage &&
-            nextCategoryItems.length === 0 &&
-            items.length > 0
-          ) {
-            return currentCount;
-          }
-
-          return resolveVisibleCount(nextCategoryItems.length);
-        });
+        setItems(nextCategoryItems);
+        setVisibleItemCount(resolveVisibleCount(nextCategoryItems.length));
       } catch (error) {
+        console.warn('[XANDEFLIX_CATEGORY_LOAD_ERROR]', error);
+
         if (isMounted) {
+          const hasFallbackItems = initialItems.length > 0;
+
           setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : 'Nao foi possivel carregar esta categoria.',
+            hasFallbackItems
+              ? null
+              : 'Nao foi possivel carregar esta categoria agora. Tente novamente em instantes.',
           );
+
+          if (!hasFallbackItems) {
+            setItems([]);
+            setVisibleItemCount(0);
+          }
         }
       } finally {
         if (isMounted) {
@@ -1700,8 +1822,8 @@ export function CatalogCategoryPage({
     };
   }, [
     category,
+    initialItems,
     isSeriesDetailPage,
-    items.length,
     seriesTmdbId,
     seriesTmdbTitle,
     seriesKey,
@@ -1760,8 +1882,154 @@ export function CatalogCategoryPage({
     seriesTmdbTitle,
     seriesTitle,
   ]);
+  const movieDetailCandidates = useMemo(() => {
+    if (!isMovieDetailPage) {
+      return [];
+    }
+
+    const byCandidate = new Map<string, HomeVodItem>();
+
+    function addCandidate(item?: HomeVodItem | null) {
+      if (!item) {
+        return;
+      }
+
+      const key = String(item.id || item.tmdbId || item.tmdbTitle || item.title);
+
+      if (!key || byCandidate.has(key)) {
+        return;
+      }
+
+      byCandidate.set(key, item);
+    }
+
+    addCandidate(movieNavigationState?.selectedMovieItem);
+
+    for (const item of items) {
+      addCandidate(item);
+    }
+
+    for (const item of movieNavigationState?.movieSimilarSeedItems ?? []) {
+      addCandidate(item);
+    }
+
+    return Array.from(byCandidate.values());
+  }, [
+    isMovieDetailPage,
+    items,
+    movieNavigationState?.movieSimilarSeedItems,
+    movieNavigationState?.selectedMovieItem,
+  ]);
+
+  const movieDetailItem = useMemo(() => {
+    if (!isMovieDetailPage) {
+      return null;
+    }
+
+    const normalizeMovieValue = (value?: string | null) =>
+      value
+        ?.normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase() ?? '';
+
+    const requestedTmdbId = normalizeMovieValue(movieTmdbId);
+    const requestedTmdbTitle = normalizeMovieValue(movieTmdbTitle);
+    const requestedTitle = normalizeMovieValue(movieTitle);
+
+    const matchedItem = movieDetailCandidates.find((item) => {
+      if (requestedTmdbId && normalizeMovieValue(item.tmdbId) === requestedTmdbId) {
+        return true;
+      }
+
+      if (
+        requestedTmdbTitle &&
+        normalizeMovieValue(item.tmdbTitle) === requestedTmdbTitle
+      ) {
+        return true;
+      }
+
+      if (!requestedTitle) {
+        return false;
+      }
+
+      return (
+        normalizeMovieValue(item.tmdbTitle) === requestedTitle ||
+        normalizeMovieValue(item.title) === requestedTitle
+      );
+    });
+
+    return matchedItem ?? movieNavigationState?.selectedMovieItem ?? items[0] ?? null;
+  }, [
+    isMovieDetailPage,
+    items,
+    movieDetailCandidates,
+    movieNavigationState?.selectedMovieItem,
+    movieTitle,
+    movieTmdbId,
+    movieTmdbTitle,
+  ]);
+
+  const movieDetailFocusSlug = movieDetailItem
+    ? `movie-detail-${
+        String(
+          movieDetailItem.id ||
+            movieDetailItem.tmdbId ||
+            movieDetailItem.tmdbTitle ||
+            movieDetailItem.title,
+        )
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z0-9_-]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 80)
+          .toLowerCase() || 'item'
+      }`
+    : 'movie-detail';
+
   const isSeriesCategoryPage = !isSeriesDetailPage && category?.slug === 'series';
   const isMoviesCategoryPage = !isSeriesDetailPage && category?.slug === 'filmes';
+  const movieDetailMetadataItems = movieDetailItem
+    ? buildMovieDetailMetadataItems(movieDetailItem)
+    : [];
+  const movieSimilarItems = useMemo(() => {
+    if (!isMovieDetailPage || !movieDetailItem) {
+      return [];
+    }
+
+    const currentKey =
+      movieDetailItem.tmdbId || movieDetailItem.tmdbTitle || movieDetailItem.title;
+
+    const byMovie = new Map<string, HomeVodItem>();
+
+    const sourceItems = movieDetailCandidates;
+
+    for (const item of sourceItems) {
+      if (!item.posterUrl) {
+        continue;
+      }
+
+      if (item.kind && item.kind !== 'movie') {
+        continue;
+      }
+
+      const key = item.tmdbId || item.tmdbTitle || item.title;
+
+      if (!key || key === currentKey || byMovie.has(key)) {
+        continue;
+      }
+
+      byMovie.set(key, item);
+    }
+
+    return Array.from(byMovie.values()).slice(0, 12);
+  }, [
+    isMovieDetailPage,
+    movieDetailCandidates,
+    movieDetailItem,
+  ]);
+
+
   const seriesCategorySections = useMemo(() => {
     if (!isSeriesCategoryPage) {
       return [];
@@ -1796,10 +2064,6 @@ export function CatalogCategoryPage({
   }, [isMoviesCategoryPage, moviesCategorySections]);
 
   const activeMovieHeroItem = movieHeroHighlights[0] ?? movieHeroItem;
-  const movieCollectionCount = moviesCategorySections.reduce(
-    (total, section) => total + section.items.length,
-    0,
-  );
 
   useEffect(() => {
     if (
@@ -2260,6 +2524,67 @@ export function CatalogCategoryPage({
     });
   }
 
+  function openMovieDetail(item: HomeVodItem) {
+    const params = new URLSearchParams({
+      title: item.tmdbTitle ?? item.title,
+    });
+
+    if (item.tmdbId) {
+      params.set('tmdbId', item.tmdbId);
+    }
+
+    if (item.tmdbTitle) {
+      params.set('tmdbTitle', item.tmdbTitle);
+    }
+
+    if (item.groupTitle) {
+      params.set('groupTitle', item.groupTitle);
+    }
+
+    navigate(`/category/movie-detail?${params.toString()}`, {
+      state: {
+        fromMoviesCategory: true,
+        returnTo: `${location.pathname}${location.search}`,
+        selectedMovieItem: createMovieNavigationItem(item),
+        movieSimilarSeedItems: (() => {
+          const seedSourceItems = isMovieDetailPage
+            ? [movieDetailItem, ...movieSimilarItems, ...items].filter(
+                (candidate): candidate is HomeVodItem => Boolean(candidate),
+              )
+            : items;
+
+          const selectedMovieKey = item.tmdbId || item.tmdbTitle || item.title || item.id;
+          const seenMovieKeys = new Set<string>();
+          const seedItems: HomeVodItem[] = [];
+
+          for (const candidate of seedSourceItems) {
+            const candidateKey =
+              candidate.tmdbId || candidate.tmdbTitle || candidate.title || candidate.id;
+
+            if (
+              !candidateKey ||
+              candidate.id === item.id ||
+              candidateKey === selectedMovieKey ||
+              seenMovieKeys.has(candidateKey)
+            ) {
+              continue;
+            }
+
+            seenMovieKeys.add(candidateKey);
+            seedItems.push(createMovieNavigationItem(candidate));
+
+            if (seedItems.length >= 24) {
+              break;
+            }
+          }
+
+          return seedItems;
+        })(),
+      },
+    });
+  }
+
+
   function openCategoryItem(item: HomeVodItem, index: number) {
     const shouldOpenSeriesDetail =
       category?.slug === 'series' ||
@@ -2269,6 +2594,11 @@ export function CatalogCategoryPage({
 
     if (shouldOpenSeriesDetail) {
       openSeriesCollection(item);
+      return;
+    }
+
+    if (category?.slug === 'filmes') {
+      openMovieDetail(item);
       return;
     }
 
@@ -2320,6 +2650,80 @@ export function CatalogCategoryPage({
     }
 
     navigate(`/player?${params.toString()}`);
+  }
+
+  // FASE 4: foco inicial do detalhe de filme
+  useEffect(() => {
+    if (!isMovieDetailPage || !movieDetailItem) {
+      return;
+    }
+
+    const focusMovieHero = () => {
+      scrollSeriesHeroIntoSafeView();
+      setFocus(SERIES_DETAIL_HERO_FOCUS_KEY);
+    };
+
+    const firstFocusTimer = window.setTimeout(focusMovieHero, 120);
+    const secondFocusTimer = window.setTimeout(focusMovieHero, 420);
+
+    return () => {
+      window.clearTimeout(firstFocusTimer);
+      window.clearTimeout(secondFocusTimer);
+    };
+  }, [isMovieDetailPage, movieDetailItem?.id, location.key, setFocus]);
+
+  function handleMovieDetailHeroArrowPress(
+    direction: string,
+    buttonPosition: 'hero' | 'play' | 'trailer' = 'hero',
+  ) {
+    if (direction === 'left') {
+      if (buttonPosition === 'trailer') {
+        setFocus('movie-detail-play');
+        return false;
+      }
+      setFocus(FOCUS_KEYS.SIDEBAR_HOME);
+      return false;
+    }
+
+    if (direction === 'right') {
+      if (buttonPosition === 'hero') {
+        setFocus('movie-detail-play');
+        return false;
+      }
+
+      if (buttonPosition === 'play') {
+        setFocus('movie-detail-trailer');
+        return false;
+      }
+      return false;
+    }
+
+    if (direction === 'up' && buttonPosition === 'trailer') {
+      setFocus('movie-detail-play');
+      return false;
+    }
+
+    if (direction === 'down') {
+      if (buttonPosition === 'play') {
+        setFocus('movie-detail-trailer');
+        return false;
+      }
+
+      if (movieSimilarItems.length > 0) {
+        setFocus(getMovieSimilarItemFocusKey(movieDetailFocusSlug, 0));
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  function playMovieDetailItem() {
+    if (!movieDetailItem) {
+      return;
+    }
+
+    openEpisode(movieDetailItem, 0);
   }
 
   function handleSeriesHeroArrowPress(direction: string) {
@@ -2649,6 +3053,45 @@ export function CatalogCategoryPage({
     return false;
   }
 
+  function handleMovieSimilarCardArrowPress(direction: string, index: number) {
+    if (!category) {
+      return false;
+    }
+
+    const lastIndex = movieSimilarItems.length - 1;
+
+    if (direction === 'left') {
+      if (index === 0) {
+        setFocus(FOCUS_KEYS.SIDEBAR_HOME);
+        return false;
+      }
+
+      setFocus(getMovieSimilarItemFocusKey(movieDetailFocusSlug, index - 1));
+      return false;
+    }
+
+    if (direction === 'right') {
+      if (index >= lastIndex) {
+        return false;
+      }
+
+      setFocus(getMovieSimilarItemFocusKey(movieDetailFocusSlug, index + 1));
+      return false;
+    }
+
+    if (direction === 'up') {
+      setFocus(SERIES_DETAIL_HERO_FOCUS_KEY);
+      return false;
+    }
+
+    if (direction === 'down') {
+      return false;
+    }
+
+    return false;
+  }
+
+
   function handleCategoryCardArrowPress(direction: string, index: number) {
     if (!category) {
       return false;
@@ -2754,7 +3197,123 @@ export function CatalogCategoryPage({
       mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
       <main className="mx-auto w-full max-w-[1920px]">
-        {isSeriesDetailPage && heroItem ? (
+        {isMovieDetailPage && movieDetailItem ? (
+          <SeriesDetailHeroFrame
+            disabled={!movieDetailItem.streamUrl}
+            onEnterPress={playMovieDetailItem}
+            onArrowPress={handleMovieDetailHeroArrowPress}
+          >
+            <div className="relative -mx-4 -mt-4 overflow-hidden bg-black md:absolute md:inset-0 md:m-0 md:rounded-[0.9rem]">
+              <div className="relative aspect-video w-full bg-zinc-950 md:absolute md:inset-0 md:h-full md:aspect-auto">
+                {movieDetailItem.backdropUrl || movieDetailItem.posterUrl ? (
+                  <img
+                    src={movieDetailItem.backdropUrl ?? movieDetailItem.posterUrl ?? undefined}
+                    alt={movieDetailItem.tmdbTitle ?? movieDetailItem.title}
+                    className="h-full w-full object-cover opacity-95 md:opacity-80"
+                    loading="eager"
+                  />
+                ) : (
+                  <div className="h-full w-full bg-zinc-950" />
+                )}
+
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black via-black/55 to-transparent md:h-32 md:via-black/70" />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black via-black/65 to-transparent md:h-full md:bg-gradient-to-r md:from-black md:via-black/72 md:to-transparent" />
+
+                <button
+                  type="button"
+                  aria-label="Voltar"
+                  className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-3xl font-light leading-none text-white backdrop-blur-sm md:left-5 md:top-5"
+                  onClick={() => navigate(-1)}
+                >
+                  ←
+                </button>
+
+                <button
+                  type="button"
+                  aria-label="Trailer"
+                  className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-base font-black text-white backdrop-blur-sm md:hidden"
+                  onClick={() => undefined}
+                >
+                  ▶
+                </button>
+              </div>
+            </div>
+
+            <div className="relative z-10 px-1 pb-1 pt-4 text-left md:flex md:min-h-[25.5rem] md:max-w-[52rem] md:flex-col md:justify-end md:px-2 md:pb-3 md:pt-20 xl:min-h-[28.5rem]">
+              <h1 className="text-[1.58rem] font-black leading-[1.02] tracking-[-0.04em] text-white md:max-w-[46rem] md:text-[clamp(1.9rem,3.2vw,3.25rem)] md:leading-[0.96]">
+                {movieDetailItem.tmdbTitle ?? movieDetailItem.title}
+              </h1>
+
+              {movieDetailMetadataItems.length > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[0.86rem] font-bold text-zinc-300 md:mt-2 md:text-[0.72rem]">
+                  {movieDetailMetadataItems.map((metadataItem) => (
+                    <span key={metadataItem}>{metadataItem}</span>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="mt-4 flex items-center gap-2 text-[0.94rem] font-black text-white md:mt-3 md:text-[0.78rem]">
+                <span className="rounded-[0.2rem] bg-xf-red px-1.5 py-1 text-[0.62rem] leading-none text-white">
+                  TOP
+                  <br />
+                  10
+                </span>
+                <span>Destaque em filmes</span>
+              </div>
+
+              <p className="mt-4 text-[0.98rem] font-semibold leading-snug text-zinc-100 md:mt-3 md:max-w-3xl md:text-[clamp(0.72rem,0.95vw,0.9rem)] md:leading-relaxed">
+                {getMovieHeroOverview(movieDetailItem) ??
+                  movieDetailItem.overview ??
+                  'Detalhes indisponiveis para este filme.'}
+              </p>
+
+              <div className="mt-3 grid gap-2 md:flex md:w-fit md:gap-2">
+                <FocusableButton
+                  focusKey={'movie-detail-play'}
+                  disabled={!movieDetailItem.streamUrl}
+                  className="flex min-h-[2.65rem] w-full items-center justify-center gap-2 rounded-[0.28rem] border border-white bg-white px-3.5 py-2.5 text-[0.86rem] font-black text-black transition data-[focused=true]:scale-[1.02] md:min-h-[calc(var(--xf-action-height)*0.5)] md:w-auto md:px-[calc(var(--xf-action-inline-padding)*0.42)] md:text-[clamp(0.52rem,0.68vw,0.64rem)]"
+                  onClick={playMovieDetailItem}
+                  onEnterPress={playMovieDetailItem}
+                  onArrowPress={(direction) =>
+                    handleMovieDetailHeroArrowPress(direction, 'play')
+                  }
+                >
+                  <span className="text-base leading-none md:text-sm">▶</span>
+                  Assistir agora
+                </FocusableButton>
+
+                <FocusableButton
+                  focusKey={'movie-detail-trailer'}
+                  className="flex min-h-[2.65rem] w-full items-center justify-center gap-2 rounded-[0.28rem] border border-white/10 bg-white/15 px-3.5 py-2.5 text-[0.86rem] font-black text-white transition data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black md:min-h-[calc(var(--xf-action-height)*0.5)] md:w-auto md:px-[calc(var(--xf-action-inline-padding)*0.42)] md:text-[clamp(0.52rem,0.68vw,0.64rem)]"
+                  onClick={() => undefined}
+                  onEnterPress={() => undefined}
+                  onArrowPress={(direction) =>
+                    handleMovieDetailHeroArrowPress(direction, 'trailer')
+                  }
+                >
+                  Trailer
+                </FocusableButton>
+              </div>
+
+              <div className="mt-6 grid grid-cols-3 gap-3 text-center text-zinc-300 md:hidden">
+                <button type="button" className="flex flex-col items-center gap-1 text-[0.74rem] font-semibold">
+                  <span className="text-3xl font-light leading-none">＋</span>
+                  Minha lista
+                </button>
+
+                <button type="button" className="flex flex-col items-center gap-1 text-[0.74rem] font-semibold">
+                  <span className="text-2xl leading-none">♡</span>
+                  Avaliar
+                </button>
+
+                <button type="button" className="flex flex-col items-center gap-1 text-[0.74rem] font-semibold">
+                  <span className="text-2xl leading-none">↗</span>
+                  Compartilhe
+                </button>
+              </div>
+            </div>
+          </SeriesDetailHeroFrame>
+        ) : isSeriesDetailPage && heroItem ? (
           <SeriesDetailHeroFrame
             disabled={seriesDetailItems.length === 0}
             onEnterPress={() => {
@@ -2794,7 +3353,7 @@ export function CatalogCategoryPage({
                   {category?.title ?? heroItem.title}
                 </h1>
 
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.68rem] font-bold text-zinc-200">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.58rem] font-bold text-zinc-200">
                   {heroItem.tmdbReleaseYear ? (
                     <span className="rounded-full border border-white/10 bg-white/10 px-2 py-1">
                       {heroItem.tmdbReleaseYear}
@@ -2845,14 +3404,14 @@ export function CatalogCategoryPage({
             ) : isMoviesCategoryPage ? (
               <MovieCategoryHero
                 item={activeMovieHeroItem}
-                totalItems={movieCollectionCount}
+                totalItems={items.length}
                 onOpenItem={openCategoryItem}
                 onButtonArrowPress={handleMoviesCategoryHeroButtonArrowPress}
               />
 
             ) : (
               <header className="mb-6">
-                <p className="text-[0.68rem] font-black uppercase tracking-[0.32em] text-xf-red">
+                <p className="text-[0.58rem] font-black uppercase tracking-[0.32em] text-xf-red">
                   {category?.slug === 'series-group' ? 'Séries / Novelas' : 'Catalogo'}
                 </p>
                 <h1 className="mt-2 text-[1.7rem] font-black tracking-[-0.03em] text-white md:text-[2.35rem]">
@@ -2868,7 +3427,54 @@ export function CatalogCategoryPage({
           </>
         )}
 
-        {isLoading && visibleItems.length === 0 ? (
+        {isMovieDetailPage ? (
+          <section className="space-y-4 pb-12">
+            <div className="flex items-end justify-between gap-3">
+              <h2 className="text-lg font-black tracking-[-0.03em] text-white">
+                Títulos semelhantes
+              </h2>
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
+                {movieSimilarItems.length}
+              </span>
+            </div>
+
+            {movieSimilarItems.length > 0 ? (
+              <div className="xf-carousel-row flex gap-[0.35rem] overflow-x-auto overflow-y-visible pb-5 pr-10 scroll-auto">
+                {movieSimilarItems.map((item, index) => (
+                  <MediaCard
+                    key={`${movieDetailFocusSlug}-${item.id}`}
+                    title={item.title}
+                    subtitle={item.subtitle}
+                    posterUrl={item.posterUrl}
+                    eagerLoad={index < 10}
+                    index={index}
+                    focusKey={getMovieSimilarItemFocusKey(movieDetailFocusSlug, index)}
+                    onEnterPress={() => {
+                      setFocus(SERIES_DETAIL_HERO_FOCUS_KEY);
+                      openMovieDetail(item);
+                    }}
+                    onArrowPress={(direction: string) =>
+                      handleMovieSimilarCardArrowPress(direction, index)
+                    }
+                    focusScrollOptions={{
+                      behavior: 'auto',
+                      block: 'center',
+                      inline: 'nearest',
+                    }}
+                    hideTextOverlay
+                    sizeScale="large"
+                  />
+                ))}
+              </div>
+            ) : (
+              <section className="rounded-[0.65rem] border border-white/10 bg-white/[0.035] px-4 py-5">
+                <p className="text-sm font-semibold text-zinc-400">
+                  Sem sugestões semelhantes nesta fonte.
+                </p>
+              </section>
+            )}
+          </section>
+        ) : isLoading && visibleItems.length === 0 ? (
           <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
             <p className="text-sm font-semibold text-zinc-300">
               Carregando categoria...

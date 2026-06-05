@@ -549,7 +549,7 @@ export function CatalogPage() {
           >
             {[
               { label: 'Ao Vivo', path: '/live' },
-              { label: 'Filmes', path: '/category/filmes-lancamentos' },
+              { label: 'Filmes', path: '/category/filmes' },
               { label: 'Séries', path: '/category/series' },
             ].map((item) => (
               <button
@@ -684,7 +684,7 @@ export function CatalogPage() {
                         spatialDebug('catalog-grid', 'Ver tudo:', section.title);
 
                         if (section.id === 'home-vod-launches') {
-                          navigate('/launches');
+                          navigate('/category/filmes');
                         } else if (section.id.startsWith('home-vod-movie-category-')) {
                           const slug = getSlugByGroupTitle(section.title);
                           navigate(`/category/${slug}`);
@@ -694,7 +694,7 @@ export function CatalogPage() {
                         spatialDebug('catalog-grid', 'Ver tudo:', section.title);
 
                         if (section.id === 'home-vod-launches') {
-                          navigate('/launches');
+                          navigate('/category/filmes');
                         } else if (section.id.startsWith('home-vod-movie-category-')) {
                           const slug = getSlugByGroupTitle(section.title);
                           navigate(`/category/${slug}`);
