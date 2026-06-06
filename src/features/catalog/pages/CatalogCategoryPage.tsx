@@ -871,7 +871,7 @@ function buildMovieHeroMetadata(item: HomeVodItem) {
 
   return [
     item.tmdbReleaseYear ? String(item.tmdbReleaseYear) : null,
-    item.tmdbRating ? `Nota ${formatHeroRating(item.tmdbRating)}` : null,
+    item.tmdbRating ? formatHeroRating(item.tmdbRating) : null,
     firstGenre,
   ]
     .filter((value): value is string => Boolean(value))
@@ -889,7 +889,7 @@ function buildMovieDetailMetadataItems(item: HomeVodItem) {
 
   return [
     item.tmdbReleaseYear ? String(item.tmdbReleaseYear) : null,
-    item.tmdbRating ? `Nota ${formatHeroRating(item.tmdbRating)}` : null,
+    item.tmdbRating ? formatHeroRating(item.tmdbRating) : null,
     firstGenre,
     shouldShowGroupTitle ? item.groupTitle?.trim() ?? null : null,
   ].filter((value): value is string => Boolean(value));
@@ -930,7 +930,7 @@ function MovieCategoryHero({
             }
           : undefined
       }
-      className="relative mb-6 box-border flex min-h-[18.75rem] w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black px-5 py-5 shadow-2xl ring-0 ring-inset ring-transparent md:min-h-[22rem] md:px-7 md:py-6 lg:min-h-[25.5rem] xl:min-h-[28.5rem]"
+      className="relative mb-6 box-border flex min-h-[min(72vh,620px)] w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black px-5 py-5 shadow-2xl ring-0 ring-inset ring-transparent md:min-h-[22rem] md:px-7 md:py-6 lg:min-h-[25.5rem] xl:min-h-[28.5rem]"
     >
       {backgroundUrl ? (
         <img
@@ -3228,14 +3228,6 @@ export function CatalogCategoryPage({
                   ←
                 </button>
 
-                <button
-                  type="button"
-                  aria-label="Trailer"
-                  className="absolute bottom-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-base font-black text-white backdrop-blur-sm md:hidden"
-                  onClick={() => undefined}
-                >
-                  ▶
-                </button>
               </div>
             </div>
 
@@ -3246,22 +3238,23 @@ export function CatalogCategoryPage({
 
               {movieDetailMetadataItems.length > 0 ? (
                 <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[0.86rem] font-bold text-zinc-300 md:mt-2 md:text-[0.72rem]">
-                  {movieDetailMetadataItems.map((metadataItem) => (
-                    <span key={metadataItem}>{metadataItem}</span>
+                  {movieDetailMetadataItems.map((metadataItem, metadataIndex) => (
+                    <span
+                      key={metadataItem}
+                      className={
+                        metadataIndex === 1
+                          ? 'rounded-[0.18rem] bg-yellow-700/85 px-1.5 py-0.5 text-black'
+                          : undefined
+                      }
+                    >
+                      {metadataItem}
+                    </span>
                   ))}
                 </div>
               ) : null}
 
-              <div className="mt-4 flex items-center gap-2 text-[0.94rem] font-black text-white md:mt-3 md:text-[0.78rem]">
-                <span className="rounded-[0.2rem] bg-xf-red px-1.5 py-1 text-[0.62rem] leading-none text-white">
-                  TOP
-                  <br />
-                  10
-                </span>
-                <span>Destaque em filmes</span>
-              </div>
 
-              <p className="mt-4 text-[0.98rem] font-semibold leading-snug text-zinc-100 md:mt-3 md:max-w-3xl md:text-[clamp(0.72rem,0.95vw,0.9rem)] md:leading-relaxed">
+              <p className="mt-4 text-[0.86rem] font-normal leading-snug text-zinc-200 md:mt-3 md:max-w-3xl md:text-[clamp(0.66rem,0.86vw,0.78rem)] md:leading-relaxed">
                 {getMovieHeroOverview(movieDetailItem) ??
                   movieDetailItem.overview ??
                   'Detalhes indisponiveis para este filme.'}
@@ -3295,22 +3288,6 @@ export function CatalogCategoryPage({
                 </FocusableButton>
               </div>
 
-              <div className="mt-6 grid grid-cols-3 gap-3 text-center text-zinc-300 md:hidden">
-                <button type="button" className="flex flex-col items-center gap-1 text-[0.74rem] font-semibold">
-                  <span className="text-3xl font-light leading-none">＋</span>
-                  Minha lista
-                </button>
-
-                <button type="button" className="flex flex-col items-center gap-1 text-[0.74rem] font-semibold">
-                  <span className="text-2xl leading-none">♡</span>
-                  Avaliar
-                </button>
-
-                <button type="button" className="flex flex-col items-center gap-1 text-[0.74rem] font-semibold">
-                  <span className="text-2xl leading-none">↗</span>
-                  Compartilhe
-                </button>
-              </div>
             </div>
           </SeriesDetailHeroFrame>
         ) : isSeriesDetailPage && heroItem ? (
@@ -3433,9 +3410,6 @@ export function CatalogCategoryPage({
               <h2 className="text-lg font-black tracking-[-0.03em] text-white">
                 Títulos semelhantes
               </h2>
-              <span className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                {movieSimilarItems.length}
-              </span>
             </div>
 
             {movieSimilarItems.length > 0 ? (
