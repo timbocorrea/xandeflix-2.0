@@ -898,12 +898,14 @@ function buildMovieDetailMetadataItems(item: HomeVodItem) {
 function MovieCategoryHero({
   item,
   totalItems,
-  onOpenItem,
+  onPlayItem,
+  onInfoItem,
   onButtonArrowPress,
 }: {
   item: HomeVodItem | null;
   totalItems: number;
-  onOpenItem: (item: HomeVodItem, index: number) => void;
+  onPlayItem: (item: HomeVodItem, index: number) => void;
+  onInfoItem: (item: HomeVodItem, index: number) => void;
   onButtonArrowPress: (
     direction: string,
     buttonPosition: 'play' | 'info',
@@ -1008,8 +1010,8 @@ function MovieCategoryHero({
                     inline: 'nearest',
                   }}
                   className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
-                  onClick={() => onOpenItem(item, 0)}
-                  onEnterPress={() => onOpenItem(item, 0)}
+                  onClick={() => onPlayItem(item, 0)}
+                  onEnterPress={() => onPlayItem(item, 0)}
                   onArrowPress={(direction) =>
                     onButtonArrowPress(direction, 'play')
                   }
@@ -1026,8 +1028,8 @@ function MovieCategoryHero({
                     inline: 'nearest',
                   }}
                   className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
-                  onClick={() => onOpenItem(item, 0)}
-                  onEnterPress={() => onOpenItem(item, 0)}
+                  onClick={() => onInfoItem(item, 0)}
+                  onEnterPress={() => onInfoItem(item, 0)}
                   onArrowPress={(direction) =>
                     onButtonArrowPress(direction, 'info')
                   }
@@ -3382,7 +3384,8 @@ export function CatalogCategoryPage({
               <MovieCategoryHero
                 item={activeMovieHeroItem}
                 totalItems={items.length}
-                onOpenItem={openCategoryItem}
+                onPlayItem={openEpisode}
+                onInfoItem={(item) => openMovieDetail(item)}
                 onButtonArrowPress={handleMoviesCategoryHeroButtonArrowPress}
               />
 

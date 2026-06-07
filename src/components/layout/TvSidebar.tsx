@@ -60,9 +60,10 @@ const menuItems = [
 
 interface TvSidebarProps {
   onSignOut: () => void;
+  isTablet?: boolean;
 }
 
-export function TvSidebar({ onSignOut }: TvSidebarProps) {
+export function TvSidebar({ onSignOut, isTablet = false }: TvSidebarProps) {
   const navigate = useNavigate();
 
   function handleSidebarArrowPress(direction: string) {
@@ -85,20 +86,27 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
     return true;
   }
 
+  const sidebarWidthClass = isTablet ? 'w-[4.5rem]' : 'w-14';
+  const logoSizeClass = isTablet ? 'size-12' : 'size-9';
+  const menuButtonClass = isTablet ? 'size-14 rounded-2xl' : 'size-10 rounded-xl';
+  const menuIconSize = isTablet ? 28 : 18;
+  const logoutIconSize = isTablet ? 26 : 17;
+  const menuGapClass = isTablet ? 'gap-4' : 'gap-2.5';
+
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-16 flex-col items-center bg-black/80 py-5 backdrop-blur">
-      <div className="mb-8 flex size-10 items-center justify-center rounded-xl bg-xf-red text-lg font-black text-white">
+    <aside className={`fixed left-0 top-0 z-40 flex h-screen ${sidebarWidthClass} flex-col items-center bg-black/80 py-5 backdrop-blur`}>
+      <div className={`mb-6 flex ${logoSizeClass} items-center justify-center rounded-xl bg-xf-red text-lg font-black text-white`}>
         X
       </div>
 
       <FocusableSection
         focusKey={FOCUS_KEYS.SIDEBAR_SECTION}
-        className="flex min-h-0 flex-1 flex-col items-center"
+        className="flex min-h-0 flex-1 flex-col items-center justify-center"
       >
-        <div className="flex flex-col items-center gap-3">
+        <div className={`flex flex-col items-center ${menuGapClass}`}>
           <FocusableButton
             focusKey={FOCUS_KEYS.SIDEBAR_PROFILE}
-            className="group flex size-11 items-center justify-center rounded-xl bg-transparent text-xf-muted hover:text-white"
+            className={`group flex ${menuButtonClass} items-center justify-center bg-transparent text-xf-muted hover:text-white`}
             aria-label="Perfil"
             title="Perfil"
             onEnterPress={() => {
@@ -109,7 +117,7 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
             }}
             onArrowPress={handleSidebarArrowPress}
           >
-            <UserRound size={20} />
+            <UserRound size={menuIconSize} />
           </FocusableButton>
 
           {menuItems.map((item) => {
@@ -128,14 +136,14 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
               <FocusableButton
                 key={item.navId}
                 focusKey={item.navId}
-                className="group flex size-11 items-center justify-center rounded-xl bg-transparent text-xf-muted hover:text-white"
+                className={`group flex ${menuButtonClass} items-center justify-center bg-transparent text-xf-muted hover:text-white`}
                 aria-label={item.label}
                 title={item.label}
                 onEnterPress={handlePress}
                 onClick={handlePress}
                 onArrowPress={handleSidebarArrowPress}
               >
-                <Icon size={20} />
+                <Icon size={menuIconSize} />
               </FocusableButton>
             );
           })}
@@ -143,14 +151,14 @@ export function TvSidebar({ onSignOut }: TvSidebarProps) {
 
         <FocusableButton
           focusKey={FOCUS_KEYS.SIDEBAR_LOGOUT}
-          className="mt-auto flex size-11 items-center justify-center rounded-xl bg-xf-red text-white"
+          className={`mt-auto flex ${menuButtonClass} items-center justify-center bg-xf-red text-white`}
           aria-label="Sair"
           title="Sair"
           onEnterPress={onSignOut}
           onClick={onSignOut}
           onArrowPress={handleSidebarArrowPress}
         >
-          <LogOut size={19} />
+          <LogOut size={logoutIconSize} />
         </FocusableButton>
       </FocusableSection>
     </aside>

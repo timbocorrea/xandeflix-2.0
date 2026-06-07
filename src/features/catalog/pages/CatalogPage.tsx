@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Clapperboard, MonitorPlay, Tv } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 
 import { useAuth } from '../../../app/providers/AuthProvider';
@@ -9,6 +10,7 @@ import { MediaCard } from '../../../components/media/MediaCard';
 import { FocusableButton } from '../../../components/tv/FocusableButton';
 import { FocusableSection } from '../../../components/tv/FocusableSection';
 import { useDeviceType } from '../../../hooks/useDeviceType';
+import { useDeviceProfile } from '../../../platform/useDeviceProfile';
 import { useCatalogGridNavigation } from '../../../hooks/useCatalogGridNavigation';
 import { useRouteInitialFocus } from '../../../hooks/useRouteInitialFocus';
 import {
@@ -35,6 +37,11 @@ const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 const SECTION_LOADING_CARD_COUNT = 4;
 const WARMUP_HOME_REFRESH_DEBOUNCE_MS = 2000;
+const TOP_CATEGORY_ITEMS = [
+  { label: 'Ao Vivo', path: '/live', Icon: Tv },
+  { label: 'Filmes', path: '/category/filmes', Icon: Clapperboard },
+  { label: 'S\u00e9ries', path: '/category/series', Icon: MonitorPlay },
+] as const;
 
 type CatalogPageItem = (typeof catalogSections)[number]['items'][number] & {
   streamUrl?: string;
@@ -56,6 +63,17 @@ type CatalogPageSection = Omit<(typeof catalogSections)[number], 'items'> & {
 
 function shouldShowSeeAll(section: { showSeeAll?: boolean }) {
   return Boolean(section.showSeeAll);
+}
+
+function createHomeMovieNavigationItem(
+  item: CatalogPageItem,
+  fallbackGroupTitle?: string,
+): CatalogPageItem {
+  return {
+    ...item,
+    groupTitle: item.groupTitle ?? fallbackGroupTitle,
+    kind: 'movie',
+  };
 }
 
 function isFireStickUserAgent() {
@@ -208,8 +226,18 @@ function createInitialHomeCatalogState(isTv: boolean) {
 
 export function CatalogPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { signOut } = useAuth();
-  const { isTv, isMobile } = useDeviceType();
+  const deviceProfile = useDeviceProfile();
+  const { isTv: legacyIsTv, isMobile } = useDeviceType();
+  const isTabletPortraitTouch =
+    deviceProfile.formFactor === 'tablet' &&
+    deviceProfile.inputMode === 'touch' &&
+    deviceProfile.viewportHeight >= deviceProfile.viewportWidth;
+  const isTv =
+    !isTabletPortraitTouch &&
+    (deviceProfile.formFactor === 'tv' || legacyIsTv);
+  const shouldShowTopCategoryChips = isMobile || isTabletPortraitTouch;
   const [initialHomeCatalogState] = useState(() =>
     createInitialHomeCatalogState(isTv),
   );
@@ -530,6 +558,86 @@ export function CatalogPage() {
   const spatialNavigation = useCatalogGridNavigation({
     sections: resolvedCatalogSections,
   });
+
+  function openHomeMovieDetail(
+    item: CatalogPageItem | null | undefined,
+    fallbackGroupTitle?: string,
+    seedItems: CatalogPageItem[] = [],
+  ) {
+    if (!item) {
+      return;
+    }
+
+    const params = new URLSearchParams({
+      title: item.tmdbTitle ?? item.title,
+    });
+
+    if (item.tmdbId) {
+      params.set('tmdbId', item.tmdbId);
+    }
+
+    if (item.tmdbTitle) {
+      params.set('tmdbTitle', item.tmdbTitle);
+    }
+
+    const groupTitle = item.groupTitle ?? fallbackGroupTitle;
+    if (groupTitle) {
+      params.set('groupTitle', groupTitle);
+    }
+
+    const selectedMovieKey = item.tmdbId || item.tmdbTitle || item.title || item.id;
+    const seenMovieKeys = new Set<string>();
+    const movieSimilarSeedItems: CatalogPageItem[] = [];
+
+    for (const candidate of [item, ...seedItems]) {
+      const candidateKey =
+        candidate.tmdbId || candidate.tmdbTitle || candidate.title || candidate.id;
+
+      if (!candidateKey || candidateKey === selectedMovieKey || seenMovieKeys.has(candidateKey)) {
+        continue;
+      }
+
+      seenMovieKeys.add(candidateKey);
+      movieSimilarSeedItems.push(
+        createHomeMovieNavigationItem(candidate, candidate.groupTitle ?? fallbackGroupTitle),
+      );
+    }
+
+    navigate(`/category/movie-detail?${params.toString()}`, {
+      state: {
+        fromMoviesCategory: true,
+        returnTo: `${location.pathname}${location.search}`,
+        selectedMovieItem: createHomeMovieNavigationItem(item, groupTitle),
+        movieSimilarSeedItems,
+      },
+    });
+  }
+
+  function openHomeMoviePlayer(
+    item: CatalogPageItem | null | undefined,
+    fallbackGroupTitle?: string,
+    seedItems: CatalogPageItem[] = [],
+  ) {
+    if (!item) {
+      return;
+    }
+
+    if (!item.streamUrl) {
+      openHomeMovieDetail(item, fallbackGroupTitle, seedItems);
+      return;
+    }
+
+    const params = new URLSearchParams({
+      src: item.streamUrl,
+      title: item.tmdbTitle ?? item.title,
+    });
+
+    params.set('episodeId', item.id);
+    params.set('direct', '1');
+
+    navigate(`/player?${params.toString()}`);
+  }
+
   return (
     <AppShell
       onSignOut={() => void signOut()}
@@ -541,25 +649,42 @@ export function CatalogPage() {
       mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
       <section className="mx-auto w-full max-w-[1920px]">
-        {isMobile ? (
+        <style>{`
+
+          .xf-app[data-device-form-factor="tablet"] [data-xf-home-section-header="true"] button {
+            min-height: 2.25rem;
+            padding-left: 0.95rem;
+            padding-right: 0.95rem;
+            padding-top: 0.45rem;
+            padding-bottom: 0.45rem;
+            font-size: 0.78rem !important;
+            line-height: 1;
+          }
+
+          .xf-app[data-device-form-factor="mobile"] [data-xf-home-section-header="true"] {
+            margin-bottom: 0 !important;
+          }
+
+          .xf-app[data-device-form-factor="mobile"] [data-xf-home-section-title="true"] {
+            line-height: 1;
+          }
+        `}</style>
+
+        {shouldShowTopCategoryChips ? (
           <nav
             data-xf-mobile-home-top-chips="true"
             aria-label="Navegação rápida"
-            className="mb-3 flex items-center justify-center gap-2"
+            className="mb-3 flex w-full items-center justify-center gap-2 px-1 pb-1"
           >
-            {[
-              { label: 'Ao Vivo', path: '/live' },
-              { label: 'Filmes', path: '/category/filmes' },
-              { label: 'Séries', path: '/category/series' },
-            ].map((item) => (
+            {TOP_CATEGORY_ITEMS.map(({ label, path, Icon }) => (
               <button
-                key={item.path}
+                key={path}
                 type="button"
-                className="rounded-full border border-white/35 bg-black/35 px-3.5 py-1.5 font-bold text-white backdrop-blur-sm transition-colors active:bg-white/20"
-                style={{ fontSize: '0.72rem' }}
-                onClick={() => navigate(item.path)}
+                className="inline-flex h-10 flex-1 min-w-[6.85rem] max-w-[8.65rem] items-center justify-center gap-1 rounded-xl border border-white/30 bg-black/55 px-2 text-[0.78rem] font-bold text-white backdrop-blur-md transition-colors active:bg-white/20 md:min-w-[8.25rem] md:max-w-[8.85rem] md:gap-2 md:text-[0.88rem]"
+                onClick={() => navigate(path)}
               >
-                {item.label}
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="whitespace-nowrap leading-none">{label}</span>
               </button>
             ))}
           </nav>
@@ -577,6 +702,20 @@ export function CatalogPage() {
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
           onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}
+          onPlayPress={() =>
+            openHomeMoviePlayer(
+              heroItem,
+              heroItem?.groupTitle,
+              resolvedCatalogSections.flatMap((section) => section.items as CatalogPageItem[]),
+            )
+          }
+          onInfoPress={() =>
+            openHomeMovieDetail(
+              heroItem,
+              heroItem?.groupTitle,
+              resolvedCatalogSections.flatMap((section) => section.items as CatalogPageItem[]),
+            )
+          }
           isCompactTvHero={isCompactFireStickHero}
 
           heroIndex={activeHeroIndex}
@@ -655,7 +794,8 @@ export function CatalogPage() {
                   )
                 }
               >
-                <div className="mb-2 flex items-end justify-between gap-4 px-0.5">
+                <div data-xf-home-section-header="true"
+                  className="mb-0.5 flex items-end justify-between gap-4 px-0.5">
                   <div className="min-w-0">
                     {shouldShowSectionEyebrow ? (
                       <p
@@ -675,11 +815,11 @@ export function CatalogPage() {
 
                   </div>
 
-                  {shouldShowSeeAll(section) && !isMobile && (
+                  {shouldShowSeeAll(section) && (
                     <FocusableButton
                       focusKey={getCategorySeeAllFocusKey(section.id)}
-                      className="rounded-full border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-black uppercase tracking-[0.08em] text-zinc-500 transition duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
-                      style={{ fontSize: '0.58rem', lineHeight: 1 }}
+                      className="shrink-0 rounded-full border border-white/20 bg-white/[0.06] px-2.5 py-1 font-black uppercase tracking-[0.06em] text-zinc-300 transition duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+                      style={{ fontSize: isMobile ? '0.62rem' : '0.58rem', lineHeight: 1 }}
                       onClick={() => {
                         spatialDebug('catalog-grid', 'Ver tudo:', section.title);
 
@@ -750,23 +890,7 @@ export function CatalogPage() {
                             return;
                           }
 
-                          const itemStreamUrl =
-                            'streamUrl' in catalogItem && typeof catalogItem.streamUrl === 'string'
-                              ? catalogItem.streamUrl
-                              : undefined;
-
-                          if (!itemStreamUrl) {
-                            return;
-                          }
-
-                          const params = new URLSearchParams({
-                            src: itemStreamUrl,
-                            title: catalogItem.title,
-                          });
-
-                          params.set('direct', '1');
-
-                          navigate(`/player?${params.toString()}`);
+                          openHomeMovieDetail(catalogItem, section.title, section.items as CatalogPageItem[]);
                         }}
                         onArrowPress={(direction) => {
                           const isLastVisibleCard =

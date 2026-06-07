@@ -22,6 +22,8 @@ interface CatalogHeroProps {
   onSectionArrowPress?: (direction: string) => boolean;
   onPlayArrowPress?: (direction: string) => boolean;
   onInfoArrowPress?: (direction: string) => boolean;
+  onPlayPress?: () => void;
+  onInfoPress?: () => void;
   isCompactTvHero?: boolean;
   heroIndex?: number;
   heroTotal?: number;
@@ -43,6 +45,8 @@ export function CatalogHero({
   onSectionArrowPress,
   onPlayArrowPress,
   onInfoArrowPress,
+  onPlayPress,
+  onInfoPress,
   isCompactTvHero = false,
   heroIndex = 0,
   heroTotal = 0,
@@ -51,10 +55,12 @@ export function CatalogHero({
 }: CatalogHeroProps) {
   function handlePlay() {
     spatialDebug('hero', 'Assistir agora:', title);
+    onPlayPress?.();
   }
 
   function handleMoreInfo() {
-    spatialDebug('hero', 'Mais informações:', title);
+    spatialDebug('hero', 'Detalhes:', title);
+    onInfoPress?.();
   }
 
   function handleHeroButtonArrowPress(
@@ -102,6 +108,37 @@ export function CatalogHero({
           {`
             @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
 
+
+
+            /* XF_TABLET_HERO_READABILITY_PATCH */
+            .xf-app[data-device-form-factor="tablet"] [data-xf-hero-title="true"] {
+              font-size: clamp(2.25rem, 4.8vw, 3.85rem);
+              line-height: 0.92;
+              max-width: 12ch;
+            }
+
+            .xf-app[data-device-form-factor="tablet"] [data-xf-hero-description="true"] {
+              max-width: min(40rem, 62vw);
+              font-size: clamp(1.08rem, 1.65vw, 1.36rem);
+              line-height: 1.42;
+              font-weight: 400;
+            }
+
+            .xf-app[data-device-form-factor="tablet"] [data-xf-hero-actions="true"] {
+              gap: 1rem;
+            }
+
+            .xf-app[data-device-form-factor="tablet"] [data-xf-hero-actions="true"] button {
+              min-height: 3.45rem;
+              padding-left: 1.7rem;
+              padding-right: 1.7rem;
+              font-size: 1.05rem;
+            }
+
+            .xf-app[data-device-form-factor="tablet"] [data-xf-hero-actions="true"] svg {
+              width: 1.38rem;
+              height: 1.38rem;
+            }
 
             /* XF_MOBILE_NETFLIX_HERO_SAFE_PATCH */
             .xf-app[data-device-form-factor="mobile"] [data-xf-hero="catalog"] {
@@ -275,6 +312,7 @@ export function CatalogHero({
               focusKey={FOCUS_KEYS.HERO_PLAY_BUTTON}
               focusScrollTarget="closest-section"
               className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+              onClick={handlePlay}
               onEnterPress={handlePlay}
               onArrowPress={(direction) =>
                   handleHeroButtonArrowPress(direction, 'play', onPlayArrowPress)
@@ -288,35 +326,22 @@ export function CatalogHero({
               focusKey={FOCUS_KEYS.HERO_INFO_BUTTON}
               focusScrollTarget="closest-section"
               className="inline-flex min-h-[calc(var(--xf-action-height)*0.58)] items-center justify-center gap-1.5 rounded-[0.22rem] border border-white/40 bg-white/10 px-[calc(var(--xf-action-inline-padding)*0.48)] text-[clamp(0.58rem,0.76vw,0.7rem)] font-black text-white backdrop-blur-md transition-[background-color,color,border-color] duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
+              onClick={handleMoreInfo}
               onEnterPress={handleMoreInfo}
               onArrowPress={(direction) =>
                   handleHeroButtonArrowPress(direction, 'info', onInfoArrowPress)
                 }
             >
               <Info size={15} />
-              Mais informações
+              Detalhes
             </FocusableButton>
           </div>
 
-            {heroTotal > 1 ? (
-              <div className="mt-2 flex items-center gap-1.5">
-                {Array.from({ length: heroTotal }).map((_, index) => (
-                  <span
-                    key={`hero-indicator-${index}`}
-                    className={cn(
-                      'h-1.5 rounded-full bg-white/35 transition-[width,background-color] duration-150',
-                      index === heroIndex ? 'w-7 bg-white' : 'w-2.5',
-                    )}
-                    aria-hidden="true"
-                  />
-                ))}
 
-                <span className="ml-2 text-[0.5rem] font-bold uppercase tracking-[0.18em] text-white/80">
-                  Use ← → no controle
-                </span>
-              </div>
-            ) : null}
         </div>
+
+
+
 
         <div className="hidden">
           <p className="text-[0.65rem] font-black uppercase tracking-[0.24em] text-xf-red">

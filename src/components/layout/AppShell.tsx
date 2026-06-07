@@ -8,7 +8,7 @@ import { MobileBottomNav } from './MobileBottomNav';
 import { TvSidebar } from './TvSidebar';
 
 interface AppShellProps {
-  children: ReactNode;
+  children: ReactNode;
   onSignOut: () => void;
   headerNavigation?: HeaderNavigationHandlers;
   hideHeaderOnTv?: boolean;
@@ -34,7 +34,7 @@ function getTvPlatform() {
 }
 
 export function AppShell({
-  children,
+  children,
   onSignOut,
   headerNavigation,
   hideHeaderOnTv = false,
@@ -42,8 +42,16 @@ export function AppShell({
 }: AppShellProps) {
   const deviceProfile = useDeviceProfile();
   const { isTv: legacyIsTv, isMobile } = useDeviceType();
-  const isTv = deviceProfile.formFactor === 'tv' || legacyIsTv;
-  const shouldShowHeader = !(isTv && hideHeaderOnTv);
+  const isTabletPortraitTouch =
+    deviceProfile.formFactor === 'tablet' &&
+    deviceProfile.inputMode === 'touch' &&
+    deviceProfile.viewportHeight >= deviceProfile.viewportWidth;
+  const isTv =
+    !isTabletPortraitTouch &&
+    (deviceProfile.formFactor === 'tv' || legacyIsTv);
+  const isTablet = deviceProfile.formFactor === 'tablet';
+  const shouldShowHeader =
+    !isTabletPortraitTouch && !(isTv && hideHeaderOnTv);
   const tvPlatform = isTv ? getTvPlatform() : undefined;
 
   return (
@@ -58,11 +66,16 @@ export function AppShell({
       data-device-pixel-ratio={deviceProfile.devicePixelRatio}
       data-player-strategy={deviceProfile.playerStrategy}
     >
-      {isTv && <TvSidebar onSignOut={onSignOut} />}
+      {isTv && <TvSidebar onSignOut={onSignOut} isTablet={isTablet} />}
 
-      <div className={cn('min-h-screen', isTv && 'pl-0 md:pl-16')}>
+      <div
+        className={cn(
+          'min-h-screen',
+          isTv && (isTablet ? 'pl-[4.5rem]' : 'pl-0 md:pl-14'),
+        )}
+      >
         {shouldShowHeader ? (
-          <AppHeader
+          <AppHeader
             onSignOut={onSignOut}
             navigation={headerNavigation}
           />
