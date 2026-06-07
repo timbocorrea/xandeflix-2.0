@@ -257,4 +257,3 @@ A URL de reprodução foi explicitamente tratada como dado efêmero de runtime e
 Status técnico:
 
 APROVADA COMO CHECKPOINT LOCAL TÉCNICO, PENDENTE DE VALIDAÇÃO EM DISPOSITIVO.
-
