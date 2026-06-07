@@ -25,3 +25,17 @@ export {
   normalizeNeutralText,
   normalizeNeutralToken,
 } from '@/features/neutralData/lib';
+
+export type {
+  NeutralLiveChannel,
+  NeutralLiveChannelIdentity,
+  NeutralLiveChannelRuntimePlayback,
+  NeutralLiveChannelRuntimeSourceMode,
+  NeutralLiveChannelVisual,
+} from '@/features/neutralData/types/neutralLiveTv.types';
+
+export {
+  buildNeutralLiveChannelFingerprint,
+  mapIptvChannelToNeutralLiveChannel,
+  mapIptvChannelsToNeutralLiveChannels,
+} from '@/features/neutralData/lib/liveTvAdapter';

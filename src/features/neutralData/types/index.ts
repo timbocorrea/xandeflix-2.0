@@ -18,3 +18,11 @@ export type {
   NeutralLiveChannelInput,
   NeutralPlaybackInput,
 } from '@/features/neutralData/types/neutralDataSource.types';
+
+export type {
+  NeutralLiveChannel,
+  NeutralLiveChannelIdentity,
+  NeutralLiveChannelRuntimePlayback,
+  NeutralLiveChannelRuntimeSourceMode,
+  NeutralLiveChannelVisual,
+} from '@/features/neutralData/types/neutralLiveTv.types';
