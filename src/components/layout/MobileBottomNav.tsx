@@ -54,11 +54,11 @@ export function MobileBottomNav() {
           <FocusableButton
             key={item.navId}
             focusKey={item.navId}
-            className="flex flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold text-xf-muted"
+            className="flex flex-col items-center justify-center gap-0.5 rounded-xl text-[0.66rem] font-medium leading-none text-xf-muted"
             onEnterPress={handlePress}
             onClick={handlePress}
           >
-            <Icon size={22} />
+            <Icon size={20} />
             <span>{item.label}</span>
           </FocusableButton>
         );

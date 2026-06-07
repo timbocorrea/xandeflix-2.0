@@ -1,5 +1,5 @@
 import { CatalogCategoryPage } from './CatalogCategoryPage';
 
 export function CatalogLaunchesPage() {
-  return <CatalogCategoryPage groupSlugOverride="filmes-lancamentos" />;
+  return <CatalogCategoryPage groupSlugOverride="filmes" />;
 }
