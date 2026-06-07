@@ -4,7 +4,7 @@
 
 Registrar os pontos atuais onde a UI e os serviços ainda dependem de dados derivados de IPTV, cache legado ou Supabase.
 
-Este documento é apenas diagnóstico.  
+Este documento é apenas diagnóstico.
 Nenhuma dependência será removida na Fase 2.
 
 ## Pontos críticos encontrados
