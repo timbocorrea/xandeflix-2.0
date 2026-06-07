@@ -7,3 +7,9 @@ export {
   normalizeNeutralText,
   normalizeNeutralToken,
 } from '@/features/neutralData/lib/contentIdentity';
+
+export {
+  buildNeutralLiveChannelFingerprint,
+  mapIptvChannelToNeutralLiveChannel,
+  mapIptvChannelsToNeutralLiveChannels,
+} from '@/features/neutralData/lib/liveTvAdapter';

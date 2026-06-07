@@ -23,10 +23,7 @@ import { createNativeVideoAdapter } from "@/features/player/lib/nativeVideoAdapt
 import { detectStreamKind } from "@/features/player/lib/detectStreamKind";
 import { useRouteInitialFocus } from "@/hooks/useRouteInitialFocus";
 import { getStoredLicenseActivation } from "@/features/licensing/lib/licenseActivationStorage";
-import {
-  getChannelDisplayGroup,
-  isLiveChannel,
-} from "@/features/playlists/lib/channelClassification";
+import { isLiveChannel } from "@/features/playlists/lib/channelClassification";
 import { getOrCreateDeviceIdentifier } from "@/features/playlists/lib/deviceIdentifier";
 import {
   getAuthorizedIptvSource,
@@ -39,6 +36,8 @@ import {
   getCachedLiveTvCriticalChannels,
   storeCachedLiveTvCriticalChannels,
 } from "../services/liveTvCriticalCache.service";
+import { mapIptvChannelToNeutralLiveChannel } from "@/features/neutralData";
+import type { NeutralLiveChannel } from "@/features/neutralData";
 import type { IptvChannel } from "@/features/playlists/types/playlist";
 import type {
   PlayerTelemetryEvent,
@@ -113,9 +112,28 @@ type ChannelGroup = {
   count: number;
 };
 
-function getChannelGroupName(channel: IptvChannel) {
-  return getChannelDisplayGroup(channel);
+type NeutralLiveChannelViewModel = {
+  legacyChannel: IptvChannel;
+  neutralChannel: NeutralLiveChannel;
+};
+
+function toNeutralLiveChannelViewModel(
+  channel: IptvChannel,
+): NeutralLiveChannelViewModel {
+  return {
+    legacyChannel: channel,
+    neutralChannel: mapIptvChannelToNeutralLiveChannel(channel, {
+      includeRuntimePlayback: true,
+    }),
+  };
 }
+
+function getNeutralLiveChannelGroupName(
+  channelView: NeutralLiveChannelViewModel,
+) {
+  return channelView.neutralChannel.visual.groupName;
+}
+
 
 function getChannelKey(channel: IptvChannel) {
   return `${channel.id}:${channel.url}`;
@@ -492,11 +510,16 @@ export default function LiveTvPage() {
     return instantLiveChannels;
   }, [channels, instantLiveChannels]);
 
+  const neutralLiveChannelViewModels = useMemo(
+    () => liveTvChannels.map(toNeutralLiveChannelViewModel),
+    [liveTvChannels],
+  );
+
   const groups = useMemo<ChannelGroup[]>(() => {
     const groupMap = new Map<string, number>();
 
-    for (const channel of liveTvChannels) {
-      const groupName = getChannelGroupName(channel);
+    for (const channelView of neutralLiveChannelViewModels) {
+      const groupName = getNeutralLiveChannelGroupName(channelView);
       groupMap.set(groupName, (groupMap.get(groupName) ?? 0) + 1);
     }
 
@@ -504,7 +527,7 @@ export default function LiveTvPage() {
       name,
       count,
     }));
-  }, [liveTvChannels]);
+  }, [neutralLiveChannelViewModels]);
 
   const activeGroupName =
     selectedGroupName && groups.some((group) => group.name === selectedGroupName)
@@ -516,15 +539,26 @@ export default function LiveTvPage() {
     : -1;
 
 
-  const activeGroupChannels = useMemo(() => {
+  const activeGroupChannelViewModels = useMemo(() => {
     if (!activeGroupName) {
       return [];
     }
 
-    return liveTvChannels
-      .filter((channel) => getChannelGroupName(channel) === activeGroupName)
+    return neutralLiveChannelViewModels
+      .filter(
+        (channelView) =>
+          getNeutralLiveChannelGroupName(channelView) === activeGroupName,
+      )
       .slice(0, MAX_VISIBLE_CHANNELS_PER_GROUP);
-  }, [activeGroupName, liveTvChannels]);
+  }, [activeGroupName, neutralLiveChannelViewModels]);
+
+  const activeGroupChannels = useMemo(
+    () =>
+      activeGroupChannelViewModels.map(
+        (channelView) => channelView.legacyChannel,
+      ),
+    [activeGroupChannelViewModels],
+  );
 
   const handleSelectGroup = useCallback((groupName: string) => {
     setSelectedGroupName(groupName);
