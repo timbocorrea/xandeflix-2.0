@@ -721,3 +721,89 @@ button {
 .xf-app[data-device-form-factor="tablet"] .xf-live-tv-channel-name {
   font-size: 0.56rem;
 }
+
+/* XANDEFLIX LIVE TV TOUCH STACKED LAYOUT START */
+.xf-app[data-device-form-factor="mobile"] .xf-live-tv-preview,
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] .xf-live-tv-preview {
+  gap: 0 !important;
+  padding: 0 !important;
+}
+
+.xf-app[data-device-form-factor="mobile"] .xf-live-tv-mobile-fixed-top,
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] .xf-live-tv-mobile-fixed-top {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  width: 100% !important;
+  max-width: 100dvw !important;
+  overflow: visible !important;
+  padding-top: calc(env(safe-area-inset-top) + 0.75rem) !important;
+  padding-bottom: 0.9rem !important;
+  background: #000 !important;
+}
+
+.xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-top-chips="true"],
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-top-chips="true"] {
+  order: 1 !important;
+  position: relative !important;
+  flex: 0 0 auto !important;
+  margin-bottom: 1.5rem !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+  padding-bottom: 0 !important;
+}
+
+.xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-top-chips="true"] > div,
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-top-chips="true"] > div {
+  width: 100% !important;
+}
+
+.xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"],
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] {
+  order: 2 !important;
+  position: relative !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 100dvw !important;
+  min-width: 100dvw !important;
+  max-width: 100dvw !important;
+  aspect-ratio: 16 / 9 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin-top: 1rem !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  border-radius: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 auto !important;
+}
+
+.xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"] video,
+.xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"] iframe,
+.xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"] canvas,
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] video,
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] iframe,
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+.xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-controls="true"],
+.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-controls="true"] {
+  order: 3 !important;
+  position: relative !important;
+  flex: 0 0 auto !important;
+  display: grid !important;
+  grid-template-columns: auto auto auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.55rem !important;
+  margin-top: 0.35rem !important;
+  margin-bottom: 0 !important;
+}
+/* XANDEFLIX LIVE TV TOUCH STACKED LAYOUT END */

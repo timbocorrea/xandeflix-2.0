@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/app/providers/AuthProvider";
 import { AppShell } from "@/components/layout/AppShell";
+import { useDeviceProfile } from "@/platform/useDeviceProfile";
 import { FocusableButton } from "@/components/tv/FocusableButton";
 import { createHlsAdapter } from "@/features/player/lib/hlsAdapter";
 import { createMpegTsAdapter } from "@/features/player/lib/mpegTsAdapter";
@@ -181,6 +182,7 @@ function createLiveTvPreviewAdapter(
 export default function LiveTvPage() {
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const deviceProfile = useDeviceProfile();
   const {
     channels,
     selectedChannel,
@@ -207,10 +209,6 @@ export default function LiveTvPage() {
   const nativeInlinePreviewActiveRef = useRef(false);
   const nativeInlinePreviewLayoutKeyRef = useRef<string | null>(null);
   const nativeFullscreenReturnRef = useRef(false);
-  const lastChannelActivationRef = useRef<{
-    channelKey: string;
-    timestamp: number;
-  } | null>(null);
   const [previewChannel, setPreviewChannel] = useState<IptvChannel | null>(
     null,
   );
@@ -924,12 +922,13 @@ export default function LiveTvPage() {
       restorePreviewAfterNativeFullscreen,
     );
 
-    const nativeResumeListenerPromise = addNativeAndroidPlayerResumeListener(
-      (event) => {
-        console.info("[XANDEFLIX_LIVE_NATIVE_RESUME_EVENT]", event);
-        restorePreviewAfterNativeFullscreen();
-      },
-    );
+    const nativeResumeListenerPromise =
+      deviceProfile.runtime === "capacitor-android"
+        ? addNativeAndroidPlayerResumeListener((event) => {
+            console.info("[XANDEFLIX_LIVE_NATIVE_RESUME_EVENT]", event);
+            restorePreviewAfterNativeFullscreen();
+          })
+        : null;
 
     return () => {
       window.removeEventListener(
@@ -942,38 +941,26 @@ export default function LiveTvPage() {
         listener.remove();
       });
 
-      void nativeResumeListenerPromise.then((listener) => {
-        listener.remove();
-      });
+      if (nativeResumeListenerPromise) {
+        void nativeResumeListenerPromise.then((listener) => {
+          listener.remove();
+        });
+      }
     };
-  }, [previewChannel, startChannelPreview]);
+  }, [deviceProfile.runtime, previewChannel, startChannelPreview]);
 
   const handleSelectChannel = useCallback(
     (channel: IptvChannel) => {
-      const channelKey = getChannelKey(channel);
-      const now = Date.now();
-      const lastActivation = lastChannelActivationRef.current;
+      const nextChannelKey = getChannelKey(channel);
+      const activePreviewChannelKey = previewChannel
+        ? getChannelKey(previewChannel)
+        : "";
 
-      if (
-        lastActivation?.channelKey === channelKey &&
-        now - lastActivation.timestamp < 900
-      ) {
-        console.info("[XANDEFLIX_LIVE_CHANNEL_DUPLICATE_OK_IGNORED]", {
-          channel: channel.name,
-          elapsedMs: now - lastActivation.timestamp,
-        });
-        return;
-      }
+      const shouldOpenFullscreen =
+        activePreviewChannelKey === nextChannelKey &&
+        (previewStatus === "playing" || previewStatus === "error");
 
-      lastChannelActivationRef.current = {
-        channelKey,
-        timestamp: now,
-      };
-
-      const isSamePreviewChannel =
-        previewChannel && getChannelKey(previewChannel) === channelKey;
-
-      if (isSamePreviewChannel && previewStatus !== "idle") {
+      if (shouldOpenFullscreen) {
         void openChannelFullscreen(channel);
         return;
       }
@@ -1059,14 +1046,33 @@ export default function LiveTvPage() {
     ? currentPreviewChannelKey
     : "";
 
+  const shouldUseTouchStackedLayout =
+    deviceProfile.inputMode === "touch" &&
+    (deviceProfile.formFactor === "mobile" ||
+      (deviceProfile.formFactor === "tablet" &&
+        deviceProfile.viewportHeight >= deviceProfile.viewportWidth));
+  const shouldUsePanelLiveTvLayout = !shouldUseTouchStackedLayout;
+
   return (
     <AppShell
       onSignOut={() => void signOut()}
       hideHeaderOnTv
       mainClassName="px-0 pt-0 pb-0 pr-0 md:px-0 md:pt-0 md:pb-0 md:pr-0 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-0"
     >
-      <section className="xf-live-tv-page xf-live-tv-layout flex min-h-screen w-full max-w-[100vw] flex-col gap-y-4 overflow-x-hidden overflow-y-auto bg-black pb-24 text-white min-[560px]:grid min-[560px]:gap-x-0 min-[560px]:overflow-hidden min-[560px]:pb-0">
-        <div className="order-2 space-y-4 px-5 pt-3 pb-4 min-[560px]:hidden">
+      <section
+        className={[
+          "xf-live-tv-page xf-live-tv-layout flex min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-black text-white",
+          shouldUseTouchStackedLayout
+            ? "flex-col gap-y-4 overflow-y-auto pb-24"
+            : "grid gap-x-0 overflow-hidden pb-0",
+        ].join(" ")}
+      >
+        <div
+          className={[
+            "order-2 space-y-4 px-5 pt-3 pb-4",
+            shouldUseTouchStackedLayout ? "block" : "hidden",
+          ].join(" ")}
+        >
           <label className="block">
             <span className="mb-2 block text-[0.68rem] font-black uppercase tracking-[0.28em] text-xf-red">
               Grupos de canais
@@ -1154,7 +1160,12 @@ export default function LiveTvPage() {
           ) : null}
         </div>
 
-        <aside className="xf-live-tv-groups-column hidden h-screen min-h-screen flex-col border-r border-white/10 bg-black/80 shadow-2xl min-[560px]:flex">
+        <aside
+          className={[
+            "xf-live-tv-groups-column h-screen min-h-screen flex-col border-r border-white/10 bg-black/80 shadow-2xl",
+            shouldUsePanelLiveTvLayout ? "flex" : "hidden",
+          ].join(" ")}
+        >
           <p className="xf-live-tv-column-title font-black uppercase tracking-[0.35em] text-xf-red">
             Grupos
           </p>
@@ -1169,6 +1180,7 @@ export default function LiveTvPage() {
                   <FocusableButton
                     key={group.name}
                     focusKey={`live-group-${index}`}
+                    data-active-group={isActiveGroup ? "true" : "false"}
                     className={[
                       "xf-live-tv-group-button flex w-full items-center border border-transparent text-left font-black uppercase tracking-wide transition hover:text-white data-[focused=true]:border-xf-red/80 data-[focused=true]:bg-xf-red/25 data-[focused=true]:text-white data-[focused=true]:shadow-lg",
                       isActiveGroup
@@ -1194,7 +1206,12 @@ export default function LiveTvPage() {
           </div>
         </aside>
 
-        <aside className="xf-live-tv-channels-column hidden h-screen min-h-screen flex-col border-r border-white/10 bg-black/75 shadow-2xl min-[560px]:flex">
+        <aside
+          className={[
+            "xf-live-tv-channels-column h-screen min-h-screen flex-col border-r border-white/10 bg-black/75 shadow-2xl",
+            shouldUsePanelLiveTvLayout ? "flex" : "hidden",
+          ].join(" ")}
+        >
           <p className="xf-live-tv-column-title font-black uppercase tracking-[0.35em] text-xf-red">
             Canais
           </p>
@@ -1264,9 +1281,27 @@ export default function LiveTvPage() {
           </div>
         </aside>
 
-        <section className="xf-live-tv-preview order-1 flex min-h-0 w-full max-w-[100vw] min-w-0 flex-col overflow-x-hidden min-[560px]:order-none min-[560px]:min-h-screen">
-          <div className="xf-live-tv-mobile-fixed-top w-full max-w-[100vw] overflow-x-hidden bg-black pt-[calc(env(safe-area-inset-top)+0.55rem)] pb-3 shadow-xl min-[560px]:max-w-none min-[560px]:overflow-visible min-[560px]:bg-transparent min-[560px]:pt-0 min-[560px]:pb-0 min-[560px]:shadow-none">
-            <div className="relative z-30 px-5 pb-3 min-[560px]:hidden">
+        <section
+          className={[
+            "xf-live-tv-preview flex min-h-0 w-full max-w-[100vw] min-w-0 flex-col overflow-x-hidden",
+            shouldUseTouchStackedLayout ? "order-1" : "order-none min-h-screen",
+          ].join(" ")}
+        >
+          <div
+            className={[
+              "xf-live-tv-mobile-fixed-top w-full max-w-[100vw] overflow-x-hidden",
+              shouldUseTouchStackedLayout
+                ? "bg-black pt-[calc(env(safe-area-inset-top)+0.55rem)] pb-3 shadow-xl"
+                : "max-w-none overflow-visible bg-transparent pt-0 pb-0 shadow-none",
+            ].join(" ")}
+          >
+            <div
+              data-xf-live-tv-mobile-top-chips="true"
+              className={[
+                "relative px-5 pb-3",
+                shouldUseTouchStackedLayout ? "block" : "hidden",
+              ].join(" ")}
+            >
               <div className="grid grid-cols-3 gap-2 rounded-[1.6rem] border border-white/10 bg-white/[0.04] p-1">
                 <button
                   type="button"
@@ -1296,7 +1331,13 @@ export default function LiveTvPage() {
 
             <div
               ref={previewContainerRef}
-              className="xf-live-tv-preview-frame relative ml-[calc(50%_-_50dvw_-_7px)] mt-10 aspect-video w-[100dvw] max-w-[100dvw] overflow-hidden border-y border-black bg-black shadow-none min-[560px]:ml-0 min-[560px]:mt-0 min-[560px]:w-full min-[560px]:max-w-full min-[560px]:border-white/10 min-[560px]:shadow-2xl"
+              data-xf-live-tv-mobile-preview-frame="true"
+              className={[
+                "xf-live-tv-preview-frame relative aspect-video overflow-hidden bg-black",
+                shouldUseTouchStackedLayout
+                  ? "mt-0 w-full max-w-full border-y border-black shadow-none"
+                  : "ml-0 mt-0 w-full max-w-full border border-white/10 shadow-2xl",
+              ].join(" ")}
             >
             <video
               ref={previewVideoRef}
@@ -1355,7 +1396,13 @@ export default function LiveTvPage() {
             ) : null}
             </div>
 
-            <div className="xf-live-tv-preview-mobile-controls mx-auto mt-1 grid w-fit max-w-[calc(100dvw-1rem)] grid-cols-[auto_auto_auto] items-center justify-center gap-2 overflow-visible px-0 min-[560px]:hidden">
+            <div
+              data-xf-live-tv-mobile-preview-controls="true"
+              className={[
+                "xf-live-tv-preview-mobile-controls mx-auto mt-1 w-fit max-w-[calc(100dvw-1rem)] items-center justify-center gap-2 overflow-visible px-0",
+                shouldUseTouchStackedLayout ? "grid grid-cols-[auto_auto_auto]" : "hidden",
+              ].join(" ")}
+            >
               <button
                 type="button"
                 className="rounded-2xl border border-white/15 bg-black/70 px-2.5 py-2 text-[0.68rem] font-black uppercase tracking-[0.06em] text-white shadow-lg disabled:opacity-60"
@@ -1388,7 +1435,12 @@ export default function LiveTvPage() {
           </div>
 
           {currentPreviewChannel ? (
-            <div className="xf-live-tv-preview-info hidden bg-black/75 shadow-2xl min-[560px]:block">
+            <div
+              className={[
+                "xf-live-tv-preview-info bg-black/75 shadow-2xl",
+                shouldUsePanelLiveTvLayout ? "block" : "hidden",
+              ].join(" ")}
+            >
               <h3 className="xf-live-tv-preview-title rounded-2xl bg-xf-red/20 px-4 py-3 font-black text-white">
                 {currentPreviewChannel.name}
               </h3>
