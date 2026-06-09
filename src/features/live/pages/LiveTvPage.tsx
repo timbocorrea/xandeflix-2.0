@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App } from "@capacitor/app";
+import { StatusBar } from "@capacitor/status-bar";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useNavigate } from "react-router-dom";
 
@@ -45,6 +46,8 @@ import type {
 } from "@/features/player/types/player";
 
 const MAX_VISIBLE_CHANNELS_PER_GROUP = 160;
+const FALLBACK_NATIVE_STATUS_BAR_HEIGHT_CSS_PX = 36;
+const MAX_NATIVE_STATUS_BAR_HEIGHT_PX = 96;
 let lastLiveTvGroupVerticalNavigationAt = 0;
 
 type ChannelSourceMode = "cache" | "playlist" | null;
@@ -55,6 +58,12 @@ function normalizeLiveGroupTitle(groupTitle?: string | null) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase() ?? "";
+}
+
+function getLiveGroupDisplayName(groupTitle?: string | null) {
+  return (groupTitle ?? "")
+    .replace(/^\s*canais\s*\|\s*/i, "")
+    .trim();
 }
 
 function isVodGroupTitleInLivePage(groupTitle?: string | null) {
@@ -137,6 +146,70 @@ function getNeutralLiveChannelGroupName(
 
 function getChannelKey(channel: IptvChannel) {
   return `${channel.id}:${channel.url}`;
+}
+
+type NativeInlinePreviewLayout = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+function normalizeNativeStatusBarHeightPx(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return Math.min(Math.round(value), MAX_NATIVE_STATUS_BAR_HEIGHT_PX);
+}
+
+async function readNativeStatusBarHeightPx() {
+  try {
+    const info = await StatusBar.getInfo();
+    return normalizeNativeStatusBarHeightPx(info.height);
+  } catch {
+    return 0;
+  }
+}
+
+function getFallbackNativeTopInsetPx(previewScale: number) {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+
+  const viewportHeight =
+    window.visualViewport?.height && window.visualViewport.height > 0
+      ? window.visualViewport.height
+      : window.innerHeight;
+  const screenHeight = window.screen?.height ?? 0;
+  const inferredInsetCssPx = Math.max(0, screenHeight - viewportHeight);
+
+  return Math.round(
+    Math.min(
+      inferredInsetCssPx,
+      FALLBACK_NATIVE_STATUS_BAR_HEIGHT_CSS_PX,
+    ) * previewScale,
+  );
+}
+
+function getNativeInlinePreviewLayout(
+  previewContainer: HTMLElement,
+  statusBarHeightPx: number,
+): NativeInlinePreviewLayout {
+  const previewRect = previewContainer.getBoundingClientRect();
+  const previewScale = window.devicePixelRatio || 1;
+  const previewTopPx = Math.round(previewRect.top * previewScale);
+  const safeTopPx = Math.max(
+    normalizeNativeStatusBarHeightPx(statusBarHeightPx),
+    getFallbackNativeTopInsetPx(previewScale),
+  );
+
+  return {
+    x: Math.round(previewRect.left * previewScale),
+    y: Math.max(previewTopPx, safeTopPx),
+    width: Math.round(previewRect.width * previewScale),
+    height: Math.round(previewRect.height * previewScale),
+  };
 }
 
 
@@ -226,6 +299,7 @@ export default function LiveTvPage() {
   const previewRequestIdRef = useRef(0);
   const nativeInlinePreviewActiveRef = useRef(false);
   const nativeInlinePreviewLayoutKeyRef = useRef<string | null>(null);
+  const nativeStatusBarHeightPxRef = useRef(0);
   const nativeFullscreenReturnRef = useRef(false);
   const [previewChannel, setPreviewChannel] = useState<IptvChannel | null>(
     null,
@@ -239,6 +313,20 @@ export default function LiveTvPage() {
     useState(false);
 
   useRouteInitialFocus();
+
+  useEffect(() => {
+    let isActive = true;
+
+    void readNativeStatusBarHeightPx().then((statusBarHeightPx) => {
+      if (isActive) {
+        nativeStatusBarHeightPxRef.current = statusBarHeightPx;
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -741,14 +829,15 @@ export default function LiveTvPage() {
             return;
           }
 
-          const previewRect = previewContainer.getBoundingClientRect();
-          const previewScale = window.devicePixelRatio || 1;
-          const previewLayout = {
-            x: Math.round(previewRect.left * previewScale),
-            y: Math.round(previewRect.top * previewScale),
-            width: Math.round(previewRect.width * previewScale),
-            height: Math.round(previewRect.height * previewScale),
-          };
+          const statusBarHeightPx = await readNativeStatusBarHeightPx();
+          if (statusBarHeightPx > 0) {
+            nativeStatusBarHeightPxRef.current = statusBarHeightPx;
+          }
+
+          const previewLayout = getNativeInlinePreviewLayout(
+            previewContainer,
+            nativeStatusBarHeightPxRef.current,
+          );
 
           await startNativeAndroidInlinePreview({
             url: channel.url,
@@ -850,15 +939,10 @@ export default function LiveTvPage() {
       return;
     }
 
-    const previewRect = previewContainer.getBoundingClientRect();
-    const previewScale = window.devicePixelRatio || 1;
-
-    const nextLayout = {
-      x: Math.round(previewRect.left * previewScale),
-      y: Math.round(previewRect.top * previewScale),
-      width: Math.round(previewRect.width * previewScale),
-      height: Math.round(previewRect.height * previewScale),
-    };
+    const nextLayout = getNativeInlinePreviewLayout(
+      previewContainer,
+      nativeStatusBarHeightPxRef.current,
+    );
 
     if (nextLayout.width <= 0 || nextLayout.height <= 0) {
       return;
@@ -1071,6 +1155,9 @@ export default function LiveTvPage() {
 
 
 
+  const shouldShowPreviewFrameBorder =
+    previewStatus === "loading" || previewStatus === "playing";
+
   const currentPreviewChannelKey = currentPreviewChannel
     ? getChannelKey(currentPreviewChannel)
     : "";
@@ -1080,11 +1167,34 @@ export default function LiveTvPage() {
     ? currentPreviewChannelKey
     : "";
 
+  const runtimeViewportWidth =
+    typeof window !== "undefined"
+      ? window.visualViewport?.width ?? deviceProfile.viewportWidth
+      : deviceProfile.viewportWidth;
+  const runtimeViewportHeight =
+    typeof window !== "undefined"
+      ? window.visualViewport?.height ?? deviceProfile.viewportHeight
+      : deviceProfile.viewportHeight;
+  const runtimeScreenOrientation =
+    typeof window !== "undefined"
+      ? window.screen.orientation?.type
+      : undefined;
+  const runtimeIsPortrait =
+    runtimeViewportHeight >= runtimeViewportWidth ||
+    runtimeScreenOrientation?.includes("portrait") ||
+    (typeof window !== "undefined" &&
+      window.matchMedia("(orientation: portrait)").matches);
+  const runtimeHasTouch =
+    deviceProfile.inputMode === "touch" ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+  const shouldUseTabletPortraitTouch =
+    runtimeHasTouch &&
+    runtimeIsPortrait &&
+    (deviceProfile.formFactor === "tablet" ||
+      (deviceProfile.formFactor === "tv" &&
+        Math.min(runtimeViewportWidth, runtimeViewportHeight) >= 600));
   const shouldUseTouchStackedLayout =
-    deviceProfile.inputMode === "touch" &&
-    (deviceProfile.formFactor === "mobile" ||
-      (deviceProfile.formFactor === "tablet" &&
-        deviceProfile.viewportHeight >= deviceProfile.viewportWidth));
+    deviceProfile.formFactor === "mobile" || shouldUseTabletPortraitTouch;
   const shouldUsePanelLiveTvLayout = !shouldUseTouchStackedLayout;
 
   return (
@@ -1094,6 +1204,7 @@ export default function LiveTvPage() {
       mainClassName="px-0 pt-0 pb-0 pr-0 md:px-0 md:pt-0 md:pb-0 md:pr-0 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-0"
     >
       <section
+        data-xf-live-tv-touch-stacked={shouldUseTouchStackedLayout ? "true" : "false"}
         className={[
           "xf-live-tv-page xf-live-tv-layout flex min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-black text-white",
           shouldUseTouchStackedLayout
@@ -1112,13 +1223,13 @@ export default function LiveTvPage() {
               Grupos de canais
             </span>
             <select
-              className="w-full rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-bold text-white outline-none"
+              className="xf-live-tv-mobile-select w-full rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-bold text-white outline-none"
               value={activeGroupName ?? ""}
               onChange={(event) => handleSelectGroup(event.target.value)}
             >
               {groups.map((group) => (
                 <option key={group.name} value={group.name} className="bg-black text-white">
-                  {group.name} ({group.count})
+                  {getLiveGroupDisplayName(group.name)} ({group.count})
                 </option>
               ))}
             </select>
@@ -1129,7 +1240,7 @@ export default function LiveTvPage() {
               Canal selecionado
             </span>
             <select
-              className="w-full rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-bold text-white outline-none"
+              className="xf-live-tv-mobile-select w-full rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-bold text-white outline-none"
               value={selectedMobileChannelKey}
               onChange={(event) => {
                 const nextChannel = activeGroupChannels.find(
@@ -1225,7 +1336,9 @@ export default function LiveTvPage() {
                     onEnterPress={() => handleSelectGroup(group.name)}
                     onClick={() => handleSelectGroup(group.name)}
                   >
-                    <span className="truncate">{group.name}</span>
+                    <span className="truncate">
+                      {getLiveGroupDisplayName(group.name)}
+                    </span>
                   </FocusableButton>
                 );
               })
@@ -1247,7 +1360,7 @@ export default function LiveTvPage() {
           ].join(" ")}
         >
           <p className="xf-live-tv-column-title font-black uppercase tracking-[0.35em] text-xf-red">
-            Canais
+            {getLiveGroupDisplayName(activeGroupName) || "Canais"}
           </p>
 
 
@@ -1369,8 +1482,18 @@ export default function LiveTvPage() {
               className={[
                 "xf-live-tv-preview-frame relative aspect-video overflow-hidden bg-black",
                 shouldUseTouchStackedLayout
-                  ? "mt-0 w-full max-w-full border-y border-black shadow-none"
-                  : "ml-0 mt-0 w-full max-w-full border border-white/10 shadow-2xl",
+                  ? [
+                      "mt-0 w-full max-w-full border-y shadow-none",
+                      shouldShowPreviewFrameBorder
+                        ? "border-black"
+                        : "border-transparent",
+                    ].join(" ")
+                  : [
+                      "ml-0 mt-0 w-full max-w-full border",
+                      shouldShowPreviewFrameBorder
+                        ? "border-white/10 shadow-2xl"
+                        : "border-transparent shadow-none",
+                    ].join(" "),
               ].join(" ")}
             >
             <video
@@ -1469,15 +1592,15 @@ export default function LiveTvPage() {
           </div>
 
           {currentPreviewChannel ? (
-            <div
-              className={[
-                "xf-live-tv-preview-info bg-black/75 shadow-2xl",
-                shouldUsePanelLiveTvLayout ? "block" : "hidden",
-              ].join(" ")}
-            >
-              <h3 className="xf-live-tv-preview-title rounded-2xl bg-xf-red/20 px-4 py-3 font-black text-white">
-                {currentPreviewChannel.name}
-              </h3>
+              <div
+                className={[
+                  "xf-live-tv-preview-info w-full max-w-none bg-black/75 shadow-2xl",
+                  shouldUsePanelLiveTvLayout ? "block" : "hidden",
+                ].join(" ")}
+              >
+                <h3 className="xf-live-tv-preview-title block w-full rounded-2xl bg-xf-red/20 px-6 py-4 text-xl font-black leading-none text-yellow-300 md:text-2xl">
+                  {currentPreviewChannel.name}
+                </h3>
 
               <p className="mt-3 text-sm leading-relaxed text-xf-muted">
                 Guia de programação indisponível no momento.

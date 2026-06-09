@@ -8,7 +8,7 @@ import {
   UserRound,
   LogOut,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
@@ -26,6 +26,7 @@ const menuItems = [
     icon: Home,
     navId: 'sidebar-home',
     path: '/',
+    activePaths: ['/'],
   },
   {
     label: 'Pesquisar',
@@ -37,24 +38,30 @@ const menuItems = [
     icon: Tv,
     navId: 'sidebar-channels',
     path: '/live',
+    activePathPrefixes: ['/live'],
   },
   {
     label: 'Filmes',
     icon: Clapperboard,
     navId: 'sidebar-movies',
     path: '/category/filmes',
+    activePaths: ['/category/movie-detail'],
+    activePathPrefixes: ['/category/filmes'],
   },
   {
     label: 'Séries',
     icon: MonitorPlay,
     navId: 'sidebar-series',
     path: '/category/series',
+    activePaths: ['/category/series-detail', '/category/series-group'],
+    activePathPrefixes: ['/category/series'],
   },
   {
     label: 'Configurações',
     icon: Settings,
     navId: 'sidebar-settings',
     path: '/settings',
+    activePathPrefixes: ['/settings'],
   },
 ];
 
@@ -65,6 +72,7 @@ interface TvSidebarProps {
 
 export function TvSidebar({ onSignOut, isTablet = false }: TvSidebarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
 
   function handleSidebarArrowPress(direction: string) {
     if (direction !== 'right') {
@@ -122,6 +130,12 @@ export function TvSidebar({ onSignOut, isTablet = false }: TvSidebarProps) {
 
           {menuItems.map((item) => {
             const Icon = item.icon;
+            const isActive =
+              item.activePaths?.includes(location.pathname) ||
+              item.activePathPrefixes?.some((pathPrefix) =>
+                location.pathname.startsWith(pathPrefix),
+              ) ||
+              false;
 
             const handlePress = () => {
               if (item.path) {
@@ -136,8 +150,14 @@ export function TvSidebar({ onSignOut, isTablet = false }: TvSidebarProps) {
               <FocusableButton
                 key={item.navId}
                 focusKey={item.navId}
-                className={`group flex ${menuButtonClass} items-center justify-center bg-transparent text-xf-muted hover:text-white`}
+                className={
+                  `group flex ${menuButtonClass} items-center justify-center transition ` +
+                  (isActive
+                    ? 'bg-xf-red text-white shadow-[0_0_1.15rem_rgba(229,9,20,0.42)] hover:text-white data-[focused=true]:bg-xf-red data-[focused=true]:text-white'
+                    : 'bg-transparent text-xf-muted hover:text-white')
+                }
                 aria-label={item.label}
+                aria-current={isActive ? 'page' : undefined}
                 title={item.label}
                 onEnterPress={handlePress}
                 onClick={handlePress}
