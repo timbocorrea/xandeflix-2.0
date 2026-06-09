@@ -184,8 +184,8 @@ Ação bloqueada:
 Erro exato:
 
 ```text
-Remove-Item : Não é possível remover o item C:\Users\Alexandre-Janaina\Dropbox\xandeflix2.0\.tmp: O processo não pode 
-acessar o arquivo 'C:\Users\Alexandre-Janaina\Dropbox\xandeflix2.0\.tmp' porque ele está sendo usado por outro 
+Remove-Item : Não é possível remover o item C:\Users\Alexandre-Janaina\Dropbox\xandeflix2.0\.tmp: O processo não pode
+acessar o arquivo 'C:\Users\Alexandre-Janaina\Dropbox\xandeflix2.0\.tmp' porque ele está sendo usado por outro
 processo.
 No linha:2 caractere:177
 + ... h($repo)) { Remove-Item -LiteralPath $tmpPath.Path -Recurse -Force }  ...
