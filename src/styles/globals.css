@@ -584,7 +584,8 @@ button {
 }
 
 .xf-live-tv-preview-title {
-  font-size: 0.875rem;
+  color: #facc15 !important;
+  font-size: 1.125rem;
 }
 
 .xf-app[data-device-form-factor="tv"] .xf-live-tv-groups-column,
@@ -659,7 +660,7 @@ button {
 }
 
 .xf-app[data-device-form-factor="tv"] .xf-live-tv-preview-title {
-  font-size: 1.085rem;
+  font-size: 1.375rem;
 }
 
 .xf-app[data-device-tv-platform="fire-tv"] .xf-live-tv-groups-column,
@@ -724,13 +725,13 @@ button {
 
 /* XANDEFLIX LIVE TV TOUCH STACKED LAYOUT START */
 .xf-app[data-device-form-factor="mobile"] .xf-live-tv-preview,
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] .xf-live-tv-preview {
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-preview {
   gap: 0 !important;
   padding: 0 !important;
 }
 
 .xf-app[data-device-form-factor="mobile"] .xf-live-tv-mobile-fixed-top,
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] .xf-live-tv-mobile-fixed-top {
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-mobile-fixed-top {
   display: flex !important;
   flex-direction: column !important;
   align-items: stretch !important;
@@ -744,7 +745,7 @@ button {
 }
 
 .xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-top-chips="true"],
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-top-chips="true"] {
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-top-chips="true"] {
   order: 1 !important;
   position: relative !important;
   flex: 0 0 auto !important;
@@ -755,12 +756,12 @@ button {
 }
 
 .xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-top-chips="true"] > div,
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-top-chips="true"] > div {
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-top-chips="true"] > div {
   width: 100% !important;
 }
 
 .xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"],
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] {
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-preview-frame="true"] {
   order: 2 !important;
   position: relative !important;
   left: 50% !important;
@@ -785,16 +786,16 @@ button {
 .xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"] video,
 .xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"] iframe,
 .xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-frame="true"] canvas,
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] video,
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] iframe,
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-frame="true"] canvas {
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-preview-frame="true"] video,
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-preview-frame="true"] iframe,
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-preview-frame="true"] canvas {
   width: 100% !important;
   height: 100% !important;
   object-fit: contain !important;
 }
 
 .xf-app[data-device-form-factor="mobile"] [data-xf-live-tv-mobile-preview-controls="true"],
-.xf-app[data-device-form-factor="tablet"][data-device-input="touch"] [data-xf-live-tv-mobile-preview-controls="true"] {
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-preview-controls="true"] {
   order: 3 !important;
   position: relative !important;
   flex: 0 0 auto !important;
@@ -806,4 +807,122 @@ button {
   margin-top: 0.35rem !important;
   margin-bottom: 0 !important;
 }
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-page {
+  min-height: 100dvh !important;
+  overflow-x: hidden !important;
+  font-size: 100% !important;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-layout {
+  display: flex !important;
+  grid-template-columns: 1fr !important;
+  width: 100% !important;
+  max-width: 100dvw !important;
+  min-height: 100dvh !important;
+  overflow-x: hidden !important;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-mobile-fixed-top {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 30 !important;
+  padding-top: max(1rem, calc(env(safe-area-inset-top) + 0.85rem)) !important;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-top-chips="true"] {
+  margin-bottom: 0.85rem !important;
+  padding-left: 1.25rem !important;
+  padding-right: 1.25rem !important;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-preview-frame="true"] {
+  margin-top: 0 !important;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-mobile-select {
+  min-height: 3.35rem;
+  border-radius: 1.25rem;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-page label > span {
+  font-size: 0.78rem;
+  letter-spacing: 0.22em;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-preview-mobile-controls button {
+  font-size: 0.76rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] .xf-live-tv-mobile-fixed-top {
+  padding-top: max(1.65rem, calc(env(safe-area-inset-top) + 1.15rem)) !important;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-top-chips="true"] {
+  padding-top: 0 !important;
+  margin-bottom: 2.5rem !important;
+}
+
+.xf-app[data-device-tablet-portrait-touch="true"] [data-xf-live-tv-mobile-preview-frame="true"] {
+  margin-top: 0.85rem !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-page {
+  padding-top: max(1.1rem, calc(env(safe-area-inset-top) + 0.8rem)) !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-groups-column,
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-channels-column,
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-preview {
+  max-height: calc(100dvh - max(1.1rem, calc(env(safe-area-inset-top) + 0.8rem))) !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-preview-frame {
+  border-radius: 0 !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-column-title {
+  font-size: 1rem !important;
+  line-height: 1.1 !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-group-list {
+  padding-left: 0.8rem !important;
+  padding-right: 0.8rem !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-group-button {
+  min-height: 3.2rem !important;
+  border-radius: 0.48rem !important;
+  font-size: 1.05rem !important;
+  line-height: 1.15 !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-group-button[data-focused="true"] {
+  transform: scale(1.015) !important;
+  outline-offset: -1px !important;
+  box-shadow: 0 0 0 1px rgba(229, 9, 20, 0.78) !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-channel-button {
+  min-height: 3.5rem !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-channel-logo {
+  width: 2.15rem !important;
+  height: 2.15rem !important;
+  border-radius: 0 !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-channel-logo-fallback {
+  font-size: 0.72rem !important;
+}
+
+.xf-app[data-device-touch-capable="true"][data-device-orientation="landscape"] .xf-live-tv-channel-name {
+  font-size: 1.08rem !important;
+  line-height: 1.18 !important;
+}
+
 /* XANDEFLIX LIVE TV TOUCH STACKED LAYOUT END */

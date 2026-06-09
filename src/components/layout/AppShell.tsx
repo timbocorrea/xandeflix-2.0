@@ -42,10 +42,34 @@ export function AppShell({
 }: AppShellProps) {
   const deviceProfile = useDeviceProfile();
   const { isTv: legacyIsTv, isMobile } = useDeviceType();
+
+  const runtimeViewportWidth =
+    typeof window !== 'undefined'
+      ? window.visualViewport?.width ?? deviceProfile.viewportWidth
+      : deviceProfile.viewportWidth;
+  const runtimeViewportHeight =
+    typeof window !== 'undefined'
+      ? window.visualViewport?.height ?? deviceProfile.viewportHeight
+      : deviceProfile.viewportHeight;
+  const runtimeScreenOrientation =
+    typeof window !== 'undefined'
+      ? window.screen.orientation?.type
+      : undefined;
+  const runtimeIsPortrait =
+    runtimeViewportHeight >= runtimeViewportWidth ||
+    runtimeScreenOrientation?.includes('portrait') ||
+    (typeof window !== 'undefined' &&
+      window.matchMedia('(orientation: portrait)').matches);
+  const runtimeHasTouch =
+    deviceProfile.inputMode === 'touch' ||
+    (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
   const isTabletPortraitTouch =
-    deviceProfile.formFactor === 'tablet' &&
-    deviceProfile.inputMode === 'touch' &&
-    deviceProfile.viewportHeight >= deviceProfile.viewportWidth;
+    runtimeHasTouch &&
+    runtimeIsPortrait &&
+    (deviceProfile.formFactor === 'tablet' ||
+      (deviceProfile.formFactor === 'tv' &&
+        Math.min(runtimeViewportWidth, runtimeViewportHeight) >= 600));
+  const deviceOrientation = runtimeIsPortrait ? 'portrait' : 'landscape';
   const isTv =
     !isTabletPortraitTouch &&
     (deviceProfile.formFactor === 'tv' || legacyIsTv);
@@ -60,9 +84,14 @@ export function AppShell({
       data-device-runtime={deviceProfile.runtime}
       data-device-form-factor={deviceProfile.formFactor}
       data-device-input={deviceProfile.inputMode}
+      data-device-touch-capable={runtimeHasTouch ? 'true' : 'false'}
+      data-device-orientation={deviceOrientation}
+      data-device-tablet-portrait-touch={isTabletPortraitTouch ? 'true' : 'false'}
       data-device-tv-platform={tvPlatform}
       data-viewport-width={deviceProfile.viewportWidth}
       data-viewport-height={deviceProfile.viewportHeight}
+      data-visual-viewport-width={runtimeViewportWidth}
+      data-visual-viewport-height={runtimeViewportHeight}
       data-device-pixel-ratio={deviceProfile.devicePixelRatio}
       data-player-strategy={deviceProfile.playerStrategy}
     >
