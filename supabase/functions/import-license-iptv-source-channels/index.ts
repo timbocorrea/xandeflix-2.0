@@ -872,6 +872,10 @@ type XtreamCredentials = {
   password: string;
 };
 
+type XtreamCategory = Record<string, unknown>;
+
+type XtreamCategoryMap = Map<string, string>;
+
 function resolveXtreamCredentials(sourceUrl: string): XtreamCredentials | null {
   try {
     const parsed = new URL(sourceUrl);
@@ -962,6 +966,47 @@ async function fetchXtreamJson<T>(url: string): Promise<T> {
   }
 }
 
+function buildXtreamCategoryMap(categories: XtreamCategory[]): XtreamCategoryMap {
+  const categoryMap: XtreamCategoryMap = new Map();
+
+  for (const category of Array.isArray(categories) ? categories : []) {
+    const categoryId = getXtreamNumericId(category.category_id);
+    const categoryName = getXtreamString(category.category_name);
+
+    if (categoryId && categoryName) {
+      categoryMap.set(categoryId, categoryName);
+    }
+  }
+
+  return categoryMap;
+}
+
+function resolveXtreamGroupTitle({
+  categoryMap,
+  categoryId,
+  categoryName,
+  fallback,
+}: {
+  categoryMap: XtreamCategoryMap;
+  categoryId: unknown;
+  categoryName: unknown;
+  fallback: string;
+}) {
+  const directCategoryName = getXtreamString(categoryName);
+
+  if (directCategoryName) {
+    return directCategoryName;
+  }
+
+  const normalizedCategoryId = getXtreamNumericId(categoryId);
+
+  if (!normalizedCategoryId) {
+    return fallback;
+  }
+
+  return categoryMap.get(normalizedCategoryId) ?? fallback;
+}
+
 function buildXtreamStreamUrl({
   credentials,
   kind,
@@ -1032,19 +1077,35 @@ async function importAndWriteXtreamSource({
   type XtreamLiveStream = Record<string, unknown>;
   type XtreamVodStream = Record<string, unknown>;
 
-  const liveStreams = await fetchXtreamJson<XtreamLiveStream[]>(
-    buildXtreamApiUrl({
-      credentials,
-      action: "get_live_streams",
-    }),
-  );
+  const [liveCategories, vodCategories, liveStreams, vodStreams] = await Promise.all([
+    fetchXtreamJson<XtreamCategory[]>(
+      buildXtreamApiUrl({
+        credentials,
+        action: "get_live_categories",
+      }),
+    ),
+    fetchXtreamJson<XtreamCategory[]>(
+      buildXtreamApiUrl({
+        credentials,
+        action: "get_vod_categories",
+      }),
+    ),
+    fetchXtreamJson<XtreamLiveStream[]>(
+      buildXtreamApiUrl({
+        credentials,
+        action: "get_live_streams",
+      }),
+    ),
+    fetchXtreamJson<XtreamVodStream[]>(
+      buildXtreamApiUrl({
+        credentials,
+        action: "get_vod_streams",
+      }),
+    ),
+  ]);
 
-  const vodStreams = await fetchXtreamJson<XtreamVodStream[]>(
-    buildXtreamApiUrl({
-      credentials,
-      action: "get_vod_streams",
-    }),
-  );
+  const liveCategoryMap = buildXtreamCategoryMap(liveCategories);
+  const vodCategoryMap = buildXtreamCategoryMap(vodCategories);
 
   const batch: ParsedChannel[] = [];
 
@@ -1107,7 +1168,12 @@ async function importAndWriteXtreamSource({
           extension: "ts",
         }),
         logoUrl: getXtreamString(item.stream_icon) || null,
-        groupTitle: getXtreamString(item.category_name) || "Xtream Live",
+        groupTitle: resolveXtreamGroupTitle({
+          categoryMap: liveCategoryMap,
+          categoryId: item.category_id,
+          categoryName: item.category_name,
+          fallback: "Xtream Live",
+        }),
         tvgId: getXtreamString(item.epg_channel_id) || null,
         sortOrder: stats.sortOrder,
         contentKind: "live",
@@ -1148,7 +1214,12 @@ async function importAndWriteXtreamSource({
             getXtreamString(item.cover) ||
             getXtreamString(item.cover_big) ||
             null,
-          groupTitle: getXtreamString(item.category_name) || "Xtream VOD",
+          groupTitle: resolveXtreamGroupTitle({
+            categoryMap: vodCategoryMap,
+            categoryId: item.category_id,
+            categoryName: item.category_name,
+            fallback: "Xtream VOD",
+          }),
           tvgId: null,
           sortOrder: stats.sortOrder,
           contentKind: "movie",
