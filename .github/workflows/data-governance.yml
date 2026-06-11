@@ -27,3 +27,6 @@ jobs:
 
       - name: Run data governance guardrail
         run: npm run governance:check
+
+      - name: Build project
+        run: npm run build --if-present
