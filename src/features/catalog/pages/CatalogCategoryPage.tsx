@@ -1711,6 +1711,105 @@ export function CatalogCategoryPage({
     );
   }
 
+  async function loadMoviesAggregateCategoryItemsByGroup({
+    licenseCode,
+    deviceIdentifier,
+    groupTitles,
+  }: {
+    licenseCode: string;
+    deviceIdentifier: string;
+    groupTitles: string[];
+  }) {
+    const uniqueGroupTitles = Array.from(
+      new Set(
+        groupTitles
+          .map((groupTitle) => groupTitle.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (uniqueGroupTitles.length === 0) {
+      return [];
+    }
+
+    const perGroupLimit = Math.max(
+      MOVIES_CATEGORY_ROW_VISIBLE_LIMIT,
+      Math.ceil(CATEGORY_ITEM_LIMIT / uniqueGroupTitles.length),
+    );
+
+    const groupedResults = await Promise.all(
+      uniqueGroupTitles.map(async (groupTitle) => {
+        try {
+          return await loadHomeVodCategoryItems({
+            licenseCode,
+            deviceIdentifier,
+            groupTitles: [groupTitle],
+            limit: perGroupLimit,
+            slug: 'filmes',
+          });
+        } catch (error) {
+          console.warn('[XANDEFLIX_MOVIES_GROUP_LOAD_ERROR]', groupTitle, error);
+          return [];
+        }
+      }),
+    );
+
+    const getMovieDedupKey = (item: HomeVodItem) =>
+      String(
+        item.tmdbId ||
+          item.tmdbTitle ||
+          item.title ||
+          item.id ||
+          `${item.groupTitle ?? 'movie'}-${byMovie.size}`,
+      );
+
+    const getMovieQualityScore = (item: HomeVodItem) =>
+      Number(Boolean(item.posterUrl || item.backdropUrl)) * 100 +
+      Number(Boolean(item.tmdbId || item.tmdbTitle)) * 10 +
+      Number(Boolean(item.overview)) +
+      Number(Boolean(item.subtitle));
+
+    const byMovie = new Map<string, HomeVodItem>();
+
+    for (const item of groupedResults.flat()) {
+      if (item.kind && item.kind !== 'movie') {
+        continue;
+      }
+
+      const key = getMovieDedupKey(item);
+
+      if (!key) {
+        continue;
+      }
+
+      const currentItem = byMovie.get(key);
+
+      if (!currentItem || getMovieQualityScore(item) > getMovieQualityScore(currentItem)) {
+        byMovie.set(key, item);
+      }
+    }
+
+    return Array.from(byMovie.values()).sort((firstItem, secondItem) => {
+      const firstHasArtwork = Boolean(firstItem.posterUrl || firstItem.backdropUrl);
+      const secondHasArtwork = Boolean(secondItem.posterUrl || secondItem.backdropUrl);
+
+      if (firstHasArtwork !== secondHasArtwork) {
+        return firstHasArtwork ? -1 : 1;
+      }
+
+      const firstHasTmdb = Boolean(firstItem.tmdbId || firstItem.tmdbTitle);
+      const secondHasTmdb = Boolean(secondItem.tmdbId || secondItem.tmdbTitle);
+
+      if (firstHasTmdb !== secondHasTmdb) {
+        return firstHasTmdb ? -1 : 1;
+      }
+
+      return firstItem.title.localeCompare(secondItem.title, 'pt-BR', {
+        sensitivity: 'base',
+      });
+    });
+  }
+
   useEffect(() => {
     let isMounted = true;
 
@@ -1745,7 +1844,19 @@ export function CatalogCategoryPage({
           slug: category.slug,
         });
 
-        if (cachedItems?.length) {
+        const cachedGroupTitleCount =
+          category.slug === 'filmes'
+            ? new Set(
+                (cachedItems ?? [])
+                  .map((item) => item.groupTitle?.trim())
+                  .filter((groupTitle): groupTitle is string => Boolean(groupTitle)),
+              ).size
+            : 0;
+        const shouldUseCachedItems =
+          Boolean(cachedItems?.length) &&
+          (category.slug !== 'filmes' || cachedGroupTitleCount > 1);
+
+        if (shouldUseCachedItems && cachedItems) {
           const filteredCachedItems = filterSeriesEpisodes(cachedItems);
           const nextCachedItems =
             category.slug === 'series' || category.slug === 'series-group'
@@ -1760,13 +1871,20 @@ export function CatalogCategoryPage({
           setVisibleItemCount(0);
         }
 
-        const nextItems = await loadHomeVodCategoryItems({
-          licenseCode,
-          deviceIdentifier,
-          groupTitles: category.groupTitles,
-          limit: CATEGORY_ITEM_LIMIT,
-          slug: category.slug,
-        });
+        const nextItems =
+          category.slug === 'filmes'
+            ? await loadMoviesAggregateCategoryItemsByGroup({
+                licenseCode,
+                deviceIdentifier,
+                groupTitles: category.groupTitles,
+              })
+            : await loadHomeVodCategoryItems({
+                licenseCode,
+                deviceIdentifier,
+                groupTitles: category.groupTitles,
+                limit: CATEGORY_ITEM_LIMIT,
+                slug: category.slug,
+              });
 
         if (!isMounted) {
           return;
