@@ -125,3 +125,41 @@ A Fase 12.3 implementa a primeira migração funcional local-first da aplicaçã
 3. Medir comportamento visual quando não houver poster/backdrop local.
 4. Planejar fase futura para TMDB local-first, sem acionar warmup legado.
 5. Manter PR como Draft até revisão do Analista Mestre.
+
+## Gate runtime — comparação com main baseline
+
+Status: executado manualmente em navegador com Vite local.
+
+### Resultado na branch da PR
+
+- `/category/filmes` carregou hero, grupos e cards.
+- Cards sem imagem mantiveram fallback textual.
+- Página interna de filme abriu.
+- Home aparentou funcionamento normal.
+- Live TV carregou grupos e canais.
+- Player no navegador falhou ao reproduzir a fonte selecionada.
+- Séries ficou sem conteúdo.
+
+### Resultado na main baseline
+
+- Home carregou.
+- `/category/filmes` carregou hero, grupos e cards.
+- Página interna de filme abriu.
+- Player no navegador falhou também na main baseline.
+- Live TV carregou grupos e canais, mas o preview no navegador também falhou.
+- Séries também ficou sem conteúdo na main baseline.
+
+### Classificação
+
+- `CATEGORY_FILMES_FALLBACK`: aprovado.
+- `MOVIE_DETAIL_NAVIGATION`: aprovado.
+- `PLAYER_BROWSER_FAILURE`: preexistente ou externo ao escopo da PR.
+- `SERIES_EMPTY_CONTENT`: preexistente na main baseline.
+- `LIVE_TV_BROWSER_PREVIEW_FAILURE`: preexistente ou externo ao escopo da PR.
+- `PR13_DIRECT_REGRESSION`: não confirmada.
+
+### Decisão do gate
+
+A PR não deve ser bloqueada por Player em navegador, Séries sem conteúdo ou preview Live TV, porque esses comportamentos também foram observados na main baseline.
+
+A PR permanece restrita à ponte controlada de Filmes com fallback. O próximo gate recomendado é validar a mesma branch em dispositivo Android/Fire Stick antes de Ready for Review.
