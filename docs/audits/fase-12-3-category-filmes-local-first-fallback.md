@@ -1,0 +1,127 @@
+# Fase 12.3 - /category/filmes local-first com fallback legado
+
+## Objetivo
+
+Migrar de forma controlada somente a página `/category/filmes` para tentar ler primeiro o catálogo local-first do dispositivo, preservando o fallback legado atual quando o catálogo local estiver vazio, indisponível ou inválido.
+
+## Decisão arquitetural vigente
+
+- Supabase permanece responsável por autenticação, autorização, licenças, perfis, aparelhos, permissões, preferências e dados seguros.
+- O dispositivo passa gradualmente a ser responsável por catalogar, armazenar, enriquecer e cachear dados IPTV/TMDB.
+- Esta fase atravessa apenas a primeira ponte funcional: `/category/filmes`.
+
+## Arquivos alterados
+
+- `src/features/catalog/pages/CatalogCategoryPage.tsx`
+- `src/features/localCatalog/readModels/localMovieHomeVodAdapter.service.ts`
+- `docs/audits/fase-12-3-category-filmes-local-first-fallback.md`
+
+## O que foi implementado
+
+### 1. Adapter LocalCatalogItem -> HomeVodItem
+
+Foi criado o adapter:
+
+`src/features/localCatalog/readModels/localMovieHomeVodAdapter.service.ts`
+
+Responsabilidades:
+
+- Converter `LocalCatalogItem` para `HomeVodItem`.
+- Manter `kind: 'movie'`.
+- Mapear `id`, `name`, `groupTitle`, `streamUrl` e `tvgLogo`.
+- Usar `tvgLogo` como `posterUrl` quando disponível.
+- Usar fallback textual quando não houver imagem local.
+
+Mapeamento aplicado:
+
+- `LocalCatalogItem.id` -> `HomeVodItem.id`
+- `LocalCatalogItem.name` -> `HomeVodItem.title`
+- `LocalCatalogItem.groupTitle` -> `HomeVodItem.groupTitle`
+- `LocalCatalogItem.groupTitle` -> `HomeVodItem.subtitle`
+- `LocalCatalogItem.streamUrl` -> `HomeVodItem.streamUrl`
+- `LocalCatalogItem.tvgLogo` -> `HomeVodItem.posterUrl`
+- `LocalCatalogItem.contentKind === 'movie'` -> `HomeVodItem.kind = 'movie'`
+
+### 2. Leitura local-first para filmes
+
+Foi adicionada em `CatalogCategoryPage.tsx` a função:
+
+`loadLocalFirstMovieCategoryItemsByGroup()`
+
+Responsabilidades:
+
+- Receber os `groupTitles` da categoria Filmes.
+- Calcular limite por grupo preservando a estratégia existente.
+- Consultar `localMovieCatalogReadModel.listMovies()`.
+- Mapear os itens locais para `HomeVodItem`.
+- Retornar lista local quando houver dados.
+- Retornar lista vazia em caso de erro, permitindo fallback legado.
+
+### 3. Integração controlada em /category/filmes
+
+O ponto de decisão em `CatalogCategoryPage.tsx` foi alterado somente para `category.slug === 'filmes'`.
+
+Fluxo novo:
+
+1. Tenta carregar itens locais por grupo.
+2. Se houver itens locais, usa o catálogo local-first.
+3. Se não houver itens locais, chama o fluxo legado `loadMoviesAggregateCategoryItemsByGroup()`.
+4. Para todas as demais categorias, mantém `loadHomeVodCategoryItems()` como antes.
+
+## Fallback preservado
+
+O fallback legado foi mantido integralmente.
+
+A função `loadMoviesAggregateCategoryItemsByGroup()` continua existindo e continua usando `loadHomeVodCategoryItems()` por grupo para Filmes quando o catálogo local não fornece dados.
+
+## O que não foi alterado
+
+- Não remove Edge Functions.
+- Não altera migrations.
+- Não remove estruturas legadas de cache/licença já existentes.
+- Não remove funções legadas de catálogo centralizado já existentes.
+- Não remove rotinas legadas de enriquecimento já existentes.
+- Não remove rotinas legadas de importação já existentes.
+- Não altera Home.
+- Não altera Séries.
+- Não altera Live TV.
+- Não altera Player.
+- Não altera Android nativo.
+- Não altera D-pad estruturalmente.
+- Não executa warmup TMDB.
+- Não migra outras telas.
+- Não remove o legado.
+
+## Validações executadas
+
+Durante a fase foram executadas validações locais em ciclos:
+
+- Preparação de branch a partir da `main` sincronizada.
+- `npm run governance:check`
+- `npm run build --if-present`
+- `git diff --check`
+
+Resultados observados nos ciclos:
+
+- `GOVERNANCE_CHECK_EXIT_CODE=0`
+- `BUILD_EXIT_CODE=0`
+- `DIFF_CHECK_EXIT_CODE=0`
+
+## Riscos conhecidos
+
+- O catálogo local pode estar vazio em instalações ainda não importadas; neste caso o fallback legado deve continuar atendendo.
+- Nesta fase ainda não há enriquecimento TMDB local completo para `posterUrl`, `backdropUrl`, sinopse, gêneros, rating e ano.
+- O adapter usa `tvgLogo` como primeira fonte visual local; quando ausente, a UI deve continuar dependendo do fallback textual já existente.
+- A ordenação e a qualidade visual podem variar conforme a qualidade dos dados locais disponíveis.
+
+## Resultado técnico
+
+A Fase 12.3 implementa a primeira migração funcional local-first da aplicação final, limitada a `/category/filmes`, com fallback legado preservado e sem impacto intencional nas demais áreas do sistema.
+
+## Próximos passos recomendados
+
+1. Validar `/category/filmes` com catálogo local vazio para confirmar fallback legado.
+2. Validar `/category/filmes` com catálogo local preenchido para confirmar uso local-first.
+3. Medir comportamento visual quando não houver poster/backdrop local.
+4. Planejar fase futura para TMDB local-first, sem acionar warmup legado.
+5. Manter PR como Draft até revisão do Analista Mestre.
