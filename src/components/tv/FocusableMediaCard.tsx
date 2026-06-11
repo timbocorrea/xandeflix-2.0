@@ -52,6 +52,8 @@ export function FocusableMediaCard({
 }: FocusableMediaCardProps) {
   const [hasPosterError, setHasPosterError] = useState(false);
   const shouldShowPoster = Boolean(posterUrl) && !hasPosterError;
+  const shouldShowFallbackTextOverlay = !shouldShowPoster;
+  const shouldRenderTextOverlay = !hideTextOverlay || shouldShowFallbackTextOverlay;
 
   const fallbackPalette = useMemo(() => getFallbackPalette(title), [title]);
   const cardSizeClass =
@@ -119,7 +121,7 @@ export function FocusableMediaCard({
         />
       )}
 
-      {!hideTextOverlay ? (
+      {shouldRenderTextOverlay ? (
         <>
           <div
             className="absolute inset-0 bg-gradient-to-t from-black/78 via-black/20 to-transparent opacity-100 transition-opacity duration-150 group-data-[focused=true]:opacity-100"
@@ -127,7 +129,13 @@ export function FocusableMediaCard({
           />
 
           <div className="absolute inset-x-0 bottom-0 z-10 px-2 pb-2 pt-8">
-            <h3 className="line-clamp-2 text-[0.72rem] font-black leading-tight text-white drop-shadow md:text-[0.78rem]">
+            <h3
+              className={
+                shouldShowFallbackTextOverlay
+                  ? 'line-clamp-4 text-[0.78rem] font-black leading-tight text-white drop-shadow md:text-[0.86rem]'
+                  : 'line-clamp-2 text-[0.72rem] font-black leading-tight text-white drop-shadow md:text-[0.78rem]'
+              }
+            >
               {title}
             </h3>
 
