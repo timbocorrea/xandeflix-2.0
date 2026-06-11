@@ -6,6 +6,7 @@ import { FocusSafetyGuard } from '@/features/tv-focus';
 import {
   getCurrentFocusKey,
   init,
+  setFocus,
   setKeyMap,
 } from '@noriginmedia/norigin-spatial-navigation';
 
@@ -69,6 +70,59 @@ function blurNativeFocusedButtonIfNeeded() {
   }
 }
 
+const INITIAL_FOCUS_SELECTORS = [
+  '[data-nav-id="hero-play-button"]',
+  '[data-nav-id="hero-info-button"]',
+  '[data-nav-id^="catalog-section-"][data-nav-id*="-item-"]',
+  '[data-nav-id="live-group-0"]',
+  '[data-nav-id="live-channel-0"]',
+  '[data-nav-id="settings-device-id-card"]',
+  '[data-nav-id="sidebar-home"]',
+  '[data-nav-id="mobile-home"]',
+] as const;
+
+function getFirstAvailableSpatialFocusKey(): string | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const activeElement = document.activeElement;
+
+  if (
+    activeElement instanceof HTMLElement &&
+    !isEditableElement(activeElement) &&
+    activeElement.dataset.navId
+  ) {
+    return activeElement.dataset.navId;
+  }
+
+  for (const selector of INITIAL_FOCUS_SELECTORS) {
+    const element = document.querySelector<HTMLElement>(selector);
+
+    if (element?.dataset.navId) {
+      return element.dataset.navId;
+    }
+  }
+
+  return null;
+}
+
+function seedSpatialFocusIfNeeded() {
+  const targetFocusKey = getFirstAvailableSpatialFocusKey();
+
+  if (!targetFocusKey) {
+    return null;
+  }
+
+  setFocus(targetFocusKey);
+
+  window.requestAnimationFrame(() => {
+    setFocus(targetFocusKey);
+  });
+
+  return targetFocusKey;
+}
+
 export function SpatialNavigationProvider({
   children,
 }: SpatialNavigationProviderProps) {
@@ -100,6 +154,26 @@ export function SpatialNavigationProvider({
 
       const activeElement = document.activeElement;
       const currentFocusKey = getCurrentFocusKey();
+
+      if (!currentFocusKey) {
+        const seededFocusKey = seedSpatialFocusIfNeeded();
+
+        if (ENABLE_SPATIAL_DEBUG) {
+          spatialDebug('provider', 'Seed focus before spatial key handling', {
+            key: event.key,
+            keyCode: event.keyCode,
+            which: event.which,
+            seededFocusKey: seededFocusKey || 'NONE',
+            activeElement: activeElement?.tagName || 'NONE',
+            activeNavId:
+              activeElement instanceof HTMLElement
+                ? activeElement.dataset.navId || 'NONE'
+                : 'NONE',
+          });
+        }
+
+        return;
+      }
 
       if (!isEditableElement(activeElement)) {
         event.preventDefault();
