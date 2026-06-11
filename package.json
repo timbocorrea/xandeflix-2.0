@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "governance:check": "node scripts/guardrails/check-data-governance.mjs",
     "postinstall": "node scripts/patch-capacitor-java17.cjs"
   },
   "dependencies": {
