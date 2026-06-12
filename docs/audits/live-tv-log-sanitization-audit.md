@@ -143,4 +143,3 @@ READY_FOR_REVIEW_RECOMENDADO=SIM
 
 Observacao:
 Este registro nao inclui linhas brutas de log nem nomes reais de canais, grupos, URLs, payloads crus ou erros crus.
-
