@@ -109,7 +109,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         Log.i(
                 TAG,
                 "Activity recebeu extras. hasTitle="
-                        + hasText(currentTitle)
+                        + currentHasTitle
                         + " hasStreamUrl=true streamKind="
                         + currentKind
                         + " positionMs="
@@ -177,7 +177,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         Log.i(
                 TAG,
                 "Inicializando ExoPlayer. hasTitle="
-                        + hasText(currentTitle)
+                        + currentHasTitle
                         + " hasStreamUrl=true streamKind="
                         + currentKind
         );
@@ -232,7 +232,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                 Log.e(
                         TAG,
                         "Falha no ExoPlayer. hasTitle="
-                                + hasText(currentTitle)
+                                + currentHasTitle
                                 + " hasStreamUrl=true streamKind="
                                 + currentKind
                                 + " candidateIndex="
@@ -263,7 +263,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                         "Estado ExoPlayer. eventCode="
                                 + playbackState
                                 + " hasTitle="
-                                + hasText(currentTitle)
+                                + currentHasTitle
                                 + " hasStreamUrl=true streamKind="
                                 + currentKind
                                 + " candidateIndex="
