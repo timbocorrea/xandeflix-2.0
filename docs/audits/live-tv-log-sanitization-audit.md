@@ -86,3 +86,18 @@ Ajuste aplicado:
 Classificacao:
 TELEMETRY_LOG_SANITIZATION_PATCH=APLICADO
 
+## Ajuste corretivo real - telemetria de preview
+
+No ciclo anterior, o relatorio foi atualizado, mas a substituicao no TSX nao havia sido aplicada porque o bloco exato nao foi encontrado.
+
+Neste ciclo foi aplicado patch real por regex tolerante em LiveTvPage.tsx.
+
+Confirmacao esperada no codigo:
+- name: event.name removido do payload do log.
+- message: event.message removido do payload do log.
+- telemetryCode: event.name mantido como codigo tecnico.
+- hasMessage: Boolean(event.message) mantido como flag booleana.
+
+Classificacao:
+TELEMETRY_LOG_TSX_REAL_PATCH=APLICADO
+

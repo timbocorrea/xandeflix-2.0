@@ -595,9 +595,9 @@ export default function LiveTvPage() {
 
       console.info("[XANDEFLIX_LIVE_PREVIEW_TELEMETRY]", {
         source: event.source,
-        name: event.name,
+        telemetryCode: event.name,
         level: event.level,
-        message: event.message,
+        hasMessage: Boolean(event.message),
       });
     },
     [],
