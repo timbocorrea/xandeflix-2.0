@@ -100,4 +100,3 @@ Confirmacao esperada no codigo:
 
 Classificacao:
 TELEMETRY_LOG_TSX_REAL_PATCH=APLICADO
-
