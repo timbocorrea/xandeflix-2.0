@@ -24,6 +24,9 @@ import {
   loadHomeVodSections,
   type HomeVodItem,
 } from '../services/homeVod.service';
+import { localMovieCatalogReadModel } from '../../localCatalog/readModels/localMovieCatalogReadModel.service';
+import { mapLocalMovieCatalogItemsToHomeVodItems } from '../../localCatalog/readModels/localMovieHomeVodAdapter.service';
+
 import {
   enrichSeriesHeroHighlights,
   hydrateSeriesHeroHighlightsFromCache,
@@ -1711,6 +1714,45 @@ export function CatalogCategoryPage({
     );
   }
 
+  async function loadLocalFirstMovieCategoryItemsByGroup({
+    groupTitles,
+  }: {
+    groupTitles: string[];
+  }): Promise<HomeVodItem[]> {
+    const uniqueGroupTitles = Array.from(
+      new Set(
+        groupTitles
+          .map((groupTitle) => groupTitle.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (uniqueGroupTitles.length === 0) {
+      return [];
+    }
+
+    const perGroupLimit = Math.max(
+      MOVIES_CATEGORY_ROW_VISIBLE_LIMIT,
+      Math.ceil(CATEGORY_ITEM_LIMIT / uniqueGroupTitles.length),
+    );
+
+    try {
+      const groupedResults = await Promise.all(
+        uniqueGroupTitles.map(async (groupTitle) =>
+          localMovieCatalogReadModel.listMovies({
+            groupTitle,
+            limit: perGroupLimit,
+          }),
+        ),
+      );
+
+      return mapLocalMovieCatalogItemsToHomeVodItems(groupedResults.flat());
+    } catch (error) {
+      console.warn('[XANDEFLIX_MOVIES_LOCAL_FIRST_LOAD_ERROR]', error);
+      return [];
+    }
+  }
+
   async function loadMoviesAggregateCategoryItemsByGroup({
     licenseCode,
     deviceIdentifier,
@@ -1873,11 +1915,21 @@ export function CatalogCategoryPage({
 
         const nextItems =
           category.slug === 'filmes'
-            ? await loadMoviesAggregateCategoryItemsByGroup({
-                licenseCode,
-                deviceIdentifier,
-                groupTitles: category.groupTitles,
-              })
+            ? await (async () => {
+                const localItems = await loadLocalFirstMovieCategoryItemsByGroup({
+                  groupTitles: category.groupTitles,
+                });
+
+                if (localItems.length > 0) {
+                  return localItems;
+                }
+
+                return loadMoviesAggregateCategoryItemsByGroup({
+                  licenseCode,
+                  deviceIdentifier,
+                  groupTitles: category.groupTitles,
+                });
+              })()
             : await loadHomeVodCategoryItems({
                 licenseCode,
                 deviceIdentifier,
@@ -2360,18 +2412,32 @@ export function CatalogCategoryPage({
   useEffect(() => {
     function goBackToHome() {
       const navigationState = location.state as
-        | { fromSeriesDetail?: boolean; fromSeriesCategory?: boolean; returnTo?: string }
+        | {
+            fromSeriesDetail?: boolean;
+            fromSeriesCategory?: boolean;
+            fromMoviesCategory?: boolean;
+            fromMovieDetail?: boolean;
+            returnTo?: string;
+          }
         | null;
 
+      const isSeriesNavigationPage = isSeriesDetailPage || isSeriesGroupListPage;
+      const isMovieNavigationPage = isMovieDetailPage;
+
       if (
-        (isSeriesDetailPage || isSeriesGroupListPage) &&
+        (isSeriesNavigationPage || isMovieNavigationPage) &&
         navigationState?.returnTo
       ) {
         navigate(navigationState.returnTo, { replace: true });
         return;
       }
 
-      if ((isSeriesDetailPage || isSeriesGroupListPage) && window.history.length > 1) {
+      if (isMovieNavigationPage) {
+        navigate('/category/filmes', { replace: true });
+        return;
+      }
+
+      if (isSeriesNavigationPage && window.history.length > 1) {
         navigate(-1);
         return;
       }
@@ -2410,7 +2476,13 @@ export function CatalogCategoryPage({
       window.removeEventListener('keydown', handleBackNavigation);
       void capacitorBackButtonListener.then((listener) => listener.remove());
     };
-  }, [navigate, location, isSeriesDetailPage, isSeriesGroupListPage]);
+  }, [
+    navigate,
+    location,
+    isSeriesDetailPage,
+    isSeriesGroupListPage,
+    isMovieDetailPage,
+  ]);
 
   function resolveEpisodeTitle(item: HomeVodItem, index: number) {
     return item.episodeTitle || item.title || `Episodio ${index + 1}`;
