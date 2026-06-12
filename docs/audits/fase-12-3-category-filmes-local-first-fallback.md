@@ -229,3 +229,49 @@ Classificação final deste ajuste:
 - `BACK_MOVIE_DETAIL_RETURN`: corrigido em código.
 - `CICLO_4C_PATCH_CODE`: aplicado.
 - `PATCH_SCOPE`: mínimo.
+
+## Gate Final Fire Stick — aprovado
+
+Dispositivo: Amazon Fire Stick AFTSS / G071CQ070344374G.
+Head validado: 756ed44.
+APK debug novo: gerado após `cap sync android` e `assembleDebug`, instalado sem limpar dados.
+APK timestamp informado: 2026-06-11 21:52:42.
+
+Checklist validado manualmente:
+
+- App abriu.
+- Licença manteve ativação.
+- `/category/filmes` abriu.
+- Filme abriu página interna.
+- Detalhe do filme apareceu.
+- BACK no detalhe retornou para `/category/filmes`.
+- Foi possível abrir o mesmo ou outro filme novamente.
+- Assistir agora abriu o player.
+- Vídeo reproduziu no Fire Stick.
+- BACK saiu do player sem crash.
+- Live TV continuou abrindo.
+- App não crashou.
+
+Observação fora do escopo:
+
+- Séries ainda não estão carregando.
+- Esse comportamento já havia sido observado também na baseline `main` durante os gates anteriores.
+- Portanto, não foi classificado como regressão direta da PR #13.
+- A correção de Séries deve ser tratada em demanda própria, separada da PR #13.
+
+Classificação:
+
+- `PR13_FIRE_STICK_GATE_FINAL`: aprovado.
+- `LOCAL_FIRST_FILMES`: aprovado.
+- `FALLBACK_LEGADO_FILMES`: aprovado.
+- `MOVIE_DETAIL_BACK_RETURN`: aprovado.
+- `PLAYER_FIRE_STICK`: aprovado.
+- `LIVE_TV_REGRESSION`: não.
+- `HOME_REGRESSION`: não.
+- `SERIES_REGRESSION_PR13`: não confirmada / fora do escopo.
+- `APP_CRASH`: não.
+- `READY_FOR_REVIEW_RECOMMENDED`: sim.
+
+Decisão:
+
+A PR #13 está apta a sair de Draft e avançar para Ready for Review, mantendo merge controlado separado.
