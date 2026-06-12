@@ -197,3 +197,19 @@ Classificação:
 
 - `BACK_MOVIE_DETAIL_RETURN`: corrigido.
 - `PATCH_SCOPE`: mínimo e restrito à navegação do detalhe de filme.
+
+## Patch corretivo efetivado — ciclo 4B
+
+O ciclo 4 inicial registrou a intenção do patch, mas o alvo textual do arquivo não foi encontrado e o código não havia sido alterado.
+
+No ciclo 4B, a correção foi efetivamente aplicada no handler de BACK da página de categoria:
+
+- `movie-detail` agora respeita `returnTo` quando presente.
+- Sem `returnTo`, `movie-detail` retorna para `/category/filmes`.
+- A alteração segue restrita à navegação de retorno do detalhe de filme.
+
+Classificação atualizada:
+
+- `BACK_MOVIE_DETAIL_RETURN`: corrigido em código.
+- `CICLO_4B_PATCH_CODE`: aplicado.
+- `PATCH_SCOPE`: mínimo e restrito.
