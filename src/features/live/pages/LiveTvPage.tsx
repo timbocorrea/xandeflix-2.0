@@ -121,23 +121,6 @@ function getChannelKey(channel: IptvChannel) {
 }
 
 
-function maskStreamUrl(rawUrl: string) {
-  const trimmedUrl = rawUrl.trim();
-
-  if (!trimmedUrl) {
-    return "[empty-stream-url]";
-  }
-
-  const urlWithoutHeaders = trimmedUrl.split("|")[0] ?? trimmedUrl;
-
-  try {
-    const parsedUrl = new URL(urlWithoutHeaders);
-    return `${parsedUrl.protocol}//${parsedUrl.host}/...`;
-  } catch {
-    return "[masked-stream-url]";
-  }
-}
-
 function summarizeUnknownError(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -627,8 +610,9 @@ export default function LiveTvPage() {
       const stream = detectStreamKind(channel.url);
 
       console.info("[XANDEFLIX_LIVE_FULLSCREEN_OPEN]", {
-        channel: channel.name,
-        stream: maskStreamUrl(channel.url),
+        fullscreenRequested: true,
+        hasPlaybackUrl: Boolean(channel.url),
+        hasChannelName: Boolean(channel.name),
         kind: stream.kind,
         mode: isNativeAndroidPlayerAvailable(stream.kind)
           ? "native-android-direct"
@@ -652,11 +636,14 @@ export default function LiveTvPage() {
           return;
         } catch (fullscreenError) {
           nativeFullscreenReturnRef.current = false;
-          const message = summarizeUnknownError(fullscreenError);
           console.warn("[XANDEFLIX_LIVE_FULLSCREEN_NATIVE_ERROR]", {
-            channel: channel.name,
-            stream: maskStreamUrl(channel.url),
-            error: message,
+            fullscreenNativeFailed: true,
+            hasPlaybackUrl: Boolean(channel.url),
+            hasChannelName: Boolean(channel.name),
+            errorName:
+              fullscreenError instanceof Error
+                ? fullscreenError.name || "Error"
+                : typeof fullscreenError,
           });
         }
       }
@@ -683,8 +670,9 @@ export default function LiveTvPage() {
       setPreviewError(null);
 
       console.info("[XANDEFLIX_LIVE_PREVIEW_START]", {
-        channel: channel.name,
-        stream: maskStreamUrl(channel.url),
+        previewRequested: true,
+        hasPlaybackUrl: Boolean(channel.url),
+        hasChannelName: Boolean(channel.name),
       });
 
       if (!videoElement) {
@@ -743,10 +731,10 @@ export default function LiveTvPage() {
           setPreviewError(null);
 
           console.info("[XANDEFLIX_LIVE_PREVIEW_NATIVE_INLINE_STARTED]", {
-            channel: channel.name,
-            stream: maskStreamUrl(channel.url),
+            playbackRequested: true,
+            hasPlaybackUrl: Boolean(channel.url),
+            hasChannelName: Boolean(channel.name),
             kind: stream.kind,
-            layout: previewLayout,
           });
           return;
         }
@@ -798,9 +786,13 @@ export default function LiveTvPage() {
         setPreviewError(message);
 
         console.warn("[XANDEFLIX_LIVE_PREVIEW_ERROR]", {
-          channel: channel.name,
-          stream: maskStreamUrl(channel.url),
-          error: message,
+          previewFailed: true,
+          hasPlaybackUrl: Boolean(channel.url),
+          hasChannelName: Boolean(channel.name),
+          errorName:
+            previewLoadError instanceof Error
+              ? previewLoadError.name || "Error"
+              : typeof previewLoadError,
         });
       }
     },
@@ -901,8 +893,9 @@ export default function LiveTvPage() {
 
       window.setTimeout(() => {
         console.info("[XANDEFLIX_LIVE_PREVIEW_RESTORE_AFTER_FULLSCREEN]", {
-          channel: previewChannel.name,
-          stream: maskStreamUrl(previewChannel.url),
+          restoreRequested: true,
+          hasPlaybackUrl: Boolean(previewChannel.url),
+          hasChannelName: Boolean(previewChannel.name),
           kind: stream.kind,
         });
 
@@ -926,7 +919,12 @@ export default function LiveTvPage() {
 
     const nativeResumeListenerPromise = addNativeAndroidPlayerResumeListener(
       (event) => {
-        console.info("[XANDEFLIX_LIVE_NATIVE_RESUME_EVENT]", event);
+        console.info("[XANDEFLIX_LIVE_NATIVE_RESUME_EVENT]", {
+          resumed: true,
+          hasPositionMs: typeof event?.positionMs === "number",
+          hasStreamUrl: Boolean(event?.streamUrl),
+          source: event?.source ?? "unknown",
+        });
         restorePreviewAfterNativeFullscreen();
       },
     );
@@ -959,7 +957,8 @@ export default function LiveTvPage() {
         now - lastActivation.timestamp < 900
       ) {
         console.info("[XANDEFLIX_LIVE_CHANNEL_DUPLICATE_OK_IGNORED]", {
-          channel: channel.name,
+          duplicateIgnored: true,
+          hasChannelName: Boolean(channel.name),
           elapsedMs: now - lastActivation.timestamp,
         });
         return;
