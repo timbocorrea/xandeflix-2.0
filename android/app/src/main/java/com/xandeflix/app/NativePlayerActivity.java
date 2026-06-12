@@ -53,8 +53,8 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     private PlayerView playerView;
     private ExoPlayer player;
-    private String currentMaskedUrl = "";
     private String currentTitle = "Xandeflix Player";
+    private boolean currentHasTitle = false;
     private String currentKind = "unknown";
     private String currentStreamUrl = "";
     private long requestedStartPositionMs = 0L;
@@ -105,14 +105,17 @@ public class NativePlayerActivity extends AppCompatActivity {
         currentTitle = streamTitle != null && !streamTitle.trim().isEmpty()
                 ? streamTitle.trim()
                 : "Xandeflix Player";
-        currentKind = streamKind != null && !streamKind.trim().isEmpty()
-                ? streamKind.trim()
-                : "unknown";
-        currentMaskedUrl = NativeStreamRequest.fromRawUrl(trimmedUrl).get(0).getMaskedUrl();
+        currentKind = sanitizeStreamKind(streamKind);
+        currentHasTitle = hasText(currentTitle);
 
         Log.i(
                 TAG,
-                "Activity recebeu extras. title=\"" + currentTitle + "\" kind=\"" + currentKind + "\" url=" + currentMaskedUrl
+                "Activity recebeu extras. hasTitle="
+                        + currentHasTitle
+                        + " hasStreamUrl=true streamKind="
+                        + currentKind
+                        + " positionMs="
+                        + requestedStartPositionMs
         );
 
         FrameLayout root = new FrameLayout(this);
@@ -175,7 +178,10 @@ public class NativePlayerActivity extends AppCompatActivity {
     private void initializePlayer(String streamUrl) {
         Log.i(
                 TAG,
-                "Inicializando ExoPlayer. title=\"" + currentTitle + "\" kind=\"" + currentKind + "\" url=" + currentMaskedUrl
+                "Inicializando ExoPlayer. hasTitle="
+                        + currentHasTitle
+                        + " hasStreamUrl=true streamKind="
+                        + currentKind
         );
 
         playbackRequests = NativeStreamRequest.fromRawUrl(streamUrl);
@@ -188,16 +194,12 @@ public class NativePlayerActivity extends AppCompatActivity {
         }
 
         NativeStreamRequest initialRequest = playbackRequests.get(0);
-        currentMaskedUrl = initialRequest.getMaskedUrl();
 
         Log.i(
                 TAG,
-                "Candidatos nativos preparados. count="
+                "Candidatos nativos preparados. candidateCount="
                         + playbackRequests.size()
-                        + " headers="
-                        + initialRequest.getHeaderSummary()
-                        + " url="
-                        + currentMaskedUrl
+                        + " hasStreamUrl=true"
         );
 
         DefaultDataSource.Factory dataSourceFactory =
@@ -231,19 +233,18 @@ public class NativePlayerActivity extends AppCompatActivity {
             public void onPlayerError(PlaybackException error) {
                 Log.e(
                         TAG,
-                        "Falha no ExoPlayer. title=\""
-                                + currentTitle
-                                + "\" kind=\""
+                        "Falha no ExoPlayer. hasTitle="
+                                + currentHasTitle
+                                + " hasStreamUrl=true streamKind="
                                 + currentKind
-                                + "\" url="
-                                + currentMaskedUrl
-                                + " candidate="
-                                + getCurrentCandidateLabel()
-                                + " error="
-                                + error.getErrorCodeName()
+                                + " candidateIndex="
+                                + getCurrentCandidateIndex()
+                                + " candidateCount="
+                                + getCurrentCandidateCount()
+                                + " errorName="
+                                + getPlaybackErrorName(error)
                                 + " httpStatus="
-                                + NativeStreamRequest.describeHttpStatus(error),
-                        error
+                                + NativeStreamRequest.describeHttpStatus(error)
                 );
 
                 if (tryNextPlaybackCandidate(error)) {
@@ -261,16 +262,16 @@ public class NativePlayerActivity extends AppCompatActivity {
             public void onPlaybackStateChanged(int playbackState) {
                 Log.i(
                         TAG,
-                        "Estado ExoPlayer: "
+                        "Estado ExoPlayer. eventCode="
                                 + playbackState
-                                + " title=\""
-                                + currentTitle
-                                + "\" kind=\""
+                                + " hasTitle="
+                                + currentHasTitle
+                                + " hasStreamUrl=true streamKind="
                                 + currentKind
-                                + "\" url="
-                                + currentMaskedUrl
-                                + " candidate="
-                                + getCurrentCandidateLabel()
+                                + " candidateIndex="
+                                + getCurrentCandidateIndex()
+                                + " candidateCount="
+                                + getCurrentCandidateCount()
                 );
             }
         });
@@ -281,10 +282,12 @@ public class NativePlayerActivity extends AppCompatActivity {
 
         Log.i(
                 TAG,
-                "ExoPlayer fast-start solicitado para stream do usuário: " + currentMaskedUrl
-                        + " bufferForPlaybackMs=" + FAST_START_PLAYBACK_BUFFER_MS
-                        + " minBufferMs=" + FAST_START_MIN_BUFFER_MS
-                        + " maxBufferMs=" + FAST_START_MAX_BUFFER_MS
+                "ExoPlayer fast-start solicitado. hasStreamUrl=true bufferForPlaybackMs="
+                        + FAST_START_PLAYBACK_BUFFER_MS
+                        + " minBufferMs="
+                        + FAST_START_MIN_BUFFER_MS
+                        + " maxBufferMs="
+                        + FAST_START_MAX_BUFFER_MS
         );
     }
 
@@ -295,7 +298,6 @@ public class NativePlayerActivity extends AppCompatActivity {
 
         NativeStreamRequest request = playbackRequests.get(requestIndex);
         currentRequestIndex = requestIndex;
-        currentMaskedUrl = request.getMaskedUrl();
 
         if (retry) {
             player.stop();
@@ -312,6 +314,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         );
         boolean hasExplicitEpisodeResume =
                 requestedStartPositionMs >= MIN_RESUME_POSITION_MS;
+        boolean hasSavedPosition = savedPlaybackPositionMs >= MIN_RESUME_POSITION_MS;
 
         if (resumePositionMs >= MIN_RESUME_POSITION_MS) {
             player.setMediaItem(mediaItem, resumePositionMs);
@@ -319,25 +322,27 @@ public class NativePlayerActivity extends AppCompatActivity {
                     TAG,
                     "Preparando stream com retomada inicial. explicit="
                             + hasExplicitEpisodeResume
+                            + " hasSavedPosition="
+                            + hasSavedPosition
                             + " requestedStartPositionMs="
                             + requestedStartPositionMs
                             + " savedPlaybackPositionMs="
                             + savedPlaybackPositionMs
                             + " resumePositionMs="
                             + resumePositionMs
-                            + " url="
-                            + currentMaskedUrl
-                            + " candidate="
-                            + getCurrentCandidateLabel()
+                            + " hasStreamUrl=true candidateIndex="
+                            + request.getCandidateIndex()
+                            + " candidateCount="
+                            + request.getCandidateCount()
             );
         } else {
             player.setMediaItem(mediaItem);
             Log.i(
                     TAG,
-                    "Preparando stream sem retomada inicial. url="
-                            + currentMaskedUrl
-                            + " candidate="
-                            + getCurrentCandidateLabel()
+                    "Preparando stream sem retomada inicial. hasStreamUrl=true candidateIndex="
+                            + request.getCandidateIndex()
+                            + " candidateCount="
+                            + request.getCandidateCount()
             );
         }
 
@@ -356,20 +361,21 @@ public class NativePlayerActivity extends AppCompatActivity {
             return false;
         }
 
+        NativeStreamRequest currentRequest = playbackRequests.get(currentRequestIndex);
         NativeStreamRequest nextRequest = playbackRequests.get(nextRequestIndex);
 
         Log.w(
                 TAG,
-                "HTTP ruim no candidato "
-                        + getCurrentCandidateLabel()
-                        + " status="
+                "HTTP ruim no candidato. candidateIndex="
+                        + currentRequest.getCandidateIndex()
+                        + " candidateCount="
+                        + currentRequest.getCandidateCount()
+                        + " httpStatus="
                         + NativeStreamRequest.describeHttpStatus(error)
-                        + ". Tentando proximo candidato "
+                        + " nextCandidateIndex="
                         + nextRequest.getCandidateIndex()
-                        + "/"
+                        + " nextCandidateCount="
                         + nextRequest.getCandidateCount()
-                        + " url="
-                        + nextRequest.getMaskedUrl()
         );
 
         preparePlaybackCandidate(nextRequestIndex, true);
@@ -378,21 +384,29 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     private String buildPlaybackErrorMessage(PlaybackException error) {
         String httpStatus = NativeStreamRequest.describeHttpStatus(error);
+        String errorName = getPlaybackErrorName(error);
 
         if (!"unknown".equals(httpStatus)) {
-            return "Nao foi possivel reproduzir: " + error.getErrorCodeName() + " (HTTP " + httpStatus + ")";
+            return "Nao foi possivel reproduzir: " + errorName + " (HTTP " + httpStatus + ")";
         }
 
-        return "Nao foi possivel reproduzir: " + error.getErrorCodeName();
+        return "Nao foi possivel reproduzir: " + errorName;
     }
 
-    private String getCurrentCandidateLabel() {
+    private int getCurrentCandidateIndex() {
         if (playbackRequests.isEmpty() || currentRequestIndex < 0 || currentRequestIndex >= playbackRequests.size()) {
-            return "0/0";
+            return 0;
         }
 
-        NativeStreamRequest request = playbackRequests.get(currentRequestIndex);
-        return request.getCandidateIndex() + "/" + request.getCandidateCount();
+        return playbackRequests.get(currentRequestIndex).getCandidateIndex();
+    }
+
+    private int getCurrentCandidateCount() {
+        if (playbackRequests.isEmpty() || currentRequestIndex < 0 || currentRequestIndex >= playbackRequests.size()) {
+            return 0;
+        }
+
+        return playbackRequests.get(currentRequestIndex).getCandidateCount();
     }
 
     private boolean shouldResumePlaybackPosition() {
@@ -522,7 +536,7 @@ public class NativePlayerActivity extends AppCompatActivity {
 
             return Math.max(0L, preferences.getLong("url:" + streamUrl.trim(), 0L));
         } catch (Exception error) {
-            Log.w(TAG, "Falha ao ler progresso salvo do player nativo.", error);
+            Log.w(TAG, "Falha ao ler progresso salvo do player nativo. errorName=" + getErrorName(error));
             return 0L;
         }
     }
@@ -547,9 +561,9 @@ public class NativePlayerActivity extends AppCompatActivity {
                     .putLong(getProgressStorageKey(), currentPositionMs)
                     .apply();
 
-            Log.i(TAG, "Progresso nativo salvo. positionMs=" + currentPositionMs + " url=" + currentMaskedUrl);
+            Log.i(TAG, "Progresso nativo salvo. positionMs=" + currentPositionMs + " hasStreamUrl=true");
         } catch (Exception error) {
-            Log.w(TAG, "Falha ao salvar progresso do player nativo.", error);
+            Log.w(TAG, "Falha ao salvar progresso do player nativo. errorName=" + getErrorName(error));
         }
     }
 
@@ -563,23 +577,6 @@ public class NativePlayerActivity extends AppCompatActivity {
                     hideControllerRunnable,
                     CONTROLLER_AUTO_HIDE_DELAY_MS
             );
-        }
-    }
-
-    private String maskStreamUrl(String url) {
-        try {
-            Uri uri = Uri.parse(url);
-            String scheme = uri.getScheme() != null ? uri.getScheme() : "unknown";
-            String host = uri.getHost() != null ? uri.getHost() : "unknown-host";
-            String lastSegment = uri.getLastPathSegment() != null ? uri.getLastPathSegment() : "";
-
-            if (lastSegment.isEmpty()) {
-                return scheme + "://" + host + "/...";
-            }
-
-            return scheme + "://" + host + "/.../" + lastSegment;
-        } catch (Exception error) {
-            return "[invalid-url]";
         }
     }
 
@@ -634,5 +631,45 @@ public class NativePlayerActivity extends AppCompatActivity {
             player.release();
             player = null;
         }
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String sanitizeStreamKind(String kind) {
+        if (!hasText(kind)) {
+            return "unknown";
+        }
+
+        return kind.trim();
+    }
+
+    private String getPlaybackErrorName(PlaybackException error) {
+        if (error == null) {
+            return "unknown";
+        }
+
+        String errorCodeName = error.getErrorCodeName();
+
+        if (hasText(errorCodeName)) {
+            return errorCodeName;
+        }
+
+        return getErrorName(error);
+    }
+
+    private String getErrorName(Throwable error) {
+        if (error == null) {
+            return "unknown";
+        }
+
+        String simpleName = error.getClass().getSimpleName();
+
+        if (hasText(simpleName)) {
+            return simpleName;
+        }
+
+        return "Throwable";
     }
 }
