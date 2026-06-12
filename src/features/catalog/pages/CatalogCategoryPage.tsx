@@ -1714,6 +1714,55 @@ export function CatalogCategoryPage({
     );
   }
 
+  function getMoviesLocalFirstMetricNowMs() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  }
+
+  function getMoviesLocalFirstMetricElapsedMs(startedAtMs: number) {
+    return Math.max(0, Math.round(getMoviesLocalFirstMetricNowMs() - startedAtMs));
+  }
+
+  function countSanitizedMovieGroups(nextItems: HomeVodItem[]) {
+    return new Set(
+      nextItems
+        .map((item) => item.groupTitle?.trim())
+        .filter((groupTitle): groupTitle is string => Boolean(groupTitle)),
+    ).size;
+  }
+
+  function logMoviesLocalFirstObservability({
+    source,
+    fallbackUsed,
+    localCount,
+    localGroupCount,
+    configuredGroupCount,
+    readTimeMs,
+    fallbackCount,
+    fallbackGroupCount,
+  }: {
+    source: 'local-first' | 'fallback';
+    fallbackUsed: boolean;
+    localCount: number;
+    localGroupCount: number;
+    configuredGroupCount: number;
+    readTimeMs: number;
+    fallbackCount?: number;
+    fallbackGroupCount?: number;
+  }) {
+    console.info('[XANDEFLIX_MOVIES_LOCAL_FIRST_OBSERVABILITY]', {
+      source,
+      fallbackUsed,
+      localCount,
+      localGroupCount,
+      configuredGroupCount,
+      readTimeMs,
+      fallbackCount,
+      fallbackGroupCount,
+    });
+  }
+
   async function loadLocalFirstMovieCategoryItemsByGroup({
     groupTitles,
   }: {
@@ -1748,7 +1797,8 @@ export function CatalogCategoryPage({
 
       return mapLocalMovieCatalogItemsToHomeVodItems(groupedResults.flat());
     } catch (error) {
-      console.warn('[XANDEFLIX_MOVIES_LOCAL_FIRST_LOAD_ERROR]', error);
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      console.warn('[XANDEFLIX_MOVIES_LOCAL_FIRST_LOAD_ERROR]', { errorName });
       return [];
     }
   }
@@ -1780,7 +1830,7 @@ export function CatalogCategoryPage({
     );
 
     const groupedResults = await Promise.all(
-      uniqueGroupTitles.map(async (groupTitle) => {
+      uniqueGroupTitles.map(async (groupTitle, groupIndex) => {
         try {
           return await loadHomeVodCategoryItems({
             licenseCode,
@@ -1790,7 +1840,11 @@ export function CatalogCategoryPage({
             slug: 'filmes',
           });
         } catch (error) {
-          console.warn('[XANDEFLIX_MOVIES_GROUP_LOAD_ERROR]', groupTitle, error);
+          const errorName = error instanceof Error ? error.name : 'UnknownError';
+          console.warn('[XANDEFLIX_MOVIES_GROUP_LOAD_ERROR]', {
+            groupIndex,
+            errorName,
+          });
           return [];
         }
       }),
@@ -1916,19 +1970,43 @@ export function CatalogCategoryPage({
         const nextItems =
           category.slug === 'filmes'
             ? await (async () => {
+                const localReadStartedAtMs = getMoviesLocalFirstMetricNowMs();
                 const localItems = await loadLocalFirstMovieCategoryItemsByGroup({
                   groupTitles: category.groupTitles,
                 });
+                const localReadTimeMs = getMoviesLocalFirstMetricElapsedMs(localReadStartedAtMs);
 
                 if (localItems.length > 0) {
+                  logMoviesLocalFirstObservability({
+                    source: 'local-first',
+                    fallbackUsed: false,
+                    localCount: localItems.length,
+                    localGroupCount: countSanitizedMovieGroups(localItems),
+                    configuredGroupCount: category.groupTitles.length,
+                    readTimeMs: localReadTimeMs,
+                  });
+
                   return localItems;
                 }
 
-                return loadMoviesAggregateCategoryItemsByGroup({
+                const fallbackItems = await loadMoviesAggregateCategoryItemsByGroup({
                   licenseCode,
                   deviceIdentifier,
                   groupTitles: category.groupTitles,
                 });
+
+                logMoviesLocalFirstObservability({
+                  source: 'fallback',
+                  fallbackUsed: true,
+                  localCount: 0,
+                  localGroupCount: 0,
+                  configuredGroupCount: category.groupTitles.length,
+                  readTimeMs: localReadTimeMs,
+                  fallbackCount: fallbackItems.length,
+                  fallbackGroupCount: countSanitizedMovieGroups(fallbackItems),
+                });
+
+                return fallbackItems;
               })()
             : await loadHomeVodCategoryItems({
                 licenseCode,
