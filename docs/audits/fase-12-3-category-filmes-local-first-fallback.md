@@ -213,3 +213,19 @@ Classificação atualizada:
 - `BACK_MOVIE_DETAIL_RETURN`: corrigido em código.
 - `CICLO_4B_PATCH_CODE`: aplicado.
 - `PATCH_SCOPE`: mínimo e restrito.
+
+## Patch corretivo efetivado — ciclo 4C
+
+Os ciclos 4 e 4B registraram a intenção do ajuste, mas o arquivo de código não havia sido alterado por incompatibilidade do alvo textual.
+
+No ciclo 4C, a correção foi aplicada no código:
+
+- o detalhe de filme agora respeita `returnTo` quando presente;
+- sem `returnTo`, o detalhe de filme retorna para `/category/filmes`;
+- o escopo segue restrito ao retorno da página interna de filme.
+
+Classificação final deste ajuste:
+
+- `BACK_MOVIE_DETAIL_RETURN`: corrigido em código.
+- `CICLO_4C_PATCH_CODE`: aplicado.
+- `PATCH_SCOPE`: mínimo.

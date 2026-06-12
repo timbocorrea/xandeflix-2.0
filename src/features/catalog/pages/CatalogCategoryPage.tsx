@@ -2412,18 +2412,32 @@ export function CatalogCategoryPage({
   useEffect(() => {
     function goBackToHome() {
       const navigationState = location.state as
-        | { fromSeriesDetail?: boolean; fromSeriesCategory?: boolean; returnTo?: string }
+        | {
+            fromSeriesDetail?: boolean;
+            fromSeriesCategory?: boolean;
+            fromMoviesCategory?: boolean;
+            fromMovieDetail?: boolean;
+            returnTo?: string;
+          }
         | null;
 
+      const isSeriesNavigationPage = isSeriesDetailPage || isSeriesGroupListPage;
+      const isMovieNavigationPage = isMovieDetailPage;
+
       if (
-        (isSeriesDetailPage || isSeriesGroupListPage) &&
+        (isSeriesNavigationPage || isMovieNavigationPage) &&
         navigationState?.returnTo
       ) {
         navigate(navigationState.returnTo, { replace: true });
         return;
       }
 
-      if ((isSeriesDetailPage || isSeriesGroupListPage) && window.history.length > 1) {
+      if (isMovieNavigationPage) {
+        navigate('/category/filmes', { replace: true });
+        return;
+      }
+
+      if (isSeriesNavigationPage && window.history.length > 1) {
         navigate(-1);
         return;
       }
@@ -2462,7 +2476,13 @@ export function CatalogCategoryPage({
       window.removeEventListener('keydown', handleBackNavigation);
       void capacitorBackButtonListener.then((listener) => listener.remove());
     };
-  }, [navigate, location, isSeriesDetailPage, isSeriesGroupListPage]);
+  }, [
+    navigate,
+    location,
+    isSeriesDetailPage,
+    isSeriesGroupListPage,
+    isMovieDetailPage,
+  ]);
 
   function resolveEpisodeTitle(item: HomeVodItem, index: number) {
     return item.episodeTitle || item.title || `Episodio ${index + 1}`;
