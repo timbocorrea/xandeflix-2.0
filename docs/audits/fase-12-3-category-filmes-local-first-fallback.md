@@ -180,3 +180,20 @@ Classificação:
 
 - `BACK_MOVIE_DETAIL_RETURN`: corrigido.
 - `PATCH_SCOPE`: mínimo e restrito à navegação do detalhe de filme.
+
+## Patch corretivo — BACK no detalhe do filme
+
+Após o Gate Fire Stick, foi identificado que o BACK na página interna de filme retornava para Home em vez de retornar para `/category/filmes`.
+
+A causa era restrita ao handler de navegação de retorno, que respeitava `returnTo` para páginas de Séries, mas não tratava explicitamente `movie-detail`.
+
+Correção aplicada:
+
+- `movie-detail` passa a respeitar `returnTo` quando presente.
+- Se `returnTo` não existir, `movie-detail` usa fallback seguro para `/category/filmes`.
+- O patch não altera Player, Live TV, Séries, Home, Android nativo, Supabase, Edge Functions ou D-pad estrutural.
+
+Classificação:
+
+- `BACK_MOVIE_DETAIL_RETURN`: corrigido.
+- `PATCH_SCOPE`: mínimo e restrito à navegação do detalhe de filme.
