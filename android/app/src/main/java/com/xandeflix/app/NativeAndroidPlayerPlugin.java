@@ -36,7 +36,6 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
     private PlayerView inlinePreviewView;
     private ExoPlayer inlinePreviewPlayer;
-    private String inlinePreviewMaskedUrl = "";
     private List<NativeStreamRequest> inlinePreviewRequests = new ArrayList<>();
     private int inlinePreviewRequestIndex = 0;
 
@@ -50,13 +49,23 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
         long lastPositionMs = NativePlayerActivity.consumeLastPlaybackPositionMs();
         String lastStreamUrl = NativePlayerActivity.consumeLastPlaybackStreamUrl();
+        boolean hasSavedPosition = lastPositionMs > 0L;
 
-        if (lastPositionMs > 0L) {
+        if (hasSavedPosition) {
             event.put("positionMs", lastPositionMs);
-            event.put("streamUrl", lastStreamUrl);
+            event.put("hasStreamUrl", hasText(lastStreamUrl));
+            event.put("hasSavedPosition", true);
         }
 
-        Log.i(TAG, "NativeAndroidPlayer resume event. positionMs=" + lastPositionMs);
+        Log.i(
+                TAG,
+                "NativeAndroidPlayer resume event. positionMs="
+                        + lastPositionMs
+                        + " hasSavedPosition="
+                        + hasSavedPosition
+                        + " hasStreamUrl="
+                        + hasText(lastStreamUrl)
+        );
         notifyListeners("resume", event, true);
     }
 
@@ -64,7 +73,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
     public void open(PluginCall call) {
         String url = call.getString("url");
         String title = call.getString("title", "Xandeflix Player");
-        String kind = call.getString("kind", "unknown");
+        String kind = sanitizeStreamKind(call.getString("kind", "unknown"));
         Long startPositionMs = call.getLong("startPositionMs", 0L);
 
         if (url == null || url.trim().isEmpty()) {
@@ -76,7 +85,12 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
         Log.i(
                 TAG,
-                "Plugin open solicitado. title=\"" + title + "\" kind=\"" + kind + "\" url=" + NativeStreamRequest.fromRawUrl(trimmedUrl).get(0).getMaskedUrl()
+                "Plugin open solicitado. hasTitle="
+                        + hasText(title)
+                        + " hasStreamUrl=true streamKind="
+                        + kind
+                        + " positionMs="
+                        + Math.max(0L, startPositionMs)
         );
 
         Intent intent = new Intent(getContext(), NativePlayerActivity.class);
@@ -96,7 +110,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
     public void startPreview(PluginCall call) {
         String url = call.getString("url");
         String title = call.getString("title", "Xandeflix Preview");
-        String kind = call.getString("kind", "unknown");
+        String kind = sanitizeStreamKind(call.getString("kind", "unknown"));
 
         Integer x = call.getInt("x");
         Integer y = call.getInt("y");
@@ -114,8 +128,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
         }
 
         String trimmedUrl = url.trim();
-        String safeTitle = title != null && !title.trim().isEmpty() ? title.trim() : "Xandeflix Preview";
-        String safeKind = kind != null && !kind.trim().isEmpty() ? kind.trim() : "unknown";
+        boolean hasTitle = hasText(title);
 
         Activity activity = getActivity();
 
@@ -144,7 +157,6 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 }
 
                 NativeStreamRequest initialRequest = inlinePreviewRequests.get(0);
-                inlinePreviewMaskedUrl = initialRequest.getMaskedUrl();
 
                 inlinePreviewView = new PlayerView(activity);
                 inlinePreviewView.setUseController(false);
@@ -183,19 +195,18 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                     public void onPlayerError(PlaybackException error) {
                         Log.e(
                                 TAG,
-                                "Falha no preview inline nativo. title=\""
-                                        + safeTitle
-                                        + "\" kind=\""
-                                        + safeKind
-                                        + "\" url="
-                                        + inlinePreviewMaskedUrl
-                                        + " candidate="
-                                        + getInlinePreviewCandidateLabel()
-                                        + " error="
-                                        + error.getErrorCodeName()
+                                "Falha no preview inline nativo. hasTitle="
+                                        + hasTitle
+                                        + " hasStreamUrl=true streamKind="
+                                        + kind
+                                        + " candidateIndex="
+                                        + getInlinePreviewCandidateIndex()
+                                        + " candidateCount="
+                                        + getInlinePreviewCandidateCount()
+                                        + " errorName="
+                                        + getPlaybackErrorName(error)
                                         + " httpStatus="
-                                        + NativeStreamRequest.describeHttpStatus(error),
-                                error
+                                        + NativeStreamRequest.describeHttpStatus(error)
                         );
 
                         tryNextInlinePreviewCandidate(error);
@@ -205,16 +216,16 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                     public void onPlaybackStateChanged(int playbackState) {
                         Log.i(
                                 TAG,
-                                "Preview inline nativo estado="
+                                "Preview inline nativo estado. eventCode="
                                         + playbackState
-                                        + " title=\""
-                                        + safeTitle
-                                        + "\" kind=\""
-                                        + safeKind
-                                        + "\" url="
-                                        + inlinePreviewMaskedUrl
-                                        + " candidate="
-                                        + getInlinePreviewCandidateLabel()
+                                        + " hasTitle="
+                                        + hasTitle
+                                        + " hasStreamUrl=true streamKind="
+                                        + kind
+                                        + " candidateIndex="
+                                        + getInlinePreviewCandidateIndex()
+                                        + " candidateCount="
+                                        + getInlinePreviewCandidateCount()
                         );
                     }
                 });
@@ -223,7 +234,22 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
                 Log.i(
                         TAG,
-                        "Preview inline nativo iniciado. title=\"" + safeTitle + "\" kind=\"" + safeKind + "\" url=" + inlinePreviewMaskedUrl + " x=" + x + " y=" + y + " width=" + width + " height=" + height
+                        "Preview inline nativo iniciado. hasTitle="
+                                + hasTitle
+                                + " hasStreamUrl=true streamKind="
+                                + kind
+                                + " candidateIndex="
+                                + getInlinePreviewCandidateIndex()
+                                + " candidateCount="
+                                + getInlinePreviewCandidateCount()
+                                + " x="
+                                + x
+                                + " y="
+                                + y
+                                + " width="
+                                + width
+                                + " height="
+                                + height
                 );
 
                 JSObject result = new JSObject();
@@ -231,8 +257,8 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 call.resolve(result);
             } catch (Exception error) {
                 stopInlinePreviewInternal();
-                Log.e(TAG, "Erro ao iniciar preview inline nativo.", error);
-                call.reject("Erro ao iniciar preview inline nativo: " + error.getMessage());
+                Log.e(TAG, "Erro ao iniciar preview inline nativo. errorName=" + getErrorName(error));
+                call.reject("Erro ao iniciar preview inline nativo.");
             }
         });
     }
@@ -295,8 +321,8 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 result.put("updated", true);
                 call.resolve(result);
             } catch (Exception error) {
-                Log.e(TAG, "Erro ao atualizar preview inline nativo.", error);
-                call.reject("Erro ao atualizar preview inline nativo: " + error.getMessage());
+                Log.e(TAG, "Erro ao atualizar preview inline nativo. errorName=" + getErrorName(error));
+                call.reject("Erro ao atualizar preview inline nativo.");
             }
         });
     }
@@ -312,7 +338,6 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
         NativeStreamRequest request = inlinePreviewRequests.get(requestIndex);
         inlinePreviewRequestIndex = requestIndex;
-        inlinePreviewMaskedUrl = request.getMaskedUrl();
 
         if (retry) {
             inlinePreviewPlayer.stop();
@@ -325,12 +350,12 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
         Log.i(
                 TAG,
-                "Preview inline nativo preparando candidato "
-                        + getInlinePreviewCandidateLabel()
-                        + " url="
-                        + inlinePreviewMaskedUrl
-                        + " headers="
-                        + request.getHeaderSummary()
+                "Preview inline nativo preparando candidato. candidateIndex="
+                        + request.getCandidateIndex()
+                        + " candidateCount="
+                        + request.getCandidateCount()
+                        + " hasStreamUrl=true retry="
+                        + retry
         );
     }
 
@@ -345,37 +370,49 @@ public class NativeAndroidPlayerPlugin extends Plugin {
             return false;
         }
 
+        NativeStreamRequest currentRequest = inlinePreviewRequests.get(inlinePreviewRequestIndex);
         NativeStreamRequest nextRequest = inlinePreviewRequests.get(nextRequestIndex);
 
         Log.w(
                 TAG,
-                "HTTP ruim no preview inline candidato "
-                        + getInlinePreviewCandidateLabel()
-                        + " status="
+                "HTTP ruim no preview inline candidato. candidateIndex="
+                        + currentRequest.getCandidateIndex()
+                        + " candidateCount="
+                        + currentRequest.getCandidateCount()
+                        + " httpStatus="
                         + NativeStreamRequest.describeHttpStatus(error)
-                        + ". Tentando proximo candidato "
+                        + " nextCandidateIndex="
                         + nextRequest.getCandidateIndex()
-                        + "/"
+                        + " nextCandidateCount="
                         + nextRequest.getCandidateCount()
-                        + " url="
-                        + nextRequest.getMaskedUrl()
         );
 
         prepareInlinePreviewCandidate(nextRequestIndex, true);
         return true;
     }
 
-    private String getInlinePreviewCandidateLabel() {
+    private int getInlinePreviewCandidateIndex() {
         if (
                 inlinePreviewRequests.isEmpty()
                         || inlinePreviewRequestIndex < 0
                         || inlinePreviewRequestIndex >= inlinePreviewRequests.size()
         ) {
-            return "0/0";
+            return 0;
         }
 
-        NativeStreamRequest request = inlinePreviewRequests.get(inlinePreviewRequestIndex);
-        return request.getCandidateIndex() + "/" + request.getCandidateCount();
+        return inlinePreviewRequests.get(inlinePreviewRequestIndex).getCandidateIndex();
+    }
+
+    private int getInlinePreviewCandidateCount() {
+        if (
+                inlinePreviewRequests.isEmpty()
+                        || inlinePreviewRequestIndex < 0
+                        || inlinePreviewRequestIndex >= inlinePreviewRequests.size()
+        ) {
+            return 0;
+        }
+
+        return inlinePreviewRequests.get(inlinePreviewRequestIndex).getCandidateCount();
     }
 
     @PluginMethod
@@ -402,6 +439,8 @@ public class NativeAndroidPlayerPlugin extends Plugin {
 
     private void stopInlinePreviewInternal() {
         try {
+            int candidateCount = inlinePreviewRequests.size();
+
             if (inlinePreviewView != null) {
                 inlinePreviewView.setPlayer(null);
 
@@ -419,32 +458,54 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 inlinePreviewPlayer = null;
             }
 
-            if (!inlinePreviewMaskedUrl.isEmpty()) {
-                Log.i(TAG, "Preview inline nativo encerrado. url=" + inlinePreviewMaskedUrl);
+            if (candidateCount > 0) {
+                Log.i(TAG, "Preview inline nativo encerrado. candidateCount=" + candidateCount);
             }
 
-            inlinePreviewMaskedUrl = "";
             inlinePreviewRequests = new ArrayList<>();
             inlinePreviewRequestIndex = 0;
         } catch (Exception error) {
-            Log.e(TAG, "Falha ao encerrar preview inline nativo.", error);
+            Log.e(TAG, "Falha ao encerrar preview inline nativo. errorName=" + getErrorName(error));
         }
     }
 
-    private String maskStreamUrl(String url) {
-        try {
-            Uri uri = Uri.parse(url);
-            String scheme = uri.getScheme() != null ? uri.getScheme() : "unknown";
-            String host = uri.getHost() != null ? uri.getHost() : "unknown-host";
-            String lastSegment = uri.getLastPathSegment() != null ? uri.getLastPathSegment() : "";
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
 
-            if (lastSegment.isEmpty()) {
-                return scheme + "://" + host + "/...";
-            }
-
-            return scheme + "://" + host + "/.../" + lastSegment;
-        } catch (Exception error) {
-            return "[invalid-url]";
+    private String sanitizeStreamKind(String kind) {
+        if (!hasText(kind)) {
+            return "unknown";
         }
+
+        return kind.trim();
+    }
+
+    private String getPlaybackErrorName(PlaybackException error) {
+        if (error == null) {
+            return "unknown";
+        }
+
+        String errorCodeName = error.getErrorCodeName();
+
+        if (hasText(errorCodeName)) {
+            return errorCodeName;
+        }
+
+        return getErrorName(error);
+    }
+
+    private String getErrorName(Throwable error) {
+        if (error == null) {
+            return "unknown";
+        }
+
+        String simpleName = error.getClass().getSimpleName();
+
+        if (hasText(simpleName)) {
+            return simpleName;
+        }
+
+        return "Throwable";
     }
 }
