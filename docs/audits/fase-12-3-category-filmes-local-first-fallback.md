@@ -163,3 +163,20 @@ Status: executado manualmente em navegador com Vite local.
 A PR não deve ser bloqueada por Player em navegador, Séries sem conteúdo ou preview Live TV, porque esses comportamentos também foram observados na main baseline.
 
 A PR permanece restrita à ponte controlada de Filmes com fallback. O próximo gate recomendado é validar a mesma branch em dispositivo Android/Fire Stick antes de Ready for Review.
+
+## Patch corretivo — BACK no detalhe do filme
+
+Após o Gate Fire Stick, foi identificado que o BACK na página interna de filme retornava para Home em vez de retornar para `/category/filmes`.
+
+A causa era restrita ao handler de navegação de retorno, que respeitava `returnTo` para páginas de Séries, mas não tratava explicitamente `movie-detail`.
+
+Correção aplicada:
+
+- `movie-detail` passa a respeitar `returnTo` quando presente.
+- Se `returnTo` não existir, `movie-detail` usa fallback seguro para `/category/filmes`.
+- O patch não altera Player, Live TV, Séries, Home, Android nativo, Supabase, Edge Functions ou D-pad estrutural.
+
+Classificação:
+
+- `BACK_MOVIE_DETAIL_RETURN`: corrigido.
+- `PATCH_SCOPE`: mínimo e restrito à navegação do detalhe de filme.
