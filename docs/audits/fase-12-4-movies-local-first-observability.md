@@ -42,7 +42,7 @@ A instrumentação não registra:
 - playlist URLs
 - nomes reais de fonte
 - nomes reais de grupos
-- tvg_id
+- identificadores técnicos de origem da playlist
 - logos reais
 - posters/backdrops
 - metadados sensíveis vinculados à fonte
