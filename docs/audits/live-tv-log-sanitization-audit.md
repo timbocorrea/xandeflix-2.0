@@ -100,3 +100,47 @@ Confirmacao esperada no codigo:
 
 Classificacao:
 TELEMETRY_LOG_TSX_REAL_PATCH=APLICADO
+
+## Gate Runtime Final - Browser Console V4
+
+Ambiente:
+- Navegador local com Vite.
+- Auditor manual V4 no Console.
+- Rota validada: /live.
+- Branch: fix/issue-live-tv-log-sanitization.
+- Head validado: d23d8ea.
+
+Resultado funcional complementar:
+- Live TV abriu.
+- Logs XANDEFLIX_LIVE apareceram no console.
+- Preview/player tentou abrir no ambiente web.
+- Erro NativeAndroidPlayer plugin is not implemented on web foi observado e classificado como esperado no navegador, fora do escopo funcional do patch TSX.
+- Fire Stick já havia sido validado funcionalmente anteriormente.
+
+Resultado do auditor V4:
+LOGS_XANDEFLIX_LIVE_APARECERAM=SIM
+LOG_TOTAL=11
+FORBIDDEN_FINDINGS_TOTAL=0
+LOG_EXPOE_URL_REAL=NAO
+LOG_EXPOE_URL_MASCARADA=NAO
+LOG_EXPOE_NOME_CANAL=NAO
+LOG_EXPOE_NOME_GRUPO=NAO
+LOG_EXPOE_PAYLOAD_CRU_CANAL_GRUPO=NAO
+LOG_EXPOE_ERRO_CRU=NAO
+LOG_EXPOE_EVENTO_CRU_RESUME=NAO
+HAS_PLAYBACK_URL_BOOLEAN=SIM
+HAS_STREAM_URL_BOOLEAN=NAO
+HAS_CHANNEL_NAME_BOOLEAN=SIM
+ERROR_NAME_ONLY=SIM
+TELEMETRY_CODE_ONLY=SIM
+HAS_MESSAGE_BOOLEAN=SIM
+CLASSIFICACAO=APROVADO
+
+Classificacao final:
+PR15_BROWSER_LOG_GATE=APROVADO
+PR15_RUNTIME_SANITIZATION=APROVADO
+READY_FOR_REVIEW_RECOMENDADO=SIM
+
+Observacao:
+Este registro nao inclui linhas brutas de log nem nomes reais de canais, grupos, URLs, payloads crus ou erros crus.
+
