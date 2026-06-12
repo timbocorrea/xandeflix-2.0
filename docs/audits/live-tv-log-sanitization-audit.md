@@ -72,3 +72,17 @@ A sanitização Android nativa deve virar subdemanda separada ou ser reautorizad
 - Logs TSX de Live TV não registram nome real de canal.
 - Logs TSX de Live TV não registram URL ou URL mascarada.
 - Logs TSX de Live TV não registram evento cru de resume.
+
+## Ajuste adicional - telemetria de preview
+
+Durante o Gate Browser, foi identificado que o log XANDEFLIX_LIVE_PREVIEW_TELEMETRY ainda registrava campos ambiguos para auditoria automatizada.
+
+Ajuste aplicado:
+- Substituido campo tecnico name por telemetryCode.
+- Substituida mensagem textual por hasMessage.
+- Mantidos apenas source, telemetryCode, level e hasMessage.
+- Nenhum nome real de canal, nome real de grupo, endereco de reproducao, payload cru ou erro cru deve ser emitido por esse log.
+
+Classificacao:
+TELEMETRY_LOG_SANITIZATION_PATCH=APLICADO
+
