@@ -26,6 +26,8 @@ import {
 } from '../services/homeVod.service';
 import { localMovieCatalogReadModel } from '../../localCatalog/readModels/localMovieCatalogReadModel.service';
 import { mapLocalMovieCatalogItemsToHomeVodItems } from '../../localCatalog/readModels/localMovieHomeVodAdapter.service';
+import { localSeriesCatalogReadModel } from '../../localCatalog/readModels/localSeriesCatalogReadModel.service';
+import { mapLocalSeriesCatalogItemsToHomeVodItems } from '../../localCatalog/readModels/localSeriesHomeVodAdapter.service';
 
 import {
   enrichSeriesHeroHighlights,
@@ -1803,6 +1805,38 @@ export function CatalogCategoryPage({
     }
   }
 
+  function countSanitizedSeriesGroups(items: readonly HomeVodItem[]) {
+    const uniqueGroupTitles = Array.from(
+      new Set(
+        items
+          .map((item) => item.groupTitle?.trim())
+          .filter((groupTitle): groupTitle is string => Boolean(groupTitle)),
+      ),
+    );
+
+    return uniqueGroupTitles.length;
+  }
+
+  async function loadSeriesLocalFirstCategoryItemsByGroup({
+    groupTitles,
+    limit,
+  }: {
+    groupTitles: readonly string[];
+    limit: number;
+  }) {
+    const seriesGroups = groupTitles.length > 0 ? groupTitles : [undefined];
+    const localItems = await Promise.all(
+      seriesGroups.map((groupTitle) =>
+        localSeriesCatalogReadModel.listSeries({
+          groupTitle,
+          limit,
+        }),
+      ),
+    );
+
+    return mapLocalSeriesCatalogItemsToHomeVodItems(localItems.flat());
+  }
+
   async function loadMoviesAggregateCategoryItemsByGroup({
     licenseCode,
     deviceIdentifier,
@@ -2008,13 +2042,56 @@ export function CatalogCategoryPage({
 
                 return fallbackItems;
               })()
-            : await loadHomeVodCategoryItems({
-                licenseCode,
-                deviceIdentifier,
-                groupTitles: category.groupTitles,
-                limit: CATEGORY_ITEM_LIMIT,
-                slug: category.slug,
-              });
+            : category.slug === 'series' || category.slug === 'series-group'
+              ? await (async () => {
+                  const localReadStartedAtMs = getMoviesLocalFirstMetricNowMs();
+                  const localItems = await loadSeriesLocalFirstCategoryItemsByGroup({
+                    groupTitles: category.groupTitles,
+                    limit: CATEGORY_ITEM_LIMIT,
+                  });
+                  const localReadTimeMs = getMoviesLocalFirstMetricElapsedMs(localReadStartedAtMs);
+
+                  if (localItems.length > 0) {
+                    logMoviesLocalFirstObservability({
+                      source: 'local-first',
+                      fallbackUsed: false,
+                      localCount: localItems.length,
+                      localGroupCount: countSanitizedSeriesGroups(localItems),
+                      configuredGroupCount: category.groupTitles.length,
+                      readTimeMs: localReadTimeMs,
+                    });
+
+                    return localItems;
+                  }
+
+                  const fallbackItems = await loadHomeVodCategoryItems({
+                    licenseCode,
+                    deviceIdentifier,
+                    groupTitles: category.groupTitles,
+                    limit: CATEGORY_ITEM_LIMIT,
+                    slug: category.slug,
+                  });
+
+                  logMoviesLocalFirstObservability({
+                    source: 'fallback',
+                    fallbackUsed: true,
+                    localCount: 0,
+                    localGroupCount: 0,
+                    configuredGroupCount: category.groupTitles.length,
+                    readTimeMs: localReadTimeMs,
+                    fallbackCount: fallbackItems.length,
+                    fallbackGroupCount: countSanitizedSeriesGroups(fallbackItems),
+                  });
+
+                  return fallbackItems;
+                })()
+              : await loadHomeVodCategoryItems({
+                  licenseCode,
+                  deviceIdentifier,
+                  groupTitles: category.groupTitles,
+                  limit: CATEGORY_ITEM_LIMIT,
+                  slug: category.slug,
+                });
 
         if (!isMounted) {
           return;
