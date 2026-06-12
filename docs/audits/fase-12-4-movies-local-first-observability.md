@@ -78,3 +78,63 @@ Resultado esperado:
 - `/category/filmes` continua usando local-first quando há dados locais.
 - `/category/filmes` continua usando fallback legado quando não há dados locais.
 - logs permitem auditar origem da carga sem expor dados sensíveis.
+
+## Gate Runtime local/navegador — aprovado
+
+O Gate Runtime local/navegador foi executado em `/category/filmes`.
+
+Resultado funcional:
+
+- `/category/filmes` abriu normalmente.
+- Hero Filmes apareceu.
+- Categorias apareceram.
+- Cards apareceram.
+- Fallback textual em card sem poster permaneceu.
+- App não crashou.
+- Home não apresentou regressão evidente.
+- Live TV abriu no navegador, com observação de falha de preview web fora do escopo da PR #14.
+- Séries permaneceu fora do escopo da alteração.
+
+Resultado da observabilidade:
+
+- O log `[XANDEFLIX_MOVIES_LOCAL_FIRST_OBSERVABILITY]` apareceu no console.
+- O log apresentou somente campos sanitizados:
+  - `source`
+  - `fallbackUsed`
+  - `localCount`
+  - `localGroupCount`
+  - `configuredGroupCount`
+  - `readTimeMs`
+  - `fallbackCount`
+  - `fallbackGroupCount`
+
+Valores observados no runtime:
+
+- `source`: `fallback`
+- `fallbackUsed`: `true`
+- `localCount`: `0`
+- `localGroupCount`: `0`
+- `configuredGroupCount`: `27`
+- `readTimeMs`: `82`
+- `fallbackCount`: `588`
+- `fallbackGroupCount`: `20`
+
+Sanitização validada no log de Filmes:
+
+- Não houve exposição de stream URL.
+- Não houve exposição de playlist URL.
+- Não houve exposição de nome real de grupo.
+- Não houve exposição de nome real de fonte.
+- Não houve exposição de identificadores técnicos de origem da playlist.
+- Não houve exposição de logo/poster/backdrop URL.
+- Não houve exposição de erro cru.
+
+Observação de escopo:
+
+- Logs legados de Live TV observados durante navegação em `/live` pertencem a outra área do sistema e não fazem parte da observabilidade adicionada por esta PR.
+
+Classificação:
+
+- `PR14_RUNTIME_GATE`: aprovado.
+- `OBSERVABILITY_SANITIZED`: sim.
+- `READY_FOR_REVIEW_RECOMMENDED`: sim.
