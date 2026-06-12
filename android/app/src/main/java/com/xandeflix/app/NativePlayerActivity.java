@@ -54,6 +54,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     private PlayerView playerView;
     private ExoPlayer player;
     private String currentTitle = "Xandeflix Player";
+    private boolean currentHasTitle = false;
     private String currentKind = "unknown";
     private String currentStreamUrl = "";
     private long requestedStartPositionMs = 0L;
@@ -105,6 +106,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                 ? streamTitle.trim()
                 : "Xandeflix Player";
         currentKind = sanitizeStreamKind(streamKind);
+        currentHasTitle = hasText(currentTitle);
 
         Log.i(
                 TAG,
