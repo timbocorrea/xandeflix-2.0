@@ -82,9 +82,9 @@ Correção recomendada em próximo ciclo:
 - associar cache à validação server-authoritative;
 - não permitir cache como bypass offline de licença.
 
-### Risco alto — Edge Function de conteúdo retorna stream_url
+### Risco alto — Edge Function de conteúdo retorna URL de reprodução
 
-`get-client-license-channels` valida `licenseCode` e `deviceIdentifier`, mas retorna `stream_url` nos itens autorizados. Isso é necessário para playback no modelo atual, porém exige que a função seja protegida por validação robusta, rate limit, logs sanitizados, CORS restrito e respostas de erro sem detalhes sensíveis.
+`função Edge de canais autorizados por licença` valida `licenseCode` e `deviceIdentifier`, mas retorna `URL de reprodução` nos itens autorizados. Isso é necessário para playback no modelo atual, porém exige que a função seja protegida por validação robusta, rate limit, logs sanitizados, CORS restrito e respostas de erro sem detalhes sensíveis.
 
 Correção recomendada em próximo ciclo:
 
@@ -121,7 +121,7 @@ O front usa `AdminRoute`, `SuperAdminOnly` e consulta `admin_profiles`. Isso é 
 Correção recomendada em próximo ciclo:
 
 - versionar migration da policy de `admin_profiles`;
-- auditar policies de `clients`, `licenses`, `license_devices`, `license_iptv_sources`, `license_channels_cache`, `app_installations`, `playback_sessions` e `audit_logs`;
+- auditar policies de `clients`, `licenses`, `license_devices`, `license_iptv_sources`, `cache de canais por licença`, `app_installations`, `playback_sessions` e `audit_logs`;
 - validar isolamento admin vs super_admin.
 
 ## Prioridade técnica do Ciclo 2
