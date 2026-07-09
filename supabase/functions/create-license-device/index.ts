@@ -1,5 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+type AdminRole = 'admin' | 'super_admin';
+
 type CreateLicenseDeviceRequest = {
   licenseId?: string;
   deviceIdentifier?: string;
@@ -33,24 +35,44 @@ function normalizeText(value?: string | null) {
   return normalized ? normalized : null;
 }
 
-function serializeErrorDetails(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
+function getBearerToken(request: Request) {
+  const authorization = request.headers.get('Authorization') ?? '';
+  const [scheme, token] = authorization.trim().split(/\s+/);
+
+  if (scheme !== 'Bearer' || !token) {
+    return null;
   }
 
-  if (typeof error === 'object' && error !== null) {
-    const record = error as Record<string, unknown>;
+  return token;
+}
 
-    return JSON.stringify({
-      code: record.code,
-      message: record.message,
-      details: record.details,
-      hint: record.hint,
-      name: record.name,
-    });
+function canManageLicense({
+  actorId,
+  actorRole,
+  ownerId,
+}: {
+  actorId: string;
+  actorRole: AdminRole;
+  ownerId: string | null;
+}) {
+  return actorRole === 'super_admin' || ownerId === actorId;
+}
+
+function getErrorCode(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+
+    return typeof code === 'string' ? code : 'unknown';
   }
 
-  return String(error);
+  return 'unknown';
+}
+
+function logSanitizedError(event: string, error?: unknown) {
+  console.error('[create-license-device]', {
+    event,
+    code: error ? getErrorCode(error) : undefined,
+  });
 }
 
 Deno.serve(async (request) => {
@@ -64,10 +86,55 @@ Deno.serve(async (request) => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      logSanitizedError('missing-env');
       return jsonResponse({ ok: false, error: 'SERVER_ERROR' }, 500);
+    }
+
+    const bearerToken = getBearerToken(request);
+
+    if (!bearerToken) {
+      return jsonResponse({ ok: false, error: 'UNAUTHORIZED' }, 401);
+    }
+
+    const supabaseAuthClient = createClient(supabaseUrl, anonKey, {
+      global: {
+        headers: {
+          Authorization: `Bearer ${bearerToken}`,
+        },
+      },
+    });
+
+    const {
+      data: { user: actor },
+      error: actorError,
+    } = await supabaseAuthClient.auth.getUser();
+
+    if (actorError || !actor) {
+      return jsonResponse({ ok: false, error: 'UNAUTHORIZED' }, 401);
+    }
+
+    const { data: actorProfile, error: actorProfileError } =
+      await supabaseAuthClient
+        .from('admin_profiles')
+        .select('id, email, role, is_active')
+        .eq('id', actor.id)
+        .eq('is_active', true)
+        .maybeSingle();
+
+    if (actorProfileError) {
+      logSanitizedError('actor-profile-query-failed', actorProfileError);
+      return jsonResponse({ ok: false, error: 'SERVER_ERROR' }, 500);
+    }
+
+    if (
+      !actorProfile ||
+      (actorProfile.role !== 'admin' && actorProfile.role !== 'super_admin')
+    ) {
+      return jsonResponse({ ok: false, error: 'FORBIDDEN' }, 403);
     }
 
     let payload: CreateLicenseDeviceRequest;
@@ -93,19 +160,27 @@ Deno.serve(async (request) => {
 
     const { data: license, error: licenseError } = await supabaseAdmin
       .from('licenses')
-      .select('id, license_code, status')
+      .select('id, license_code, status, admin_owner_id')
       .eq('id', licenseId)
       .maybeSingle();
 
     if (licenseError) {
-      return jsonResponse(
-        { ok: false, error: 'SERVER_ERROR', details: licenseError.message },
-        500,
-      );
+      logSanitizedError('license-query-failed', licenseError);
+      return jsonResponse({ ok: false, error: 'SERVER_ERROR' }, 500);
     }
 
     if (!license) {
       return jsonResponse({ ok: false, error: 'LICENSE_NOT_FOUND' }, 404);
+    }
+
+    if (
+      !canManageLicense({
+        actorId: actor.id,
+        actorRole: actorProfile.role as AdminRole,
+        ownerId: license.admin_owner_id,
+      })
+    ) {
+      return jsonResponse({ ok: false, error: 'FORBIDDEN' }, 403);
     }
 
     const now = new Date().toISOString();
@@ -118,10 +193,8 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (existingDeviceError) {
-      return jsonResponse(
-        { ok: false, error: 'SERVER_ERROR', details: existingDeviceError.message },
-        500,
-      );
+      logSanitizedError('existing-device-query-failed', existingDeviceError);
+      return jsonResponse({ ok: false, error: 'SERVER_ERROR' }, 500);
     }
 
     if (existingDevice) {
@@ -142,11 +215,26 @@ Deno.serve(async (request) => {
         .single();
 
       if (updateDeviceError) {
+        logSanitizedError('device-update-failed', updateDeviceError);
         return jsonResponse(
-          { ok: false, error: 'SERVER_ERROR', details: updateDeviceError.message },
+          { ok: false, error: 'LICENSE_DEVICE_UPDATE_FAILED' },
           500,
         );
       }
+
+      await supabaseAdmin.from('audit_logs').insert({
+        actor_id: actor.id,
+        action: 'license_device_updated',
+        entity: 'license_devices',
+        entity_id: updatedDevice.id,
+        metadata: {
+          licenseId,
+          licenseCode: license.license_code,
+          deviceId: updatedDevice.id,
+          deviceIdentifier,
+          alreadyExisted: true,
+        },
+      });
 
       return jsonResponse({
         ok: true,
@@ -173,20 +261,24 @@ Deno.serve(async (request) => {
       .single();
 
     if (createDeviceError) {
+      logSanitizedError('device-create-failed', createDeviceError);
       return jsonResponse(
-        { ok: false, error: 'SERVER_ERROR', details: createDeviceError.message },
+        { ok: false, error: 'LICENSE_DEVICE_CREATE_FAILED' },
         500,
       );
     }
 
     await supabaseAdmin.from('audit_logs').insert({
+      actor_id: actor.id,
       action: 'license_device_created',
       entity: 'license_devices',
       entity_id: createdDevice.id,
       metadata: {
         licenseId,
         licenseCode: license.license_code,
+        deviceId: createdDevice.id,
         deviceIdentifier,
+        alreadyExisted: false,
       },
     });
 
@@ -196,11 +288,12 @@ Deno.serve(async (request) => {
       alreadyExisted: false,
     });
   } catch (error) {
+    logSanitizedError('unexpected-error', error);
+
     return jsonResponse(
       {
         ok: false,
         error: 'CREATE_LICENSE_DEVICE_FAILED',
-        details: serializeErrorDetails(error),
       },
       500,
     );
