@@ -25,11 +25,16 @@ import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { AdminLoginPage } from '../features/admin/pages/AdminLoginPage';
 import { SuperAdminOnly } from '../features/admin/components/SuperAdminOnly';
 import { LoginPage } from '../features/auth/pages/LoginPage';
-import { getStoredLicenseActivation } from '../features/licensing/lib/licenseActivationStorage';
+import {
+  clearStoredLicenseActivation,
+  getStoredLicenseActivation,
+} from '../features/licensing/lib/licenseActivationStorage';
+import { validateStoredLicenseSession } from '../features/licensing/services/licenseSessionValidation.service';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
 import { CatalogLaunchesPage } from '../features/catalog/pages/CatalogLaunchesPage';
 import { CatalogCategoryPage } from '../features/catalog/pages/CatalogCategoryPage';
 import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
+import { clearHomeVodCache } from '../features/catalog/services/homeVod.service';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
 import { env } from '../config/env';
 // Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
@@ -56,9 +61,59 @@ const SettingsPage = lazy(
 
 function LicenseRoute({ children }: { children: ReactNode }) {
   const storedActivation = getStoredLicenseActivation();
+  const licenseCode = storedActivation?.licenseCode?.trim() ?? '';
+  const deviceIdentifier = storedActivation?.deviceIdentifier?.trim() ?? '';
+  const [validationStatus, setValidationStatus] = useState<
+    'checking' | 'valid' | 'invalid'
+  >('checking');
 
-  if (!storedActivation?.licenseCode || !storedActivation.deviceIdentifier) {
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!licenseCode || !deviceIdentifier) {
+      setValidationStatus('invalid');
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setValidationStatus('checking');
+
+    void validateStoredLicenseSession({
+      licenseCode,
+      deviceIdentifier,
+    }).then((result) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (result.valid) {
+        setValidationStatus('valid');
+        return;
+      }
+
+      clearStoredLicenseActivation();
+      clearHomeVodCache();
+      setValidationStatus('invalid');
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [licenseCode, deviceIdentifier]);
+
+  if (!licenseCode || !deviceIdentifier || validationStatus === 'invalid') {
     return <Navigate to="/login" replace />;
+  }
+
+  if (validationStatus !== 'valid') {
+    return (
+      <main className="xf-app flex min-h-screen items-center justify-center">
+        <p className="text-xl font-semibold text-xf-muted">
+          Validando licença...
+        </p>
+      </main>
+    );
   }
 
   return children;

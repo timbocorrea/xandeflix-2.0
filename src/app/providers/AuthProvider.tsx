@@ -11,6 +11,8 @@ import type { Session, User } from '@supabase/supabase-js';
 import { spatialError } from '@/lib/spatial/spatialDebug';
 
 import { supabase } from '../../lib/supabase/supabaseClient';
+import { clearHomeVodCache } from '../../features/catalog/services/homeVod.service';
+import { clearStoredLicenseActivation } from '../../features/licensing/lib/licenseActivationStorage';
 
 interface AuthContextValue {
   user: User | null;
@@ -102,6 +104,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setIsLoading(true);
 
     const { error } = await supabase.auth.signOut();
+    clearStoredLicenseActivation();
+    clearHomeVodCache();
 
     setSession(null);
     setUser(null);
