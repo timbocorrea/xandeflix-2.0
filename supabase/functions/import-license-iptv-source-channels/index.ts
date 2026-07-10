@@ -60,7 +60,7 @@ type LicenseIptvSourceRecord = {
 type SupabaseClient = ReturnType<typeof createClient>;
 
 const FETCH_TIMEOUT_MS = 300000;
-const DEFAULT_IMPORT_LIMIT = 350000;
+const DEFAULT_IMPORT_LIMIT = 1000;
 const MAX_IMPORT_LIMIT = 350000;
 const MAX_SAMPLES = 10;
 const WRITE_BATCH_SIZE = 500;
@@ -90,6 +90,27 @@ function normalizeText(value?: string | null) {
 
 function normalizeNullableText(value?: string | null) {
   return normalizeText(value) ?? null;
+}
+
+
+function serializeErrorDetails(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+
+    return JSON.stringify({
+      code: record.code,
+      message: record.message,
+      details: record.details,
+      hint: record.hint,
+      name: record.name,
+    });
+  }
+
+  return String(error);
 }
 
 function normalizeClassificationText(value?: string | null) {
@@ -562,7 +583,7 @@ async function flushChannelBatch({
     });
 
   if (error) {
-    throw error;
+    throw new Error(serializeErrorDetails(error));
   }
 
   stats.totalWritten += rows.length;
@@ -1354,7 +1375,7 @@ Deno.serve(async (request) => {
 
     const { data: license, error: licenseError } = await supabaseAdmin
       .from("licenses")
-      .select("id, license_code, admin_owner_id")
+      .select("*")
       .eq("id", typedSource.license_id)
       .maybeSingle();
 
@@ -1379,7 +1400,7 @@ Deno.serve(async (request) => {
       !canManageLicense({
         actorId: actor.id,
         actorRole: actorProfile.role as AdminRole,
-        ownerId: typedLicense.admin_owner_id,
+        ownerId: typeof typedLicense.admin_owner_id === 'string' ? typedLicense.admin_owner_id : null,
       })
     ) {
       return jsonResponse({ ok: false, error: "FORBIDDEN" }, 403);
@@ -1458,7 +1479,7 @@ Deno.serve(async (request) => {
           {
             ok: false,
             error: "XTREAM_IMPORT_FAILED",
-            details: error instanceof Error ? error.message : String(error),
+            details: serializeErrorDetails(error),
             result,
           },
           502,
@@ -1647,7 +1668,7 @@ Deno.serve(async (request) => {
         {
           ok: false,
           error: "CHANNELS_CACHE_IMPORT_FAILED",
-          details: error instanceof Error ? error.message : String(error),
+          details: serializeErrorDetails(error),
           result,
         },
         500,
@@ -1732,7 +1753,7 @@ Deno.serve(async (request) => {
           {
             ok: false,
             error: "CHANNELS_CACHE_IMPORT_FAILED",
-            details: error instanceof Error ? error.message : String(error),
+            details: serializeErrorDetails(error),
             result,
           },
           500,
@@ -1814,7 +1835,7 @@ Deno.serve(async (request) => {
       {
         ok: false,
         error: "SERVER_ERROR",
-        details: error instanceof Error ? error.message : String(error),
+        details: serializeErrorDetails(error),
       },
       500,
     );

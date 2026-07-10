@@ -177,7 +177,7 @@ Deno.serve(async (request) => {
       !canManageLicense({
         actorId: actor.id,
         actorRole: actorProfile.role as AdminRole,
-        ownerId: license.admin_owner_id,
+        ownerId: typeof license.admin_owner_id === 'string' ? license.admin_owner_id : null,
       })
     ) {
       return jsonResponse({ ok: false, error: 'FORBIDDEN' }, 403);
