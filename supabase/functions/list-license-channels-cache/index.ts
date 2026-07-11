@@ -61,6 +61,7 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 const SOURCE_COUNT_PAGE_SIZE = 1000;
+const SOURCE_COUNT_MAX_PAGES = 50;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -137,110 +138,6 @@ function buildAccessibleLicenseQuery({
   }
 
   return query;
-}
-
-function getQueryUrl(query: unknown) {
-  const url = (query as { url?: URL }).url;
-
-  if (!url) {
-    throw new Error('SUMMARY_QUERY_UNAVAILABLE');
-  }
-
-  return new URL(url.toString());
-}
-
-function getServiceRoleHeaders(serviceRoleKey: string) {
-  return {
-    apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
-  };
-}
-
-function parseExactCount(response: Response) {
-  const contentRange = response.headers.get('content-range') ?? '';
-  const totalText = contentRange.split('/').pop() ?? '';
-  const total = Number(totalText);
-
-  if (!Number.isFinite(total)) {
-    throw new Error('SUMMARY_COUNT_UNAVAILABLE');
-  }
-
-  return total;
-}
-
-async function fetchExactCountFromUrl({
-  url,
-  serviceRoleKey,
-}: {
-  url: URL;
-  serviceRoleKey: string;
-}) {
-  const countUrl = new URL(url.toString());
-  countUrl.searchParams.set('select', 'id');
-
-  const response = await fetch(countUrl, {
-    method: 'HEAD',
-    headers: {
-      ...getServiceRoleHeaders(serviceRoleKey),
-      Prefer: 'count=exact',
-      Range: '0-0',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('SUMMARY_COUNT_FAILED');
-  }
-
-  return parseExactCount(response);
-}
-
-async function countDistinctSourcesFromUrl({
-  url,
-  serviceRoleKey,
-}: {
-  url: URL;
-  serviceRoleKey: string;
-}) {
-  const sourceIds = new Set<string>();
-
-  for (let from = 0; ; from += SOURCE_COUNT_PAGE_SIZE) {
-    const pageUrl = new URL(url.toString());
-    pageUrl.searchParams.set('select', 'license_iptv_source_id');
-
-    const response = await fetch(pageUrl, {
-      headers: {
-        ...getServiceRoleHeaders(serviceRoleKey),
-        Range: `${from}-${from + SOURCE_COUNT_PAGE_SIZE - 1}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error('SUMMARY_SOURCE_COUNT_FAILED');
-    }
-
-    const rows = (await response.json()) as Array<{
-      license_iptv_source_id?: string | null;
-    }>;
-
-    for (const row of rows) {
-      if (row.license_iptv_source_id) {
-        sourceIds.add(row.license_iptv_source_id);
-      }
-    }
-
-    if (rows.length < SOURCE_COUNT_PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return sourceIds.size;
-}
-
-function withActiveFilter(url: URL, isActive: boolean) {
-  const nextUrl = new URL(url.toString());
-  nextUrl.searchParams.set('is_active', `eq.${isActive}`);
-
-  return nextUrl;
 }
 
 
@@ -403,32 +300,127 @@ Deno.serve(async (request) => {
       return jsonResponse({ ok: false, error: 'FORBIDDEN' }, 403);
     }
 
+    const scopedLicenseIds = licenseId ? [licenseId] : accessibleLicenseIds;
+    const buildChannelsQuery = ({
+      selectColumns,
+      includeSearch,
+      includeGroup,
+      includeSource,
+      selectedStatus,
+      licenseIds = scopedLicenseIds,
+      count = null,
+      head = false,
+    }: {
+      selectColumns: string;
+      includeSearch: boolean;
+      includeGroup: boolean;
+      includeSource: boolean;
+      selectedStatus: boolean | null;
+      licenseIds?: string[];
+      count?: 'exact' | null;
+      head?: boolean;
+    }) => {
+      const selectOptions = count ? { count, head } : undefined;
     let query = supabaseAdmin
       .from('license_channels_cache')
-      .select('*', { count: 'exact' })
-      .in('license_id', licenseId ? [licenseId] : accessibleLicenseIds);
-    const totalAccessibleUrl = getQueryUrl(query);
+      .select(selectColumns, selectOptions)
+      .in('license_id', licenseIds);
 
-    if (sourceId) {
+    if (includeSource && sourceId) {
       query = query.eq('license_iptv_source_id', sourceId);
     }
 
-    if (groupTitle) {
+    if (includeGroup && groupTitle) {
       query = query.eq('group_title', groupTitle);
     }
 
-    if (isActive !== null) {
-      query = query.eq('is_active', isActive);
+    if (selectedStatus !== null) {
+      query = query.eq('is_active', selectedStatus);
     }
 
-    if (searchPattern) {
+    if (includeSearch && searchPattern) {
       query = query.or(
         `name.ilike.%${searchPattern}%,tvg_id.ilike.%${searchPattern}%,stream_url.ilike.%${searchPattern}%`,
       );
     }
-    const filteredSummaryUrl = getQueryUrl(query);
 
-    const { data: channels, error: channelsError, count } = await query
+      return query;
+    };
+
+    const countChannels = async ({
+      includeSearch,
+      includeGroup,
+      includeSource,
+      selectedStatus,
+      licenseIds,
+    }: {
+      includeSearch: boolean;
+      includeGroup: boolean;
+      includeSource: boolean;
+      selectedStatus: boolean | null;
+      licenseIds?: string[];
+    }) => {
+      const { error, count } = await buildChannelsQuery({
+        selectColumns: 'id',
+        includeSearch,
+        includeGroup,
+        includeSource,
+        selectedStatus,
+        licenseIds,
+        count: 'exact',
+        head: true,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      return count ?? 0;
+    };
+
+    const countSources = async () => {
+      const sourceIds = new Set<string>();
+
+      for (let pageIndex = 0; pageIndex < SOURCE_COUNT_MAX_PAGES; pageIndex += 1) {
+        const pageFrom = pageIndex * SOURCE_COUNT_PAGE_SIZE;
+        const pageTo = pageFrom + SOURCE_COUNT_PAGE_SIZE - 1;
+        const { data, error } = await buildChannelsQuery({
+          selectColumns: 'license_iptv_source_id',
+          includeSearch: true,
+          includeGroup: true,
+          includeSource: true,
+          selectedStatus: null,
+        }).range(pageFrom, pageTo);
+
+        if (error) {
+          throw error;
+        }
+
+        const rows = (data ?? []) as Array<{
+          license_iptv_source_id?: string | null;
+        }>;
+
+        for (const row of rows) {
+          if (row.license_iptv_source_id) {
+            sourceIds.add(row.license_iptv_source_id);
+          }
+        }
+
+        if (rows.length < SOURCE_COUNT_PAGE_SIZE) {
+          return sourceIds.size;
+        }
+      }
+
+      throw new Error('SUMMARY_SOURCE_COUNT_LIMIT_EXCEEDED');
+    };
+
+    const { data: channels, error: channelsError } = await buildChannelsQuery({
+      selectColumns: '*',
+      includeSearch: true,
+      includeGroup: true,
+      includeSource: true,
+      selectedStatus: isActive,
+    })
       .order('group_title', { ascending: true, nullsFirst: false })
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true })
@@ -440,29 +432,39 @@ Deno.serve(async (request) => {
 
     const [
       totalAccessible,
+      totalFiltered,
       sourceCount,
       activeCount,
       inactiveCount,
     ] = await Promise.all([
-      fetchExactCountFromUrl({
-        url: totalAccessibleUrl,
-        serviceRoleKey: supabaseServiceRoleKey,
+      countChannels({
+        includeSearch: false,
+        includeGroup: false,
+        includeSource: false,
+        selectedStatus: null,
+        licenseIds: accessibleLicenseIds,
       }),
-      countDistinctSourcesFromUrl({
-        url: filteredSummaryUrl,
-        serviceRoleKey: supabaseServiceRoleKey,
+      countChannels({
+        includeSearch: true,
+        includeGroup: true,
+        includeSource: true,
+        selectedStatus: isActive,
       }),
-      fetchExactCountFromUrl({
-        url: withActiveFilter(filteredSummaryUrl, true),
-        serviceRoleKey: supabaseServiceRoleKey,
+      countSources(),
+      countChannels({
+        includeSearch: true,
+        includeGroup: true,
+        includeSource: true,
+        selectedStatus: true,
       }),
-      fetchExactCountFromUrl({
-        url: withActiveFilter(filteredSummaryUrl, false),
-        serviceRoleKey: supabaseServiceRoleKey,
+      countChannels({
+        includeSearch: true,
+        includeGroup: true,
+        includeSource: true,
+        selectedStatus: false,
       }),
     ]);
 
-    const totalFiltered = count ?? 0;
     const summary: ListLicenseChannelsCacheSummary = {
       totalAccessible,
       totalFiltered,
