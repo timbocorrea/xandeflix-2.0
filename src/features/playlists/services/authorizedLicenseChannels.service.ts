@@ -253,20 +253,50 @@ async function fetchLicenseChannelsPage({
   contentKinds?: Array<'live' | 'movie' | 'series'>;
   groupTitle?: string;
   groupTitles?: string[];
-}): Promise<LicenseChannelsPageResult> {
-  const requestKey = createLicenseChannelsPageRequestKey({
-    licenseCode,
-    deviceIdentifier,
-    page,
-    pageSize,
-    requireTmdbMatched,
-    requireTmdbPoster,
-    contentKind,
-    contentKinds,
-    groupTitle,
-    groupTitles,
-  });
+}) {
+  const { data, error } =
+    await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
+      'get-client-license-channels',
+      {
+        body: {
+          licenseCode,
+          deviceIdentifier,
+          page,
+          pageSize,
+          ...(requireTmdbMatched === undefined ? {} : { requireTmdbMatched }),
+          ...(requireTmdbPoster === undefined ? {} : { requireTmdbPoster }),
+          ...(contentKind === undefined ? {} : { contentKind }),
+          ...(contentKinds === undefined ? {} : { contentKinds }),
+          ...(groupTitle === undefined ? {} : { groupTitle }),
+          ...(groupTitles === undefined ? {} : { groupTitles }),
+        },
+      },
+    );
 
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.ok) {
+    throw new Error(
+      data?.details ?? data?.error ?? 'CLIENT_LICENSE_CHANNELS_FAILED',
+    );
+  }
+
+  return {
+    channels: data.channels ?? [],
+    totalPages: data.totalPages ?? 0,
+  };
+}
+
+type FetchLicenseChannelsPageInput = Parameters<
+  typeof fetchLicenseChannelsPage
+>[0];
+
+async function fetchCachedLicenseChannelsPage(
+  input: FetchLicenseChannelsPageInput,
+): Promise<LicenseChannelsPageResult> {
+  const requestKey = createLicenseChannelsPageRequestKey(input);
   const cachedResult = getCachedLicenseChannelsPage(requestKey);
 
   if (cachedResult) {
@@ -279,45 +309,10 @@ async function fetchLicenseChannelsPage({
     return existingRequest;
   }
 
-  const requestPromise = (async () => {
-    const { data, error } =
-      await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
-        'get-client-license-channels',
-        {
-          body: {
-            licenseCode,
-            deviceIdentifier,
-            page,
-            pageSize,
-            ...(requireTmdbMatched === undefined ? {} : { requireTmdbMatched }),
-            ...(requireTmdbPoster === undefined ? {} : { requireTmdbPoster }),
-            ...(contentKind === undefined ? {} : { contentKind }),
-            ...(contentKinds === undefined ? {} : { contentKinds }),
-            ...(groupTitle === undefined ? {} : { groupTitle }),
-            ...(groupTitles === undefined ? {} : { groupTitles }),
-          },
-        },
-      );
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data?.ok) {
-      throw new Error(
-        data?.details ?? data?.error ?? 'CLIENT_LICENSE_CHANNELS_FAILED',
-      );
-    }
-
-    const result = {
-      channels: data.channels ?? [],
-      totalPages: data.totalPages ?? 0,
-    };
-
+  const requestPromise = fetchLicenseChannelsPage(input).then((result) => {
     setCachedLicenseChannelsPage(requestKey, result);
-
     return result;
-  })();
+  });
 
   inFlightLicenseChannelsPageRequests.set(requestKey, requestPromise);
 
@@ -360,7 +355,7 @@ export async function listAuthorizedLicenseChannels({
     return [];
   }
 
-  const firstPage = await fetchLicenseChannelsPage({
+  const firstPage = await fetchCachedLicenseChannelsPage({
     licenseCode: normalizedLicenseCode,
     deviceIdentifier: normalizedDeviceIdentifier,
     page: 1,
@@ -380,7 +375,7 @@ export async function listAuthorizedLicenseChannels({
     const pagePromises = [];
     for (let page = 2; page <= totalPages; page += 1) {
       pagePromises.push(
-        fetchLicenseChannelsPage({
+        fetchCachedLicenseChannelsPage({
           licenseCode: normalizedLicenseCode,
           deviceIdentifier: normalizedDeviceIdentifier,
           page,
