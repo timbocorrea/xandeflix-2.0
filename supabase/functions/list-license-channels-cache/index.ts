@@ -47,11 +47,20 @@ type ListLicenseChannelsCacheItem = LicenseChannelCacheRecord & {
   source: LicenseIptvSourceRecord | null;
 };
 
+type ListLicenseChannelsCacheSummary = {
+  totalAccessible: number;
+  totalFiltered: number;
+  sourceCount: number;
+  activeCount: number;
+  inactiveCount: number;
+};
+
 type SupabaseClient = ReturnType<typeof createClient>;
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
+const SOURCE_COUNT_PAGE_SIZE = 1000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -110,26 +119,6 @@ function resolvePageSize(value: unknown) {
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
 }
 
-function serializeErrorDetails(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (typeof error === 'object' && error !== null) {
-    const record = error as Record<string, unknown>;
-
-    return JSON.stringify({
-      code: record.code,
-      message: record.message,
-      details: record.details,
-      hint: record.hint,
-      name: record.name,
-    });
-  }
-
-  return String(error);
-}
-
 function buildAccessibleLicenseQuery({
   supabaseAdmin,
   actorId,
@@ -148,6 +137,110 @@ function buildAccessibleLicenseQuery({
   }
 
   return query;
+}
+
+function getQueryUrl(query: unknown) {
+  const url = (query as { url?: URL }).url;
+
+  if (!url) {
+    throw new Error('SUMMARY_QUERY_UNAVAILABLE');
+  }
+
+  return new URL(url.toString());
+}
+
+function getServiceRoleHeaders(serviceRoleKey: string) {
+  return {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+  };
+}
+
+function parseExactCount(response: Response) {
+  const contentRange = response.headers.get('content-range') ?? '';
+  const totalText = contentRange.split('/').pop() ?? '';
+  const total = Number(totalText);
+
+  if (!Number.isFinite(total)) {
+    throw new Error('SUMMARY_COUNT_UNAVAILABLE');
+  }
+
+  return total;
+}
+
+async function fetchExactCountFromUrl({
+  url,
+  serviceRoleKey,
+}: {
+  url: URL;
+  serviceRoleKey: string;
+}) {
+  const countUrl = new URL(url.toString());
+  countUrl.searchParams.set('select', 'id');
+
+  const response = await fetch(countUrl, {
+    method: 'HEAD',
+    headers: {
+      ...getServiceRoleHeaders(serviceRoleKey),
+      Prefer: 'count=exact',
+      Range: '0-0',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('SUMMARY_COUNT_FAILED');
+  }
+
+  return parseExactCount(response);
+}
+
+async function countDistinctSourcesFromUrl({
+  url,
+  serviceRoleKey,
+}: {
+  url: URL;
+  serviceRoleKey: string;
+}) {
+  const sourceIds = new Set<string>();
+
+  for (let from = 0; ; from += SOURCE_COUNT_PAGE_SIZE) {
+    const pageUrl = new URL(url.toString());
+    pageUrl.searchParams.set('select', 'license_iptv_source_id');
+
+    const response = await fetch(pageUrl, {
+      headers: {
+        ...getServiceRoleHeaders(serviceRoleKey),
+        Range: `${from}-${from + SOURCE_COUNT_PAGE_SIZE - 1}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('SUMMARY_SOURCE_COUNT_FAILED');
+    }
+
+    const rows = (await response.json()) as Array<{
+      license_iptv_source_id?: string | null;
+    }>;
+
+    for (const row of rows) {
+      if (row.license_iptv_source_id) {
+        sourceIds.add(row.license_iptv_source_id);
+      }
+    }
+
+    if (rows.length < SOURCE_COUNT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return sourceIds.size;
+}
+
+function withActiveFilter(url: URL, isActive: boolean) {
+  const nextUrl = new URL(url.toString());
+  nextUrl.searchParams.set('is_active', `eq.${isActive}`);
+
+  return nextUrl;
 }
 
 
@@ -286,6 +379,14 @@ Deno.serve(async (request) => {
     const accessibleLicenseIds = licenseRows.map((license) => license.id);
 
     if (accessibleLicenseIds.length === 0) {
+      const summary: ListLicenseChannelsCacheSummary = {
+        totalAccessible: 0,
+        totalFiltered: 0,
+        sourceCount: 0,
+        activeCount: 0,
+        inactiveCount: 0,
+      };
+
       return jsonResponse({
         ok: true,
         channels: [],
@@ -294,6 +395,7 @@ Deno.serve(async (request) => {
         pageSize,
         totalPages: 0,
         groups: [],
+        summary,
       });
     }
 
@@ -305,6 +407,7 @@ Deno.serve(async (request) => {
       .from('license_channels_cache')
       .select('*', { count: 'exact' })
       .in('license_id', licenseId ? [licenseId] : accessibleLicenseIds);
+    const totalAccessibleUrl = getQueryUrl(query);
 
     if (sourceId) {
       query = query.eq('license_iptv_source_id', sourceId);
@@ -323,6 +426,7 @@ Deno.serve(async (request) => {
         `name.ilike.%${searchPattern}%,tvg_id.ilike.%${searchPattern}%,stream_url.ilike.%${searchPattern}%`,
       );
     }
+    const filteredSummaryUrl = getQueryUrl(query);
 
     const { data: channels, error: channelsError, count } = await query
       .order('group_title', { ascending: true, nullsFirst: false })
@@ -333,6 +437,39 @@ Deno.serve(async (request) => {
     if (channelsError) {
       throw channelsError;
     }
+
+    const [
+      totalAccessible,
+      sourceCount,
+      activeCount,
+      inactiveCount,
+    ] = await Promise.all([
+      fetchExactCountFromUrl({
+        url: totalAccessibleUrl,
+        serviceRoleKey: supabaseServiceRoleKey,
+      }),
+      countDistinctSourcesFromUrl({
+        url: filteredSummaryUrl,
+        serviceRoleKey: supabaseServiceRoleKey,
+      }),
+      fetchExactCountFromUrl({
+        url: withActiveFilter(filteredSummaryUrl, true),
+        serviceRoleKey: supabaseServiceRoleKey,
+      }),
+      fetchExactCountFromUrl({
+        url: withActiveFilter(filteredSummaryUrl, false),
+        serviceRoleKey: supabaseServiceRoleKey,
+      }),
+    ]);
+
+    const totalFiltered = count ?? 0;
+    const summary: ListLicenseChannelsCacheSummary = {
+      totalAccessible,
+      totalFiltered,
+      sourceCount,
+      activeCount,
+      inactiveCount,
+    };
 
     const channelRows = (channels ?? []) as LicenseChannelCacheRecord[];
     const sourceIds = Array.from(
@@ -383,18 +520,18 @@ Deno.serve(async (request) => {
     return jsonResponse({
       ok: true,
       channels: items,
-      totalCount: count ?? 0,
+      totalCount: totalFiltered,
       page,
       pageSize,
-      totalPages: Math.ceil((count ?? 0) / pageSize),
+      totalPages: Math.ceil(totalFiltered / pageSize),
       groups,
+      summary,
     });
-  } catch (error) {
+  } catch {
     return jsonResponse(
       {
         ok: false,
         error: 'LIST_LICENSE_CHANNELS_CACHE_FAILED',
-        details: serializeErrorDetails(error),
       },
       500,
     );

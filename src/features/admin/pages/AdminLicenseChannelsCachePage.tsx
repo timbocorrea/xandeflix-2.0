@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AdminLayout } from '../components/AdminLayout';
 
@@ -6,6 +6,7 @@ import {
   listAdminLicenseChannelsCache,
   updateAdminLicenseChannelStatus,
   type AdminLicenseChannelCacheItem,
+  type AdminLicenseChannelsCacheSummary,
 } from '../services';
 
 const PAGE_SIZE = 25;
@@ -51,11 +52,20 @@ function getListErrorMessage(error: unknown) {
   const messages: Record<string, string> = {
     UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
     FORBIDDEN: 'Você não tem permissão para visualizar estes canais.',
+    EDGE_FUNCTION_REQUEST_FAILED:
+      'Não foi possível conectar ao serviço de canais.',
+    EDGE_FUNCTION_UNAVAILABLE:
+      'A função administrativa de canais não está disponível.',
+    RESPONSE_SCHEMA_INVALID:
+      'A resposta do serviço de canais está em um formato inesperado.',
+    MISSING_ENV: 'O serviço administrativo de canais não está configurado.',
+    ADMIN_CHANNELS_LOAD_FAILED:
+      'Não foi possível carregar os canais importados.',
     LIST_LICENSE_CHANNELS_CACHE_FAILED:
       'Não foi possível carregar os canais importados.',
   };
 
-  return messages[error.message] ?? error.message;
+  return messages[error.message] ?? 'Não foi possível carregar os canais importados.';
 }
 
 function getUpdateErrorMessage(error: unknown) {
@@ -75,7 +85,11 @@ function getUpdateErrorMessage(error: unknown) {
       'Não foi possível atualizar o status do canal.',
   };
 
-  return messages[error.message] ?? error.message;
+  return messages[error.message] ?? 'Não foi possível atualizar o status do canal.';
+}
+
+function formatMetricValue(value: number | null) {
+  return value === null ? '—' : value.toLocaleString('pt-BR');
 }
 
 export function AdminLicenseChannelsCachePage() {
@@ -88,6 +102,9 @@ export function AdminLicenseChannelsCachePage() {
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+  const [summary, setSummary] =
+    useState<AdminLicenseChannelsCacheSummary | null>(null);
+  const [hasLoadedSuccessfully, setHasLoadedSuccessfully] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [updatingChannelId, setUpdatingChannelId] = useState<string | null>(null);
@@ -95,21 +112,9 @@ export function AdminLicenseChannelsCachePage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
-  const activeCount = useMemo(
-    () => channels.filter((channel) => channel.is_active).length,
-    [channels],
-  );
-
-  const inactiveCount = useMemo(
-    () => channels.filter((channel) => !channel.is_active).length,
-    [channels],
-  );
-
-  const sourceCount = useMemo(
-    () =>
-      new Set(channels.map((channel) => channel.license_iptv_source_id)).size,
-    [channels],
-  );
+  const canShowConfirmedMetrics = hasLoadedSuccessfully && summary !== null;
+  const isInitialLoading = isLoading && !hasLoadedSuccessfully;
+  const isInitialError = Boolean(errorMessage) && !hasLoadedSuccessfully;
 
   async function loadChannels(options?: { silent?: boolean; nextPage?: number }) {
     try {
@@ -138,6 +143,8 @@ export function AdminLicenseChannelsCachePage() {
       setGroups(result.groups);
       setTotalCount(result.totalCount);
       setTotalPages(result.totalPages);
+      setSummary(result.summary);
+      setHasLoadedSuccessfully(true);
       setPage(result.page);
       setLastLoadedAt(new Date().toISOString());
     } catch (error) {
@@ -161,7 +168,13 @@ export function AdminLicenseChannelsCachePage() {
   }, [searchInput]);
 
   useEffect(() => {
-    void loadChannels({ nextPage: 1 });
+    const timeoutId = window.setTimeout(() => {
+      void loadChannels({ nextPage: 1 });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, groupTitle, statusFilter]);
 
@@ -182,7 +195,11 @@ export function AdminLicenseChannelsCachePage() {
   }
 
   function handleChangePage(nextPage: number) {
-    if (nextPage < 1 || (totalPages > 0 && nextPage > totalPages)) {
+    if (
+      !hasLoadedSuccessfully ||
+      nextPage < 1 ||
+      (totalPages > 0 && nextPage > totalPages)
+    ) {
       return;
     }
 
@@ -253,26 +270,47 @@ export function AdminLicenseChannelsCachePage() {
           </button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-5">
+          <article className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-xf-muted">
+              Total carregado
+            </p>
+            <p className="mt-2 text-3xl font-black">
+              {formatMetricValue(
+                canShowConfirmedMetrics ? summary.totalAccessible : null,
+              )}
+            </p>
+          </article>
+
           <article className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-xf-muted">
               Total filtrado
             </p>
-            <p className="mt-2 text-3xl font-black">{totalCount}</p>
+            <p className="mt-2 text-3xl font-black">
+              {formatMetricValue(
+                canShowConfirmedMetrics ? summary.totalFiltered : null,
+              )}
+            </p>
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-xf-muted">
               Nesta página
             </p>
-            <p className="mt-2 text-3xl font-black">{channels.length}</p>
+            <p className="mt-2 text-3xl font-black">
+              {formatMetricValue(canShowConfirmedMetrics ? channels.length : null)}
+            </p>
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-xf-muted">
               Fontes
             </p>
-            <p className="mt-2 text-3xl font-black">{sourceCount}</p>
+            <p className="mt-2 text-3xl font-black">
+              {formatMetricValue(
+                canShowConfirmedMetrics ? summary.sourceCount : null,
+              )}
+            </p>
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -280,7 +318,9 @@ export function AdminLicenseChannelsCachePage() {
               Ativos/Inativos
             </p>
             <p className="mt-2 text-3xl font-black">
-              {activeCount}/{inactiveCount}
+              {canShowConfirmedMetrics
+                ? `${summary.activeCount.toLocaleString('pt-BR')}/${summary.inactiveCount.toLocaleString('pt-BR')}`
+                : '—'}
             </p>
           </article>
         </div>
@@ -383,9 +423,13 @@ export function AdminLicenseChannelsCachePage() {
             </p>
           </div>
 
-          {isLoading ? (
+          {isInitialLoading ? (
             <div className="p-6 text-sm text-xf-muted">
               Carregando canais importados...
+            </div>
+          ) : isInitialError ? (
+            <div className="p-6 text-sm text-xf-muted">
+              Não foi possível confirmar a lista de canais neste momento.
             </div>
           ) : channels.length === 0 ? (
             <div className="p-6 text-sm text-xf-muted">
@@ -492,14 +536,18 @@ export function AdminLicenseChannelsCachePage() {
 
           <div className="flex flex-col gap-3 border-t border-white/10 px-5 py-4 md:flex-row md:items-center md:justify-between">
             <p className="text-xs text-xf-muted">
-              Página {page} de {Math.max(totalPages, 1)} — {totalCount} resultado(s)
+              {hasLoadedSuccessfully
+                ? `Página ${page} de ${Math.max(totalPages, 1)} — ${totalCount.toLocaleString('pt-BR')} resultado(s)`
+                : 'Paginação indisponível até a primeira carga bem-sucedida.'}
             </p>
 
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => handleChangePage(page - 1)}
-                disabled={page <= 1 || isLoading || isRefreshing}
+                disabled={
+                  !hasLoadedSuccessfully || page <= 1 || isLoading || isRefreshing
+                }
                 className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Anterior
@@ -509,7 +557,11 @@ export function AdminLicenseChannelsCachePage() {
                 type="button"
                 onClick={() => handleChangePage(page + 1)}
                 disabled={
-                  totalPages === 0 || page >= totalPages || isLoading || isRefreshing
+                  !hasLoadedSuccessfully ||
+                  totalPages === 0 ||
+                  page >= totalPages ||
+                  isLoading ||
+                  isRefreshing
                 }
                 className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
