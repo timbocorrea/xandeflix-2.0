@@ -50,7 +50,7 @@ type ListLicenseChannelsCacheItem = LicenseChannelCacheRecord & {
 type ListLicenseChannelsCacheSummary = {
   totalAccessible: number;
   totalFiltered: number;
-  sourceCount: number;
+  sourceCount: number | null;
   activeCount: number;
   inactiveCount: number;
 };
@@ -60,8 +60,7 @@ type SupabaseClient = ReturnType<typeof createClient>;
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
-const SOURCE_CANDIDATE_PAGE_SIZE = 1000;
-const SOURCE_CANDIDATE_MAX_PAGES = 10;
+const SOURCE_CANDIDATE_HARD_LIMIT = 100;
 const SOURCE_COUNT_BATCH_SIZE = 10;
 
 const corsHeaders = {
@@ -119,6 +118,10 @@ function resolvePageSize(value: unknown) {
   }
 
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
+}
+
+function logStageFailure(stage: string) {
+  console.error(`[list-license-channels-cache] ${stage}`);
 }
 
 function buildAccessibleLicenseQuery({
@@ -270,6 +273,7 @@ Deno.serve(async (request) => {
     });
 
     if (licensesError) {
+      logStageFailure('ACCESSIBLE_LICENSES_FAILED');
       throw licensesError;
     }
 
@@ -359,6 +363,7 @@ Deno.serve(async (request) => {
       selectedStatus,
       licenseIds,
       sourceIdOverride,
+      failureStage,
     }: {
       includeSearch: boolean;
       includeGroup: boolean;
@@ -366,6 +371,7 @@ Deno.serve(async (request) => {
       selectedStatus: boolean | null;
       licenseIds?: string[];
       sourceIdOverride?: string | null;
+      failureStage: string;
     }) => {
       const { error, count } = await buildChannelsQuery({
         selectColumns: 'id',
@@ -380,56 +386,66 @@ Deno.serve(async (request) => {
       });
 
       if (error) {
+        logStageFailure(failureStage);
         throw error;
       }
 
       return count ?? 0;
     };
 
-    const listCandidateSourceIds = async () => {
-      const ids: string[] = [];
+    const countCandidateSources = async () => {
+      let query = supabaseAdmin
+        .from('license_iptv_sources')
+        .select('id', { count: 'exact', head: true })
+        .in('license_id', scopedLicenseIds);
 
-      for (
-        let pageIndex = 0;
-        pageIndex < SOURCE_CANDIDATE_MAX_PAGES;
-        pageIndex += 1
-      ) {
-        const pageFrom = pageIndex * SOURCE_CANDIDATE_PAGE_SIZE;
-        const pageTo = pageFrom + SOURCE_CANDIDATE_PAGE_SIZE - 1;
-        let query = supabaseAdmin
-          .from('license_iptv_sources')
-          .select('id')
-          .in('license_id', scopedLicenseIds)
-          .range(pageFrom, pageTo);
-
-        if (sourceId) {
-          query = query.eq('id', sourceId);
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-          throw error;
-        }
-
-        const rows = (data ?? []) as Array<{ id?: string | null }>;
-
-        for (const row of rows) {
-          if (row.id) {
-            ids.push(row.id);
-          }
-        }
-
-        if (rows.length < SOURCE_CANDIDATE_PAGE_SIZE) {
-          return ids;
-        }
+      if (sourceId) {
+        query = query.eq('id', sourceId);
       }
 
-      throw new Error('SUMMARY_SOURCE_CANDIDATE_LIMIT_EXCEEDED');
+      const { error, count } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      return count ?? 0;
+    };
+
+    const listCandidateSourceIds = async (candidateCount: number) => {
+      if (candidateCount === 0) {
+        return [];
+      }
+
+      let query = supabaseAdmin
+        .from('license_iptv_sources')
+        .select('id')
+        .in('license_id', scopedLicenseIds)
+        .range(0, candidateCount - 1);
+
+      if (sourceId) {
+        query = query.eq('id', sourceId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      return ((data ?? []) as Array<{ id?: string | null }>)
+        .map((row) => row.id)
+        .filter((id): id is string => Boolean(id));
     };
 
     const countSources = async () => {
-      const candidateSourceIds = await listCandidateSourceIds();
+      const candidateCount = await countCandidateSources();
+
+      if (candidateCount > SOURCE_CANDIDATE_HARD_LIMIT) {
+        throw new Error('SOURCE_COUNT_UNAVAILABLE');
+      }
+
+      const candidateSourceIds = await listCandidateSourceIds(candidateCount);
       let total = 0;
 
       for (
@@ -449,6 +465,7 @@ Deno.serve(async (request) => {
               includeSource: false,
               sourceIdOverride: candidateSourceId,
               selectedStatus: null,
+              failureStage: 'SOURCE_COUNT_UNAVAILABLE',
             }),
           ),
         );
@@ -472,13 +489,13 @@ Deno.serve(async (request) => {
       .range(from, to);
 
     if (channelsError) {
+      logStageFailure('CHANNEL_PAGE_FAILED');
       throw channelsError;
     }
 
     const [
       totalAccessible,
       totalFiltered,
-      sourceCount,
       activeCount,
       inactiveCount,
     ] = await Promise.all([
@@ -488,27 +505,40 @@ Deno.serve(async (request) => {
         includeSource: false,
         selectedStatus: null,
         licenseIds: accessibleLicenseIds,
+        failureStage: 'TOTAL_ACCESSIBLE_FAILED',
       }),
       countChannels({
         includeSearch: true,
         includeGroup: true,
         includeSource: true,
         selectedStatus: isActive,
+        failureStage: 'TOTAL_FILTERED_FAILED',
       }),
-      countSources(),
       countChannels({
         includeSearch: true,
         includeGroup: true,
         includeSource: true,
         selectedStatus: true,
+        failureStage: 'ACTIVE_COUNT_FAILED',
       }),
       countChannels({
         includeSearch: true,
         includeGroup: true,
         includeSource: true,
         selectedStatus: false,
+        failureStage: 'INACTIVE_COUNT_FAILED',
       }),
     ]);
+
+    let sourceCount: number | null = null;
+    const summaryWarnings: string[] = [];
+
+    try {
+      sourceCount = await countSources();
+    } catch {
+      logStageFailure('SOURCE_COUNT_UNAVAILABLE');
+      summaryWarnings.push('SOURCE_COUNT_UNAVAILABLE');
+    }
 
     const summary: ListLicenseChannelsCacheSummary = {
       totalAccessible,
@@ -532,6 +562,7 @@ Deno.serve(async (request) => {
         : { data: [], error: null };
 
     if (sourcesError) {
+      logStageFailure('SOURCE_LOOKUP_FAILED');
       throw sourcesError;
     }
 
@@ -573,8 +604,10 @@ Deno.serve(async (request) => {
       totalPages: Math.ceil(totalFiltered / pageSize),
       groups,
       summary,
+      ...(summaryWarnings.length > 0 ? { summaryWarnings } : {}),
     });
   } catch {
+    logStageFailure('REQUEST_FAILED');
     return jsonResponse(
       {
         ok: false,

@@ -43,6 +43,7 @@ export type ListAdminLicenseChannelsCacheResponse = {
   totalPages?: number;
   groups?: string[];
   summary?: AdminLicenseChannelsCacheSummary;
+  summaryWarnings?: string[];
   error?: string;
   details?: string;
 };
@@ -50,7 +51,7 @@ export type ListAdminLicenseChannelsCacheResponse = {
 export type AdminLicenseChannelsCacheSummary = {
   totalAccessible: number;
   totalFiltered: number;
-  sourceCount: number;
+  sourceCount: number | null;
   activeCount: number;
   inactiveCount: number;
 };
@@ -63,6 +64,7 @@ export type AdminLicenseChannelsCacheResult = {
   totalPages: number;
   groups: string[];
   summary: AdminLicenseChannelsCacheSummary;
+  summaryWarnings: string[];
 };
 
 export type UpdateAdminLicenseChannelStatusInput = {
@@ -111,6 +113,31 @@ function normalizeListFunctionError(error: unknown) {
   return 'ADMIN_CHANNELS_LOAD_FAILED';
 }
 
+function isNonNegativeNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function normalizeSummary(summary: AdminLicenseChannelsCacheSummary | undefined) {
+  if (!summary) {
+    throw new Error('RESPONSE_SCHEMA_INVALID');
+  }
+
+  if (
+    !isNonNegativeNumber(summary.totalAccessible) ||
+    !isNonNegativeNumber(summary.totalFiltered) ||
+    !isNonNegativeNumber(summary.activeCount) ||
+    !isNonNegativeNumber(summary.inactiveCount) ||
+    !(
+      summary.sourceCount === null ||
+      isNonNegativeNumber(summary.sourceCount)
+    )
+  ) {
+    throw new Error('RESPONSE_SCHEMA_INVALID');
+  }
+
+  return summary;
+}
+
 export async function listAdminLicenseChannelsCache(
   input: ListAdminLicenseChannelsCacheInput = {},
 ): Promise<AdminLicenseChannelsCacheResult> {
@@ -130,18 +157,19 @@ export async function listAdminLicenseChannelsCache(
     throw new Error(data?.error ?? 'LIST_LICENSE_CHANNELS_CACHE_FAILED');
   }
 
-  if (!data.summary) {
-    throw new Error('RESPONSE_SCHEMA_INVALID');
-  }
+  const summary = normalizeSummary(data.summary);
 
   return {
     channels: data.channels ?? [],
-    totalCount: data.totalCount ?? data.summary.totalFiltered,
+    totalCount: data.totalCount ?? summary.totalFiltered,
     page: data.page ?? input.page ?? 1,
     pageSize: data.pageSize ?? input.pageSize ?? 25,
     totalPages: data.totalPages ?? 0,
     groups: data.groups ?? [],
-    summary: data.summary,
+    summary,
+    summaryWarnings: (data.summaryWarnings ?? []).filter(
+      (warning): warning is string => typeof warning === 'string',
+    ),
   };
 }
 

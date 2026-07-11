@@ -113,6 +113,8 @@ export function AdminLicenseChannelsCachePage() {
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
   const canShowConfirmedMetrics = hasLoadedSuccessfully && summary !== null;
+  const isSourceCountUnavailable =
+    canShowConfirmedMetrics && summary.sourceCount === null;
   const isInitialLoading = isLoading && !hasLoadedSuccessfully;
   const isInitialError = Boolean(errorMessage) && !hasLoadedSuccessfully;
 
@@ -306,7 +308,19 @@ export function AdminLicenseChannelsCachePage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-xf-muted">
               Fontes
             </p>
-            <p className="mt-2 text-3xl font-black">
+            <p
+              className="mt-2 text-3xl font-black"
+              title={
+                isSourceCountUnavailable
+                  ? 'Contagem de fontes temporariamente indisponível'
+                  : undefined
+              }
+              aria-label={
+                isSourceCountUnavailable
+                  ? 'Contagem de fontes temporariamente indisponível'
+                  : undefined
+              }
+            >
               {formatMetricValue(
                 canShowConfirmedMetrics ? summary.sourceCount : null,
               )}
