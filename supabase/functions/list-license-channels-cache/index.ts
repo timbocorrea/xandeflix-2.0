@@ -60,8 +60,9 @@ type SupabaseClient = ReturnType<typeof createClient>;
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
-const SOURCE_COUNT_PAGE_SIZE = 1000;
-const SOURCE_COUNT_MAX_PAGES = 50;
+const SOURCE_CANDIDATE_PAGE_SIZE = 1000;
+const SOURCE_CANDIDATE_MAX_PAGES = 10;
+const SOURCE_COUNT_BATCH_SIZE = 10;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -308,6 +309,7 @@ Deno.serve(async (request) => {
       includeSource,
       selectedStatus,
       licenseIds = scopedLicenseIds,
+      sourceIdOverride = null,
       count = null,
       head = false,
     }: {
@@ -317,6 +319,7 @@ Deno.serve(async (request) => {
       includeSource: boolean;
       selectedStatus: boolean | null;
       licenseIds?: string[];
+      sourceIdOverride?: string | null;
       count?: 'exact' | null;
       head?: boolean;
     }) => {
@@ -326,8 +329,10 @@ Deno.serve(async (request) => {
       .select(selectColumns, selectOptions)
       .in('license_id', licenseIds);
 
-    if (includeSource && sourceId) {
-      query = query.eq('license_iptv_source_id', sourceId);
+    const selectedSourceId = sourceIdOverride ?? (includeSource ? sourceId : null);
+
+    if (selectedSourceId) {
+      query = query.eq('license_iptv_source_id', selectedSourceId);
     }
 
     if (includeGroup && groupTitle) {
@@ -353,12 +358,14 @@ Deno.serve(async (request) => {
       includeSource,
       selectedStatus,
       licenseIds,
+      sourceIdOverride,
     }: {
       includeSearch: boolean;
       includeGroup: boolean;
       includeSource: boolean;
       selectedStatus: boolean | null;
       licenseIds?: string[];
+      sourceIdOverride?: string | null;
     }) => {
       const { error, count } = await buildChannelsQuery({
         selectColumns: 'id',
@@ -367,6 +374,7 @@ Deno.serve(async (request) => {
         includeSource,
         selectedStatus,
         licenseIds,
+        sourceIdOverride,
         count: 'exact',
         head: true,
       });
@@ -378,40 +386,77 @@ Deno.serve(async (request) => {
       return count ?? 0;
     };
 
-    const countSources = async () => {
-      const sourceIds = new Set<string>();
+    const listCandidateSourceIds = async () => {
+      const ids: string[] = [];
 
-      for (let pageIndex = 0; pageIndex < SOURCE_COUNT_MAX_PAGES; pageIndex += 1) {
-        const pageFrom = pageIndex * SOURCE_COUNT_PAGE_SIZE;
-        const pageTo = pageFrom + SOURCE_COUNT_PAGE_SIZE - 1;
-        const { data, error } = await buildChannelsQuery({
-          selectColumns: 'license_iptv_source_id',
-          includeSearch: true,
-          includeGroup: true,
-          includeSource: true,
-          selectedStatus: null,
-        }).range(pageFrom, pageTo);
+      for (
+        let pageIndex = 0;
+        pageIndex < SOURCE_CANDIDATE_MAX_PAGES;
+        pageIndex += 1
+      ) {
+        const pageFrom = pageIndex * SOURCE_CANDIDATE_PAGE_SIZE;
+        const pageTo = pageFrom + SOURCE_CANDIDATE_PAGE_SIZE - 1;
+        let query = supabaseAdmin
+          .from('license_iptv_sources')
+          .select('id')
+          .in('license_id', scopedLicenseIds)
+          .range(pageFrom, pageTo);
+
+        if (sourceId) {
+          query = query.eq('id', sourceId);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
           throw error;
         }
 
-        const rows = (data ?? []) as Array<{
-          license_iptv_source_id?: string | null;
-        }>;
+        const rows = (data ?? []) as Array<{ id?: string | null }>;
 
         for (const row of rows) {
-          if (row.license_iptv_source_id) {
-            sourceIds.add(row.license_iptv_source_id);
+          if (row.id) {
+            ids.push(row.id);
           }
         }
 
-        if (rows.length < SOURCE_COUNT_PAGE_SIZE) {
-          return sourceIds.size;
+        if (rows.length < SOURCE_CANDIDATE_PAGE_SIZE) {
+          return ids;
         }
       }
 
-      throw new Error('SUMMARY_SOURCE_COUNT_LIMIT_EXCEEDED');
+      throw new Error('SUMMARY_SOURCE_CANDIDATE_LIMIT_EXCEEDED');
+    };
+
+    const countSources = async () => {
+      const candidateSourceIds = await listCandidateSourceIds();
+      let total = 0;
+
+      for (
+        let index = 0;
+        index < candidateSourceIds.length;
+        index += SOURCE_COUNT_BATCH_SIZE
+      ) {
+        const batch = candidateSourceIds.slice(
+          index,
+          index + SOURCE_COUNT_BATCH_SIZE,
+        );
+        const counts = await Promise.all(
+          batch.map((candidateSourceId) =>
+            countChannels({
+              includeSearch: true,
+              includeGroup: true,
+              includeSource: false,
+              sourceIdOverride: candidateSourceId,
+              selectedStatus: null,
+            }),
+          ),
+        );
+
+        total += counts.filter((count) => count > 0).length;
+      }
+
+      return total;
     };
 
     const { data: channels, error: channelsError } = await buildChannelsQuery({
