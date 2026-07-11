@@ -1,13 +1,20 @@
-import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
+import {
+  clearStoredLicenseActivation,
+  getStoredLicenseActivation,
+} from '@/features/licensing/lib/licenseActivationStorage';
 import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
 import { isLiveChannel } from '@/features/playlists/lib/channelClassification';
-import { listAuthorizedLicenseChannels } from '@/features/playlists/services/authorizedLicenseChannels.service';
+import {
+  clearAuthorizedLicenseChannelsCache,
+  listAuthorizedLicenseChannels,
+} from '@/features/playlists/services/authorizedLicenseChannels.service';
 import type {
   IptvChannel,
   PlaylistRuntimeStatus,
   PlaylistSource,
 } from '@/features/playlists/types/playlist';
 import {
+  clearHomeVodCache,
   loadHomeVodCategoryItems,
   loadHomeVodSections,
   type HomeVodItem,
@@ -83,6 +90,11 @@ const SERIES_HERO_PRELOAD_ITEM_LIMIT = 10;
 const SERIES_VISIBLE_CARD_PRELOAD_LIMIT = 15;
 const HOME_VISIBLE_CARD_PRELOAD_LIMIT = 15;
 const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v1:';
+const LIVE_TV_CRITICAL_CACHE_STORAGE_KEY = 'xandeflix:live-tv-critical-cache:v5';
+const SERIES_DETAIL_EPISODES_CACHE_PREFIX = 'xandeflix:series-detail-episodes:v1:';
+const CATALOG_WARMUP_STORAGE_PREFIX = 'xandeflix.catalogVodWarmup:';
+const CATALOG_WARMUP_REFRESH_STORAGE_KEY =
+  'xandeflix:catalog-vod-warmup:last-refreshed-at';
 
 type StoredSeriesLandingItemsEntry = {
   createdAt: number;
@@ -149,6 +161,57 @@ type AppBootstrapCacheEntry = {
 };
 
 let appBootstrapCache: AppBootstrapCacheEntry | null = null;
+
+const CLIENT_RUNTIME_ACCESS_STORAGE_KEYS = [
+  APP_BOOTSTRAP_STORAGE_KEY,
+  LIVE_TV_CRITICAL_CACHE_STORAGE_KEY,
+  CATALOG_WARMUP_REFRESH_STORAGE_KEY,
+];
+
+const CLIENT_RUNTIME_ACCESS_STORAGE_PREFIXES = [
+  SERIES_LANDING_ITEMS_STORAGE_PREFIX,
+  SERIES_DETAIL_EPISODES_CACHE_PREFIX,
+  CATALOG_WARMUP_STORAGE_PREFIX,
+];
+
+function clearClientRuntimeStorage(storage: Storage) {
+  const storageKeysToRemove = new Set(CLIENT_RUNTIME_ACCESS_STORAGE_KEYS);
+
+  for (let index = 0; index < storage.length; index += 1) {
+    const storageKey = storage.key(index);
+
+    if (
+      storageKey &&
+      CLIENT_RUNTIME_ACCESS_STORAGE_PREFIXES.some((prefix) =>
+        storageKey.startsWith(prefix),
+      )
+    ) {
+      storageKeysToRemove.add(storageKey);
+    }
+  }
+
+  for (const storageKey of storageKeysToRemove) {
+    storage.removeItem(storageKey);
+  }
+}
+
+export function clearClientRuntimeAccessState(): void {
+  appBootstrapCache = null;
+  clearStoredLicenseActivation({ markSignedOut: true });
+  clearHomeVodCache();
+  clearAuthorizedLicenseChannelsCache();
+
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    clearClientRuntimeStorage(window.localStorage);
+    clearClientRuntimeStorage(window.sessionStorage);
+  } catch {
+    // Runtime cache cleanup is best-effort; missing storage already means blocked.
+  }
+}
 
 function normalizeLicenseCode(value?: string | null) {
   return value?.trim().toUpperCase() ?? '';

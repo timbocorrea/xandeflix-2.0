@@ -48,6 +48,101 @@ type GetClientLicenseChannelsResponse = {
   details?: string;
 };
 
+type LicenseChannelsPageResult = {
+  channels: LicenseChannelCacheItem[];
+  totalPages: number;
+};
+
+const LICENSE_CHANNELS_PAGE_CACHE_TTL_MS = 30_000;
+const LICENSE_CHANNELS_PAGE_CACHE_MAX_ENTRIES = 250;
+
+const inFlightLicenseChannelsPageRequests = new Map<
+  string,
+  Promise<LicenseChannelsPageResult>
+>();
+
+const licenseChannelsPageCache = new Map<
+  string,
+  { expiresAt: number; result: LicenseChannelsPageResult }
+>();
+
+function createLicenseChannelsPageRequestKey(input: {
+  licenseCode: string;
+  deviceIdentifier: string;
+  page: number;
+  pageSize: number;
+  requireTmdbMatched?: boolean;
+  requireTmdbPoster?: boolean;
+  contentKind?: 'live' | 'movie' | 'series';
+  contentKinds?: Array<'live' | 'movie' | 'series'>;
+  groupTitle?: string;
+  groupTitles?: string[];
+}) {
+  return JSON.stringify({
+    licenseCode: input.licenseCode,
+    deviceIdentifier: input.deviceIdentifier,
+    page: input.page,
+    pageSize: input.pageSize,
+    requireTmdbMatched: input.requireTmdbMatched ?? null,
+    requireTmdbPoster: input.requireTmdbPoster ?? null,
+    contentKind: input.contentKind ?? null,
+    contentKinds: input.contentKinds ?? null,
+    groupTitle: input.groupTitle ?? null,
+    groupTitles: input.groupTitles ?? null,
+  });
+}
+
+function getCachedLicenseChannelsPage(
+  requestKey: string,
+): LicenseChannelsPageResult | null {
+  const cachedEntry = licenseChannelsPageCache.get(requestKey);
+
+  if (!cachedEntry) {
+    return null;
+  }
+
+  if (cachedEntry.expiresAt <= Date.now()) {
+    licenseChannelsPageCache.delete(requestKey);
+    return null;
+  }
+
+  return cachedEntry.result;
+}
+
+function trimLicenseChannelsPageCache() {
+  if (licenseChannelsPageCache.size <= LICENSE_CHANNELS_PAGE_CACHE_MAX_ENTRIES) {
+    return;
+  }
+
+  const keysToDelete = Array.from(licenseChannelsPageCache.keys()).slice(
+    0,
+    Math.max(
+      1,
+      licenseChannelsPageCache.size - LICENSE_CHANNELS_PAGE_CACHE_MAX_ENTRIES,
+    ),
+  );
+
+  for (const key of keysToDelete) {
+    licenseChannelsPageCache.delete(key);
+  }
+}
+
+function setCachedLicenseChannelsPage(
+  requestKey: string,
+  result: LicenseChannelsPageResult,
+) {
+  licenseChannelsPageCache.set(requestKey, {
+    expiresAt: Date.now() + LICENSE_CHANNELS_PAGE_CACHE_TTL_MS,
+    result,
+  });
+  trimLicenseChannelsPageCache();
+}
+
+export function clearAuthorizedLicenseChannelsCache(): void {
+  inFlightLicenseChannelsPageRequests.clear();
+  licenseChannelsPageCache.clear();
+}
+
 export type ListAuthorizedLicenseChannelsInput = {
   licenseCode: string;
   deviceIdentifier: string;
@@ -158,40 +253,79 @@ async function fetchLicenseChannelsPage({
   contentKinds?: Array<'live' | 'movie' | 'series'>;
   groupTitle?: string;
   groupTitles?: string[];
-}) {
-  const { data, error } =
-    await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
-      'get-client-license-channels',
-      {
-        body: {
-          licenseCode,
-          deviceIdentifier,
-          page,
-          pageSize,
-          ...(requireTmdbMatched === undefined ? {} : { requireTmdbMatched }),
-          ...(requireTmdbPoster === undefined ? {} : { requireTmdbPoster }),
-          ...(contentKind === undefined ? {} : { contentKind }),
-          ...(contentKinds === undefined ? {} : { contentKinds }),
-          ...(groupTitle === undefined ? {} : { groupTitle }),
-          ...(groupTitles === undefined ? {} : { groupTitles }),
+}): Promise<LicenseChannelsPageResult> {
+  const requestKey = createLicenseChannelsPageRequestKey({
+    licenseCode,
+    deviceIdentifier,
+    page,
+    pageSize,
+    requireTmdbMatched,
+    requireTmdbPoster,
+    contentKind,
+    contentKinds,
+    groupTitle,
+    groupTitles,
+  });
+
+  const cachedResult = getCachedLicenseChannelsPage(requestKey);
+
+  if (cachedResult) {
+    return cachedResult;
+  }
+
+  const existingRequest = inFlightLicenseChannelsPageRequests.get(requestKey);
+
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const requestPromise = (async () => {
+    const { data, error } =
+      await supabase.functions.invoke<GetClientLicenseChannelsResponse>(
+        'get-client-license-channels',
+        {
+          body: {
+            licenseCode,
+            deviceIdentifier,
+            page,
+            pageSize,
+            ...(requireTmdbMatched === undefined ? {} : { requireTmdbMatched }),
+            ...(requireTmdbPoster === undefined ? {} : { requireTmdbPoster }),
+            ...(contentKind === undefined ? {} : { contentKind }),
+            ...(contentKinds === undefined ? {} : { contentKinds }),
+            ...(groupTitle === undefined ? {} : { groupTitle }),
+            ...(groupTitles === undefined ? {} : { groupTitles }),
+          },
         },
-      },
-    );
+      );
 
-  if (error) {
-    throw error;
+    if (error) {
+      throw error;
+    }
+
+    if (!data?.ok) {
+      throw new Error(
+        data?.details ?? data?.error ?? 'CLIENT_LICENSE_CHANNELS_FAILED',
+      );
+    }
+
+    const result = {
+      channels: data.channels ?? [],
+      totalPages: data.totalPages ?? 0,
+    };
+
+    setCachedLicenseChannelsPage(requestKey, result);
+
+    return result;
+  })();
+
+  inFlightLicenseChannelsPageRequests.set(requestKey, requestPromise);
+
+  try {
+    return await requestPromise;
+  } finally {
+    inFlightLicenseChannelsPageRequests.delete(requestKey);
   }
-
-  if (!data?.ok) {
-    throw new Error(
-      data?.details ?? data?.error ?? 'CLIENT_LICENSE_CHANNELS_FAILED',
-    );
-  }
-
-  return {
-    channels: data.channels ?? [],
-    totalPages: data.totalPages ?? 0,
-  };
 }
 
 export async function listAuthorizedLicenseChannels({

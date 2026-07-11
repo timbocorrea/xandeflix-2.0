@@ -25,16 +25,13 @@ import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { AdminLoginPage } from '../features/admin/pages/AdminLoginPage';
 import { SuperAdminOnly } from '../features/admin/components/SuperAdminOnly';
 import { LoginPage } from '../features/auth/pages/LoginPage';
-import {
-  clearStoredLicenseActivation,
-  getStoredLicenseActivation,
-} from '../features/licensing/lib/licenseActivationStorage';
+import { getStoredLicenseActivation } from '../features/licensing/lib/licenseActivationStorage';
 import { validateStoredLicenseSession } from '../features/licensing/services/licenseSessionValidation.service';
 import { CatalogPage } from '../features/catalog/pages/CatalogPage';
 import { CatalogLaunchesPage } from '../features/catalog/pages/CatalogLaunchesPage';
 import { CatalogCategoryPage } from '../features/catalog/pages/CatalogCategoryPage';
 import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
-import { clearHomeVodCache } from '../features/catalog/services/homeVod.service';
+import { clearClientRuntimeAccessState } from '../features/bootstrap/services/appBootstrap.service';
 import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
 import { env } from '../config/env';
 // Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
@@ -92,8 +89,7 @@ function LicenseRoute({ children }: { children: ReactNode }) {
         return;
       }
 
-      clearStoredLicenseActivation();
-      clearHomeVodCache();
+      clearClientRuntimeAccessState();
       setValidationStatus('invalid');
     });
 

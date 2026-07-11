@@ -11,8 +11,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { spatialError } from '@/lib/spatial/spatialDebug';
 
 import { supabase } from '../../lib/supabase/supabaseClient';
-import { clearHomeVodCache } from '../../features/catalog/services/homeVod.service';
-import { clearStoredLicenseActivation } from '../../features/licensing/lib/licenseActivationStorage';
+import { clearClientRuntimeAccessState } from '../../features/bootstrap/services/appBootstrap.service';
 
 interface AuthContextValue {
   user: User | null;
@@ -103,19 +102,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signOut = useCallback(async () => {
     setIsLoading(true);
 
-    const { error } = await supabase.auth.signOut();
-    clearStoredLicenseActivation();
-    clearHomeVodCache();
+    let signOutError: Error | null = null;
 
-    setSession(null);
-    setUser(null);
-    setIsLoading(false);
+    try {
+      const { error } = await supabase.auth.signOut();
 
-    if (error) {
-      throw new Error(error.message);
+      if (error) {
+        signOutError = new Error(error.message);
+      }
+    } catch (error) {
+      signOutError =
+        error instanceof Error ? error : new Error('SIGN_OUT_FAILED');
+    } finally {
+      clearClientRuntimeAccessState();
+
+      setSession(null);
+      setUser(null);
+      setIsLoading(false);
+    }
+
+    if (signOutError) {
+      throw signOutError;
     }
   }, []);
-
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
