@@ -34,6 +34,21 @@ export type ListAdminLicenseChannelsCacheInput = {
   isActive?: boolean | null;
 };
 
+export type AdminLicenseChannelsCacheFailureStage =
+  | 'ENVIRONMENT'
+  | 'AUTH_USER'
+  | 'ADMIN_PROFILE'
+  | 'ACCESSIBLE_LICENSES'
+  | 'CHANNEL_PAGE'
+  | 'TOTAL_ACCESSIBLE'
+  | 'TOTAL_FILTERED'
+  | 'ACTIVE_COUNT'
+  | 'INACTIVE_COUNT'
+  | 'SOURCE_LOOKUP'
+  | 'GROUP_LIST'
+  | 'RESPONSE_ASSEMBLY'
+  | 'UNKNOWN';
+
 export type ListAdminLicenseChannelsCacheResponse = {
   ok: boolean;
   channels?: AdminLicenseChannelCacheItem[];
@@ -45,7 +60,8 @@ export type ListAdminLicenseChannelsCacheResponse = {
   summary?: AdminLicenseChannelsCacheSummary;
   summaryWarnings?: string[];
   error?: string;
-  details?: string;
+  failureStage?: AdminLicenseChannelsCacheFailureStage;
+  traceId?: string;
 };
 
 export type AdminLicenseChannelsCacheSummary = {

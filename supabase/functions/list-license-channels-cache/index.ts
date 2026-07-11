@@ -57,6 +57,31 @@ type ListLicenseChannelsCacheSummary = {
 
 type SupabaseClient = ReturnType<typeof createClient>;
 
+type FailureStage =
+  | 'ENVIRONMENT'
+  | 'AUTH_USER'
+  | 'ADMIN_PROFILE'
+  | 'ACCESSIBLE_LICENSES'
+  | 'CHANNEL_PAGE'
+  | 'TOTAL_ACCESSIBLE'
+  | 'TOTAL_FILTERED'
+  | 'ACTIVE_COUNT'
+  | 'INACTIVE_COUNT'
+  | 'SOURCE_LOOKUP'
+  | 'GROUP_LIST'
+  | 'RESPONSE_ASSEMBLY'
+  | 'UNKNOWN';
+
+class StageFailure extends Error {
+  readonly stage: FailureStage;
+
+  constructor(stage: FailureStage) {
+    super('STAGE_FAILURE');
+    this.name = 'StageFailure';
+    this.stage = stage;
+  }
+}
+
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
@@ -120,8 +145,21 @@ function resolvePageSize(value: unknown) {
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
 }
 
-function logStageFailure(stage: string) {
-  console.error(`[list-license-channels-cache] ${stage}`);
+async function runRequiredStage<T>(
+  stage: FailureStage,
+  operation: () => Promise<T> | T,
+) {
+  try {
+    return await operation();
+  } catch {
+    throw new StageFailure(stage);
+  }
+}
+
+function logStageFailure(stage: FailureStage, traceId: string) {
+  console.error(
+    `[list-license-channels-cache] failureStage=${stage} traceId=${traceId}`,
+  );
 }
 
 function buildAccessibleLicenseQuery({
@@ -167,7 +205,7 @@ async function listAllChannelGroups({
       .range(from, to);
 
     if (error) {
-      throw error;
+      throw new StageFailure('GROUP_LIST');
     }
 
     const rows = (data ?? []) as { group_title: string | null }[];
@@ -197,13 +235,16 @@ Deno.serve(async (request) => {
     return jsonResponse({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
   }
 
+  const traceId = crypto.randomUUID();
+  let isValidatedAdmin = false;
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
     if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
-      return jsonResponse({ ok: false, error: 'MISSING_ENV' }, 500);
+      throw new StageFailure('ENVIRONMENT');
     }
 
     const token = getBearerToken(request);
@@ -229,21 +270,25 @@ Deno.serve(async (request) => {
     const {
       data: { user },
       error: userError,
-    } = await supabaseAuth.auth.getUser();
+    } = await runRequiredStage('AUTH_USER', () => supabaseAuth.auth.getUser());
 
     if (userError || !user) {
       return jsonResponse({ ok: false, error: 'UNAUTHORIZED' }, 401);
     }
 
-    const { data: actorProfile, error: profileError } = await supabaseAdmin
-      .from('admin_profiles')
-      .select('id, role, is_active')
-      .eq('id', user.id)
-      .maybeSingle();
+    const actorProfile = await runRequiredStage('ADMIN_PROFILE', async () => {
+      const { data, error } = await supabaseAdmin
+        .from('admin_profiles')
+        .select('id, role, is_active')
+        .eq('id', user.id)
+        .maybeSingle();
 
-    if (profileError) {
-      throw profileError;
-    }
+      if (error) {
+        throw new StageFailure('ADMIN_PROFILE');
+      }
+
+      return data;
+    });
 
     if (
       !actorProfile ||
@@ -252,6 +297,8 @@ Deno.serve(async (request) => {
     ) {
       return jsonResponse({ ok: false, error: 'FORBIDDEN' }, 403);
     }
+
+    isValidatedAdmin = true;
 
     const body = (await request.json().catch(() => ({}))) as ListLicenseChannelsCacheRequest;
     const page = resolvePage(body.page);
@@ -266,16 +313,19 @@ Deno.serve(async (request) => {
     const sourceId = normalizeText(body.sourceId);
     const isActive = normalizeBooleanFilter(body.isActive);
 
-    const { data: licenses, error: licensesError } = await buildAccessibleLicenseQuery({
-      supabaseAdmin,
-      actorId: actorProfile.id,
-      actorRole: actorProfile.role as AdminRole,
-    });
+    const licenses = await runRequiredStage('ACCESSIBLE_LICENSES', async () => {
+      const { data, error } = await buildAccessibleLicenseQuery({
+        supabaseAdmin,
+        actorId: actorProfile.id,
+        actorRole: actorProfile.role as AdminRole,
+      });
 
-    if (licensesError) {
-      logStageFailure('ACCESSIBLE_LICENSES_FAILED');
-      throw licensesError;
-    }
+      if (error) {
+        throw new StageFailure('ACCESSIBLE_LICENSES');
+      }
+
+      return data;
+    });
 
     const licenseRows = (licenses ?? []) as LicenseRecord[];
     const accessibleLicenseIds = licenseRows.map((license) => license.id);
@@ -328,30 +378,31 @@ Deno.serve(async (request) => {
       head?: boolean;
     }) => {
       const selectOptions = count ? { count, head } : undefined;
-    let query = supabaseAdmin
-      .from('license_channels_cache')
-      .select(selectColumns, selectOptions)
-      .in('license_id', licenseIds);
+      let query = supabaseAdmin
+        .from('license_channels_cache')
+        .select(selectColumns, selectOptions)
+        .in('license_id', licenseIds);
 
-    const selectedSourceId = sourceIdOverride ?? (includeSource ? sourceId : null);
+      const selectedSourceId =
+        sourceIdOverride ?? (includeSource ? sourceId : null);
 
-    if (selectedSourceId) {
-      query = query.eq('license_iptv_source_id', selectedSourceId);
-    }
+      if (selectedSourceId) {
+        query = query.eq('license_iptv_source_id', selectedSourceId);
+      }
 
-    if (includeGroup && groupTitle) {
-      query = query.eq('group_title', groupTitle);
-    }
+      if (includeGroup && groupTitle) {
+        query = query.eq('group_title', groupTitle);
+      }
 
-    if (selectedStatus !== null) {
-      query = query.eq('is_active', selectedStatus);
-    }
+      if (selectedStatus !== null) {
+        query = query.eq('is_active', selectedStatus);
+      }
 
-    if (includeSearch && searchPattern) {
-      query = query.or(
-        `name.ilike.%${searchPattern}%,tvg_id.ilike.%${searchPattern}%,stream_url.ilike.%${searchPattern}%`,
-      );
-    }
+      if (includeSearch && searchPattern) {
+        query = query.or(
+          `name.ilike.%${searchPattern}%,tvg_id.ilike.%${searchPattern}%,stream_url.ilike.%${searchPattern}%`,
+        );
+      }
 
       return query;
     };
@@ -371,45 +422,48 @@ Deno.serve(async (request) => {
       selectedStatus: boolean | null;
       licenseIds?: string[];
       sourceIdOverride?: string | null;
-      failureStage: string;
+      failureStage: FailureStage;
     }) => {
-      const { error, count } = await buildChannelsQuery({
-        selectColumns: 'id',
-        includeSearch,
-        includeGroup,
-        includeSource,
-        selectedStatus,
-        licenseIds,
-        sourceIdOverride,
-        count: 'exact',
-        head: true,
+      return await runRequiredStage(failureStage, async () => {
+        const { error, count } = await buildChannelsQuery({
+          selectColumns: 'id',
+          includeSearch,
+          includeGroup,
+          includeSource,
+          selectedStatus,
+          licenseIds,
+          sourceIdOverride,
+          count: 'exact',
+          head: true,
+        });
+
+        if (error) {
+          throw new StageFailure(failureStage);
+        }
+
+        return count ?? 0;
       });
-
-      if (error) {
-        logStageFailure(failureStage);
-        throw error;
-      }
-
-      return count ?? 0;
     };
 
     const countCandidateSources = async () => {
-      let query = supabaseAdmin
-        .from('license_iptv_sources')
-        .select('id', { count: 'exact', head: true })
-        .in('license_id', scopedLicenseIds);
+      return await runRequiredStage('SOURCE_LOOKUP', async () => {
+        let query = supabaseAdmin
+          .from('license_iptv_sources')
+          .select('id', { count: 'exact', head: true })
+          .in('license_id', scopedLicenseIds);
 
-      if (sourceId) {
-        query = query.eq('id', sourceId);
-      }
+        if (sourceId) {
+          query = query.eq('id', sourceId);
+        }
 
-      const { error, count } = await query;
+        const { error, count } = await query;
 
-      if (error) {
-        throw error;
-      }
+        if (error) {
+          throw new StageFailure('SOURCE_LOOKUP');
+        }
 
-      return count ?? 0;
+        return count ?? 0;
+      });
     };
 
     const listCandidateSourceIds = async (candidateCount: number) => {
@@ -417,32 +471,34 @@ Deno.serve(async (request) => {
         return [];
       }
 
-      let query = supabaseAdmin
-        .from('license_iptv_sources')
-        .select('id')
-        .in('license_id', scopedLicenseIds)
-        .range(0, candidateCount - 1);
+      return await runRequiredStage('SOURCE_LOOKUP', async () => {
+        let query = supabaseAdmin
+          .from('license_iptv_sources')
+          .select('id')
+          .in('license_id', scopedLicenseIds)
+          .range(0, candidateCount - 1);
 
-      if (sourceId) {
-        query = query.eq('id', sourceId);
-      }
+        if (sourceId) {
+          query = query.eq('id', sourceId);
+        }
 
-      const { data, error } = await query;
+        const { data, error } = await query;
 
-      if (error) {
-        throw error;
-      }
+        if (error) {
+          throw new StageFailure('SOURCE_LOOKUP');
+        }
 
-      return ((data ?? []) as Array<{ id?: string | null }>)
-        .map((row) => row.id)
-        .filter((id): id is string => Boolean(id));
+        return ((data ?? []) as Array<{ id?: string | null }>)
+          .map((row) => row.id)
+          .filter((id): id is string => Boolean(id));
+      });
     };
 
     const countSources = async () => {
       const candidateCount = await countCandidateSources();
 
       if (candidateCount > SOURCE_CANDIDATE_HARD_LIMIT) {
-        throw new Error('SOURCE_COUNT_UNAVAILABLE');
+        throw new StageFailure('SOURCE_LOOKUP');
       }
 
       const candidateSourceIds = await listCandidateSourceIds(candidateCount);
@@ -465,7 +521,7 @@ Deno.serve(async (request) => {
               includeSource: false,
               sourceIdOverride: candidateSourceId,
               selectedStatus: null,
-              failureStage: 'SOURCE_COUNT_UNAVAILABLE',
+              failureStage: 'SOURCE_LOOKUP',
             }),
           ),
         );
@@ -476,59 +532,58 @@ Deno.serve(async (request) => {
       return total;
     };
 
-    const { data: channels, error: channelsError } = await buildChannelsQuery({
-      selectColumns: '*',
-      includeSearch: true,
-      includeGroup: true,
-      includeSource: true,
-      selectedStatus: isActive,
-    })
-      .order('group_title', { ascending: true, nullsFirst: false })
-      .order('sort_order', { ascending: true })
-      .order('name', { ascending: true })
-      .range(from, to);
-
-    if (channelsError) {
-      logStageFailure('CHANNEL_PAGE_FAILED');
-      throw channelsError;
-    }
-
-    const [
-      totalAccessible,
-      totalFiltered,
-      activeCount,
-      inactiveCount,
-    ] = await Promise.all([
-      countChannels({
-        includeSearch: false,
-        includeGroup: false,
-        includeSource: false,
-        selectedStatus: null,
-        licenseIds: accessibleLicenseIds,
-        failureStage: 'TOTAL_ACCESSIBLE_FAILED',
-      }),
-      countChannels({
+    const channels = await runRequiredStage('CHANNEL_PAGE', async () => {
+      const { data, error } = await buildChannelsQuery({
+        selectColumns: '*',
         includeSearch: true,
         includeGroup: true,
         includeSource: true,
         selectedStatus: isActive,
-        failureStage: 'TOTAL_FILTERED_FAILED',
-      }),
-      countChannels({
-        includeSearch: true,
-        includeGroup: true,
-        includeSource: true,
-        selectedStatus: true,
-        failureStage: 'ACTIVE_COUNT_FAILED',
-      }),
-      countChannels({
-        includeSearch: true,
-        includeGroup: true,
-        includeSource: true,
-        selectedStatus: false,
-        failureStage: 'INACTIVE_COUNT_FAILED',
-      }),
-    ]);
+      })
+        .order('group_title', { ascending: true, nullsFirst: false })
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        throw new StageFailure('CHANNEL_PAGE');
+      }
+
+      return data;
+    });
+
+    const totalAccessible = await countChannels({
+      includeSearch: false,
+      includeGroup: false,
+      includeSource: false,
+      selectedStatus: null,
+      licenseIds: accessibleLicenseIds,
+      failureStage: 'TOTAL_ACCESSIBLE',
+    });
+
+    const totalFiltered = await countChannels({
+      includeSearch: true,
+      includeGroup: true,
+      includeSource: true,
+      selectedStatus: isActive,
+      failureStage: 'TOTAL_FILTERED',
+    });
+
+    const activeCount = await countChannels({
+      includeSearch: true,
+      includeGroup: true,
+      includeSource: true,
+      selectedStatus: true,
+      failureStage: 'ACTIVE_COUNT',
+    });
+
+    const inactiveCount = await countChannels({
+      includeSearch: true,
+      includeGroup: true,
+      includeSource: true,
+      selectedStatus: false,
+      failureStage: 'INACTIVE_COUNT',
+    });
 
     let sourceCount: number | null = null;
     const summaryWarnings: string[] = [];
@@ -536,7 +591,7 @@ Deno.serve(async (request) => {
     try {
       sourceCount = await countSources();
     } catch {
-      logStageFailure('SOURCE_COUNT_UNAVAILABLE');
+      logStageFailure('SOURCE_LOOKUP', traceId);
       summaryWarnings.push('SOURCE_COUNT_UNAVAILABLE');
     }
 
@@ -549,71 +604,93 @@ Deno.serve(async (request) => {
     };
 
     const channelRows = (channels ?? []) as LicenseChannelCacheRecord[];
-    const sourceIds = Array.from(
-      new Set(channelRows.map((channel) => channel.license_iptv_source_id)),
+    const sourceIds = await runRequiredStage('RESPONSE_ASSEMBLY', () =>
+      Array.from(
+        new Set(channelRows.map((channel) => channel.license_iptv_source_id)),
+      ),
     );
 
-    const { data: sources, error: sourcesError } =
-      sourceIds.length > 0
-        ? await supabaseAdmin
-            .from('license_iptv_sources')
-            .select('id, name, type, is_active')
-            .in('id', sourceIds)
-        : { data: [], error: null };
+    const sources = await runRequiredStage('SOURCE_LOOKUP', async () => {
+      if (sourceIds.length === 0) {
+        return [];
+      }
 
-    if (sourcesError) {
-      logStageFailure('SOURCE_LOOKUP_FAILED');
-      throw sourcesError;
-    }
+      const { data, error } = await supabaseAdmin
+        .from('license_iptv_sources')
+        .select('id, name, type, is_active')
+        .in('id', sourceIds);
 
-    const licensesById = new Map(
-      licenseRows.map((license) => [
-        license.id,
-        {
-          id: license.id,
-          license_code: license.license_code,
-          label: license.label,
-        },
-      ]),
-    );
+      if (error) {
+        throw new StageFailure('SOURCE_LOOKUP');
+      }
 
-    const sourcesById = new Map(
-      ((sources ?? []) as LicenseIptvSourceRecord[]).map((source) => [
-        source.id,
-        source,
-      ]),
-    );
-
-    const items: ListLicenseChannelsCacheItem[] = channelRows.map((channel) => ({
-      ...channel,
-      license: licensesById.get(channel.license_id) ?? null,
-      source: sourcesById.get(channel.license_iptv_source_id) ?? null,
-    }));
-
-    const groups = await listAllChannelGroups({
-      supabaseAdmin,
-      licenseIds: licenseId ? [licenseId] : accessibleLicenseIds,
+      return data;
     });
 
-    return jsonResponse({
-      ok: true,
-      channels: items,
-      totalCount: totalFiltered,
-      page,
-      pageSize,
-      totalPages: Math.ceil(totalFiltered / pageSize),
-      groups,
-      summary,
-      ...(summaryWarnings.length > 0 ? { summaryWarnings } : {}),
-    });
-  } catch {
-    logStageFailure('REQUEST_FAILED');
-    return jsonResponse(
-      {
-        ok: false,
-        error: 'LIST_LICENSE_CHANNELS_CACHE_FAILED',
-      },
-      500,
+    const groups = await runRequiredStage('GROUP_LIST', () =>
+      listAllChannelGroups({
+        supabaseAdmin,
+        licenseIds: licenseId ? [licenseId] : accessibleLicenseIds,
+      }),
     );
+
+    const responseBody = await runRequiredStage('RESPONSE_ASSEMBLY', () => {
+      const licensesById = new Map(
+        licenseRows.map((license) => [
+          license.id,
+          {
+            id: license.id,
+            license_code: license.license_code,
+            label: license.label,
+          },
+        ]),
+      );
+
+      const sourcesById = new Map(
+        ((sources ?? []) as LicenseIptvSourceRecord[]).map((source) => [
+          source.id,
+          source,
+        ]),
+      );
+
+      const items: ListLicenseChannelsCacheItem[] = channelRows.map((channel) => ({
+        ...channel,
+        license: licensesById.get(channel.license_id) ?? null,
+        source: sourcesById.get(channel.license_iptv_source_id) ?? null,
+      }));
+
+      return {
+        ok: true,
+        channels: items,
+        totalCount: totalFiltered,
+        page,
+        pageSize,
+        totalPages: Math.ceil(totalFiltered / pageSize),
+        groups,
+        summary,
+        ...(summaryWarnings.length > 0 ? { summaryWarnings } : {}),
+      };
+    });
+
+    return jsonResponse(responseBody);
+  } catch (error) {
+    const failureStage =
+      error instanceof StageFailure ? error.stage : 'UNKNOWN';
+
+    logStageFailure(failureStage, traceId);
+
+    const responseBody = isValidatedAdmin
+      ? {
+          ok: false,
+          error: 'LIST_LICENSE_CHANNELS_CACHE_FAILED',
+          failureStage,
+          traceId,
+        }
+      : {
+          ok: false,
+          error: 'LIST_LICENSE_CHANNELS_CACHE_FAILED',
+        };
+
+    return jsonResponse(responseBody, 500);
   }
 });
