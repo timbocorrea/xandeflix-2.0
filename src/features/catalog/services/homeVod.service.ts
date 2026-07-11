@@ -95,6 +95,33 @@ type HomeVodCategoryCacheEntry = {
 
 const homeVodCategoryItemsCache = new Map<string, HomeVodCategoryCacheEntry>();
 
+export function clearHomeVodCache(): void {
+  homeVodSectionsCache.clear();
+  homeVodCategoryItemsCache.clear();
+
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const storageKeysToRemove: string[] = [];
+
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const storageKey = window.localStorage.key(index);
+
+      if (storageKey?.startsWith(HOME_VOD_CACHE_STORAGE_PREFIX)) {
+        storageKeysToRemove.push(storageKey);
+      }
+    }
+
+    for (const storageKey of storageKeysToRemove) {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Cache persistente e uma otimizacao local; falha de limpeza nao deve quebrar a rota.
+  }
+}
+
 function normalizeCacheLicenseCode(value: string) {
   return value.trim().toUpperCase();
 }

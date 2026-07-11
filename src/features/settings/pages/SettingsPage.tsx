@@ -86,7 +86,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <AppShell onSignOut={() => void signOut()} hideHeaderOnTv>
+    <AppShell onSignOut={() => {
+        void signOut()
+          .catch(() => undefined)
+          .finally(() => {
+            navigate('/login', { replace: true });
+          });
+      }} hideHeaderOnTv>
       <section
         className="xf-settings-page mx-auto max-w-5xl text-white"
         data-settings-page-root="true"

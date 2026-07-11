@@ -640,7 +640,13 @@ export function CatalogPage() {
 
   return (
     <AppShell
-      onSignOut={() => void signOut()}
+      onSignOut={() => {
+        void signOut()
+          .catch(() => undefined)
+          .finally(() => {
+            navigate('/login', { replace: true });
+          });
+      }}
       headerNavigation={{
         onSearchArrowPress: spatialNavigation.handleHeaderSearchArrowPress,
         onProfileArrowPress: spatialNavigation.handleHeaderProfileArrowPress,

@@ -3463,7 +3463,13 @@ export function CatalogCategoryPage({
 
   return (
     <AppShell
-      onSignOut={() => void signOut()}
+      onSignOut={() => {
+        void signOut()
+          .catch(() => undefined)
+          .finally(() => {
+            navigate('/login', { replace: true });
+          });
+      }}
       mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
       <main className="mx-auto w-full max-w-[1920px]">

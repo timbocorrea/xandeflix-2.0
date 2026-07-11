@@ -619,7 +619,7 @@ export function AdminLicensesPage() {
       setErrorMessage(null);
       setSuccessMessage(null);
 
-      const result = await importAdminLicenseIptvSourceChannels(source.id);
+      const result = await importAdminLicenseIptvSourceChannels(source.id, 1000);
 
       setSourceImportResults((currentResults) => ({
         ...currentResults,

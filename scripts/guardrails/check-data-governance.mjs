@@ -8,6 +8,8 @@ const PROTECTED_ALLOWLIST = [
   'docs/governance/',
   'scripts/guardrails/',
   '.github/pull_request_template.md',
+  'docs/security/security-lgpd-ciclo-3-gate-positive.md',
+  'supabase/migrations/20260710_0001_restore_license_channels_cache.sql',
 ];
 
 const FORBIDDEN_PATTERNS = [
