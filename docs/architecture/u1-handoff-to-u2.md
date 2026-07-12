@@ -8,14 +8,22 @@ REPOSITORIO=timbocorrea/xandeflix-2.0
 ISSUE_CONCLUIDA=U1
 BRANCH=feat/issue-u1-universal-catalog-contract-metrics
 BASE_SHA=731b6ba2ae3c44c32d19e136dfbbaca734510aba
-HEAD_SHA=PREENCHER_APOS_COMMIT
-PR=AGUARDANDO_CRIACAO
-STATUS_PR=AGUARDANDO_DRAFT
-DATA_GOVERNANCE=PREENCHER_APOS_VALIDACAO
-BUILD=PREENCHER_APOS_VALIDACAO
-LINT_DIRECIONADO=PREENCHER_APOS_VALIDACAO
-DIFF_CHECK=PREENCHER_APOS_VALIDACAO
+HEAD_SHA_IMPLEMENTACAO=47e959f90667245a2b1aae6805d5e046a53d608d
+PR=#20
+STATUS_PR=open / Ready for Review / não mergeada
+DATA_GOVERNANCE=PASS (workflow #34)
+BUILD=PASS
+LINT_DIRECIONADO=PASS
+DIFF_CHECK=PASS
+RUNTIME_ALTERADO=NAO
+MIGRATION_CRIADA=NAO
+EDGE_FUNCTION_ALTERADA=NAO
+DEPLOY_EXECUTADO=NAO
+BANCO_CONSULTADO=NAO
+PR19_ALTERADA=NAO
 ```
+
+`HEAD_SHA_IMPLEMENTACAO` identifica o commit que entregou o contrato e os documentos originais da U1. O head final da PR pode avançar apenas por patches documentais de fechamento e deve ser confirmado diretamente na PR #20 antes do merge.
 
 ## 13.2 Entregas da U1
 
@@ -126,4 +134,4 @@ LOGS_SANITIZADOS=PASS
 
 ## 13.11 Próximo comando recomendado
 
-A próxima ação é abrir a Issue U2 na branch própria `feat/issue-u2-universal-raw-catalog-local-first`, somente após revisão da U1 e sem modificar a PR #19.
+A próxima ação é concluir a revisão final e o merge controlado da PR #20. Somente depois da sincronização da `main`, abrir a Issue U2 na branch própria `feat/issue-u2-universal-raw-catalog-local-first`, sem modificar a PR #19.
