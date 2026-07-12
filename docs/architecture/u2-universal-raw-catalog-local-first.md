@@ -1,12 +1,12 @@
 # Arquitetura do Catálogo Local (Local-First) — Issue U2
 
-Este documento descreve a especificação técnica e a arquitetura implementada para o catálogo local (local-first) de VOD e canais na versão Xandeflix 2.0.
+Este documento descreve a especificação técnica e a arquitetura implementada para o catálogo local-first de VOD e canais na versão Xandeflix 2.0.
 
 ---
 
 ## 1. Arquitetura Geral
 
-A arquitetura do catálogo local adota uma abordagem de persistência local-first baseada em **IndexedDB**. Ela desonera a API remota do Supabase para o carregamento do catálogo VOD e permite inicialização instantânea e offline de conteúdos autorizados.
+A arquitetura do catálogo local adota persistência local-first baseada em **IndexedDB**. Após uma importação bem-sucedida, o catálogo bruto pode ser consultado localmente para montar seções VOD sem depender de uma nova consulta remota para cada leitura.
 
 ```mermaid
 graph TD
@@ -18,132 +18,152 @@ graph TD
   F --> G[(IndexedDB)]
 ```
 
-O catálogo bruto pode ser consultado localmente após importação; a reprodução continua condicionada à disponibilidade da fonte de mídia e da rede.
+A reprodução continua condicionada à disponibilidade da fonte de mídia e da rede.
 
 ---
 
 ## 2. Fluxo de Download e Ingestão
 
 ### A. Fluxo Único de Download
-O download do arquivo M3U ocorre uma única vez por carregamento. Ele é iniciado na camada de runtime pela função `loadDirectSourcePlaylist` dentro do arquivo `src/features/playlists/lib/directSourcePlaylistLoader.ts`. Não há downloads concorrentes ou redundantes entre a interface do usuário (Player/Canais) e o importador local do banco de dados.
 
-### B. Callback Assíncrono em Lotes (Progressivo)
-* O parser progressivo em `src/features/playlists/lib/parseM3uPlaylist.ts` faz o parsing de linhas M3U por fluxo de caracteres (`ReadableStream`), gerando lotes parciais de canais (configurável pelo batch size, padrão `250`).
-* O callback assíncrono `onChannelsBatch` em `src/features/playlists/providers/PlaylistRuntimeProvider.tsx` recebe cada lote síncrono e dispara a escrita no banco de dados local com `await localImportSession.writeBatch(channelBatch)`.
-* A execução do parser aguarda a finalização da escrita no banco de dados para cada lote, mitigando gargalos de I/O em IndexedDB e evitando perda de escrita.
+O download do arquivo M3U ocorre uma única vez por carregamento. Ele é iniciado na camada de runtime pela função `loadDirectSourcePlaylist`, em `src/features/playlists/lib/directSourcePlaylistLoader.ts`. Não há download adicional exclusivo para o importador local.
+
+### B. Callback Assíncrono em Lotes
+
+- O parser progressivo em `src/features/playlists/lib/parseM3uPlaylist.ts` processa a playlist por fluxo de caracteres (`ReadableStream`) e gera lotes parciais, com batch padrão `250`.
+- O callback assíncrono `onChannelsBatch` em `src/features/playlists/providers/PlaylistRuntimeProvider.tsx` encaminha cada lote ao importador por meio de `await localImportSession.writeBatch(channelBatch)`.
+- O parser aguarda a escrita de cada lote antes de prosseguir, reduzindo o risco de perda de escrita e concorrência descontrolada no IndexedDB.
 
 ### C. Cancelamento por AbortSignal
-O carregamento e a importação suportam cancelamento por `AbortSignal` de forma granular:
-1. **Fetch HTTP**: O sinal cancela a requisição ativa de rede.
-2. **Parser e escrita**: O sinal cancela fetch e parser e impede novos lotes. Uma escrita IndexedDB que já tenha iniciado pode concluir; a sessão é finalizada como canceled e a remoção de obsoletos não é executada.
+
+O carregamento e a importação suportam cancelamento por `AbortSignal`:
+
+1. **Fetch HTTP**: o sinal cancela a requisição ativa de rede.
+2. **Parser e escrita**: o sinal cancela fetch e parser e impede novos lotes. Uma escrita IndexedDB já iniciada pode concluir; a sessão é finalizada como `canceled` e a remoção de obsoletos não é executada.
 
 ---
 
-## 3. Estrutura do IndexedDB (Versão 2)
+## 3. Estrutura do IndexedDB — Versão 2
 
-O banco de dados IndexedDB local (`xandeflix-local-catalog`) foi atualizado para a **versão 2** no arquivo `src/features/localCatalog/services/localCatalogDb.service.ts`.
+O banco local `xandeflix-local-catalog` foi atualizado para a versão 2 em `src/features/localCatalog/services/localCatalogDb.service.ts`.
 
-### A. Stores e Estrutura
-1. `playlistItems` (Chave: `id`): Guarda os canais e VODs locais.
-2. `catalogMetadata` (Chave: `key`): Registra o progresso e o status da importação.
-3. `tmdbMetadata` (Chave: `id`): Cache local de enriquecimentos externos.
+### A. Stores
 
-### B. Índices Adicionados (Isolamento por sourceId)
-Para garantir isolamento de multi-fontes e paginação eficiente por categorias, foram criados os seguintes índices compostos na store `playlistItems`:
-* `sourceId` (Indexação simples da fonte)
-* `sourceIdContentKind` (Filtro composto `[sourceId, contentKind]`)
-* `sourceIdGroupTitle` (Filtro composto `[sourceId, groupTitle]`)
-* `sourceIdContentKindGroupTitle` (Filtro composto `[sourceId, contentKind, groupTitle]`)
-* `sourceIdContentKindNormalizedGroup` (Filtro composto `[sourceId, contentKind, normalizedGroup]`)
+1. `playlistItems`, chave `id`: itens de catálogo locais.
+2. `catalogMetadata`, chave `key`: progresso e status de importação.
+3. `tmdbMetadata`, chave `id`: cache local de enriquecimento externo.
+
+### B. Índices por sourceId
+
+Foram adicionados à store `playlistItems`:
+
+- `sourceId`;
+- `sourceIdContentKind` — `[sourceId, contentKind]`;
+- `sourceIdGroupTitle` — `[sourceId, groupTitle]`;
+- `sourceIdContentKindGroupTitle` — `[sourceId, contentKind, groupTitle]`;
+- `sourceIdContentKindNormalizedGroup` — `[sourceId, contentKind, normalizedGroup]`.
+
+O upgrade não remove stores ou índices existentes.
 
 ---
 
 ## 4. Governança e Regras de Negócio
 
 ### A. Identidade SHA-256 Opaca
-O ID final de cada item persistido no catálogo local é uma hash SHA-256 opaca, gerada de maneira determinística com a seguinte estrutura concatenada:
-`uc_SHA256(v1 + sourceId + tvgId + name + groupTitle + streamUrl)`
-Dessa forma, IDs expostos não contêm referências legíveis a credenciais ou URLs IPTV.
 
-### B. Classificação e Unknown
-* O classificador determina se o canal representa um filme (`movie`), série (`series`) ou canal de tv ao vivo (`live`).
-* O contrato local aceita `radio`, mas a ingestão e classificação funcional de rádio permanece destinada à U3.
-* Conteúdos não categorizáveis por padrões conhecidos de VOD ou lives permanecem marcados como `unknown`.
-* Elementos sem cabeçalho `#EXTINF` são preservados como `unknown` e nomeados incrementalmente como `Canal X`.
+O identificador final de cada item é um hash SHA-256 determinístico, baseado internamente em:
 
-### C. Tratamento de Grupos (Categorias)
-* Grupos vazios ou não definidos são atribuídos automaticamente à categoria `"Não categorizados"`.
-* Categorias dinâmicas e não predefinidas nas tabelas oficiais do app são criadas de forma dinâmica no banco local a partir da varredura de metadados da playlist.
+`v1 + sourceId + tvgId + name + groupTitle + streamUrl`
 
-### D. Conciliação e Reconciliação Consistente
-* **Preservação**: Uma importação ativa não apaga os dados antigos durante a execução. O catálogo anterior permanece totalmente disponível para o usuário.
-* **Limpeza pós-sucesso**: Apenas após o sucesso total da transação e do sinalizador de progresso como `ready`, o importador invoca `removeObsoleteLocalCatalogItems` para remover os registros com `importSessionId` antigo, mantendo a consistência operacional.
+O identificador exposto segue o formato `uc_<hash>` e não contém URL, credencial ou `sourceId` em texto legível.
+
+### B. Classificação e unknown
+
+- O classificador atual distingue `movie`, `series`, `live` e `unknown` conforme os dados disponíveis.
+- O contrato local aceita `radio`, mas a ingestão e classificação funcional de rádio permanece destinada à U3.
+- Conteúdo inconclusivo permanece como `unknown`.
+- Linhas reproduzíveis sem `#EXTINF` são preservadas como `unknown` e recebem nome sintético sequencial.
+
+### C. Categorias
+
+- Grupo vazio ou ausente é exposto como `Não categorizados`.
+- Grupos não predefinidos são preservados e geram categorias locais dinamicamente.
+- A normalização é utilizada para comparação, sem substituir o texto original de exibição.
+
+### D. Reconciliação
+
+- Uma importação em andamento não apaga previamente o catálogo anterior.
+- Os novos lotes são persistidos com `importSessionId`.
+- Itens obsoletos são removidos somente após a conclusão bem-sucedida da importação.
+- Em cancelamento ou erro, lotes já persistidos podem coexistir temporariamente com itens anteriores até uma próxima importação bem-sucedida.
 
 ---
 
-## 5. Integração na Interface do Usuário
+## 5. Integração na Interface
 
 ### A. Home Local-First
-A função `loadHomeVodSections` em `src/features/catalog/services/homeVod.service.ts` intercepta a inicialização e busca seções locais VOD caso o metadado da fonte ativa esteja no estado `ready`.
+
+`loadHomeVodSections`, em `src/features/catalog/services/homeVod.service.ts`, tenta carregar seções locais quando a metadata da fonte M3U ativa está em `ready`. Quando não há catálogo utilizável, o fluxo remoto legado é preservado.
 
 ### B. Filmes Local-First
-A listagem de filmes por categoria na página `src/features/catalog/pages/CatalogCategoryPage.tsx` lê os itens do read model local `src/features/localCatalog/readModels/localCatalogCategoryReadModel.service.ts` caso o catálogo local esteja pronto.
 
-### C. Fallback Remoto Transparente
-Caso o banco local esteja vazio, corrompido, inacessível ou no meio de um processo de importação inicial (status não `ready`), o sistema executa silenciosamente o fallback remoto consumindo dados via API do Supabase e cache.
+`src/features/catalog/pages/CatalogCategoryPage.tsx` consulta `src/features/localCatalog/readModels/localCatalogCategoryReadModel.service.ts` para obter filmes e categorias dinâmicas da fonte ativa. Falha ou ausência de dados locais mantém o fallback remoto.
+
+### C. Cards sem TMDB
+
+O mapeamento local usa título e grupo da playlist e, quando seguro, o logo original. TMDB, pôster e backdrop não são requisitos para visibilidade do item.
 
 ---
 
-## 6. Segurança e Logs Sensíveis
+## 6. Segurança e Logs
 
-* **Sanitização de logs**: Mensagens de erro de fontes de rede foram blindadas contra o log de dados confidenciais (códigos de licença, URLs IPTV ou payloads brutos).
-* **Logs em Produção**: Chamadas críticas como erros de requisição de playlists foram substituídas por códigos sanitizados genéricos, ex: `AUTHORIZED_IPTV_SOURCE_UNAVAILABLE` e `[PLAYLIST_LINE_REDACTED]`.
+- Logs de autorização não incluem código de licença, token ou payload bruto.
+- Diagnósticos de linha M3U são redigidos como `[PLAYLIST_LINE_REDACTED]`.
+- Erros de fonte autorizada usam códigos sanitizados, como `AUTHORIZED_IPTV_SOURCE_UNAVAILABLE`.
+- `.env.local`, listas reais e credenciais não fazem parte do diff.
+- URLs de reprodução permanecem no IndexedDB por necessidade funcional, mas não são incluídas em logs ou identificadores visíveis.
 
 ---
 
 ## 7. Riscos e Limitações
 
-### Riscos Críticos
+### Riscos altos
 
-> [!CAUTION]
-> **RISCO_ALTO: Comportamento com Listas Extremamente Grandes**
-> Listas IPTV contendo mais de 50.000 itens geram expressivo consumo de CPU durante o parsing SHA-256 e podem esgotar a cota de persistência temporária do navegador (IndexedDB storage quota limits).
+- **Listas muito grandes**: parsing, hashing e escrita de dezenas de milhares de itens podem gerar pressão de CPU, memória e quota do IndexedDB.
+- **Integração no runtime**: importação em lotes durante o bootstrap pode competir com renderização e navegação em dispositivos TV de baixa capacidade.
+- **Falha intermediária**: lotes novos podem coexistir temporariamente com o catálogo anterior até uma importação posterior concluir a reconciliação.
 
-> [!WARNING]
-> **RISCO_ALTO: Dependência de crypto.subtle**
-> A geração de chaves opacas utiliza `crypto.subtle.digest('SHA-256')`. Em navegadores antigos ou ambientes webview inseguros (HTTP sem SSL), a API `crypto.subtle` é undefined, disparando erro de importação.
+### Riscos médios
 
-*   **RISCO_MEDIO: Upgrade de Esquema IndexedDB**
-    Dispositivos antigos de TV (Fire Stick legado) podem falhar ou bloquear o processo de upgrade síncrono do IndexedDB (evento `onblocked`).
-*   **RISCO_MEDIO: Consumo de memória no Runtime**
-    A manutenção da lista completa de canais ao vivo em memória do React pode causar lentidão na renderização sob listas muito grandes.
+- **Disponibilidade de `crypto.subtle`**: ambientes antigos ou contextos inseguros podem impedir geração dos IDs.
+- **Upgrade IndexedDB**: conexões antigas abertas podem bloquear temporariamente a atualização para versão 2.
+- **Memória do runtime React**: a lista completa de canais continua mantida em memória pelo fluxo atual.
+- **Rede lenta**: o primeiro download autorizado continua dependente da qualidade da conexão.
 
 ### Limitações da U2
-* Suporte local-first disponível exclusivamente para fontes de formato `m3u`.
-* O enriquecimento do TMDB não é mandatório para exibição de itens VOD locais, exibindo metadados básicos caso a chave TMDB esteja indisponível.
+
+- O local-first funcional cobre fontes `m3u`.
+- Xtream, séries estruturadas, episódios e rádio funcional permanecem destinados à U3.
+- Gates físicos em Fire Stick, tablet e dados móveis ainda não foram executados.
 
 ---
 
-## 8. Status de Homologação e Implementação
+## 8. Status de Homologação
 
-Implementação candidata da U2, validada localmente e aguardando commit e gates.
+A implementação candidata da U2 está commitada e publicada na PR #21, permanecendo em Draft enquanto aguarda revisão técnica e gates físicos.
 
-Os seguintes gates necessitam obrigatoriamente de homologação com dispositivos físicos em laboratório antes da publicação final de produção:
-*   **FIRE_STICK_GATE**: PENDENTE_VALIDACAO_FISICA (Aguardando teste de performance do IndexedDB em hardware real).
-*   **TABLET_GATE**: PENDENTE_VALIDACAO_FISICA (Aguardando teste de toques sucessivos e cancelamento de fluxo).
-*   **MOBILE_DATA_GATE**: PENDENTE_VALIDACAO_FISICA (Aguardando homologação de consumo de tráfego móvel no download inicial de playlist).
+- `FIRE_STICK_GATE=PENDENTE_VALIDACAO_FISICA`
+- `TABLET_GATE=PENDENTE_VALIDACAO_FISICA`
+- `MOBILE_DATA_GATE=PENDENTE_VALIDACAO_FISICA`
 
 ---
 
-## 9. Plano de Rollback Pós-Commit
+## 9. Plano de Rollback
 
-Caso seja necessário reverter a implantação da Issue U2 pós-commit, os seguintes commits devem ser revertidos na ordem inversa da criação:
+Após integração, reverter os commits na ordem inversa:
 
-1.  `git revert <SHA_COMMIT_DOCUMENTACAO>` (Reverte arquivos de documentação e diagramas)
-2.  `git revert <SHA_COMMIT_INTEGRACAO_UI>` (Reverte alterações visuais na Home e Categorias de Filmes)
-3.  `git revert <SHA_COMMIT_IMPORTACAO_STORAGE>` (Reverte atualizações em IndexedDB, Repositórios e Parser progressivo)
+1. `git revert <HEAD_DOCUMENTAL_DA_PR>` — documentação e handoff.
+2. `git revert 140180491467cd99163f00cce63fb3219743d4a3` — integração da Home e de Filmes.
+3. `git revert e60dfae6101ef52ba1a521aaca0da9c540799004` — IndexedDB v2, parser progressivo e importação local.
 
-### Notas Operacionais importantes:
-*   **Banco de dados e Esquemas**: Reverter o código-fonte **não reduz** automaticamente a versão do IndexedDB (`LOCAL_CATALOG_DB_VERSION`).
-*   **Esquema versão 2**: Bancos locais em dispositivos que já foram atualizados para a versão 2 continuarão operando sob essa versão.
-*   **Limpeza do DB**: Stores e índices adicionados não serão apagados automaticamente. No entanto, o rollback operacional garante que a interface do usuário lerá corretamente do fallback remoto sem quebrar, preservando os dados locais e de rede.
+Reverter o código não reduz automaticamente a versão do IndexedDB. Bancos já atualizados para versão 2 permanecem nessa versão, e stores ou índices adicionais não devem ser removidos automaticamente.
