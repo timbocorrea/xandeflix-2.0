@@ -11,6 +11,7 @@ import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
 import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
+import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
 
 import {
   getCatalogCategoryDefinition,
@@ -24,8 +25,7 @@ import {
   loadHomeVodSections,
   type HomeVodItem,
 } from '../services/homeVod.service';
-import { localMovieCatalogReadModel } from '../../localCatalog/readModels/localMovieCatalogReadModel.service';
-import { mapLocalMovieCatalogItemsToHomeVodItems } from '../../localCatalog/readModels/localMovieHomeVodAdapter.service';
+import { loadLocalMovieCategoryReadModel } from '../../localCatalog/readModels/localCatalogCategoryReadModel.service';
 
 import {
   enrichSeriesHeroHighlights,
@@ -748,7 +748,7 @@ function buildMoviesCategorySections(
   const groupedItems = new Map<string, HomeVodItem[]>();
 
   for (const item of items) {
-    const groupTitle = item.groupTitle?.trim() || 'Outros filmes';
+    const groupTitle = item.groupTitle?.trim() || 'Não categorizados';
     const nextItems = groupedItems.get(groupTitle) ?? [];
     nextItems.push(item);
     groupedItems.set(groupTitle, nextItems);
@@ -1470,6 +1470,10 @@ export function CatalogCategoryPage({
   groupSlugOverride,
 }: CatalogCategoryPageProps = {}) {
   const { signOut } = useAuth();
+  const {
+    source: playlistSource,
+    status: playlistStatus,
+  } = usePlaylistRuntime();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
@@ -1764,38 +1768,21 @@ export function CatalogCategoryPage({
   }
 
   async function loadLocalFirstMovieCategoryItemsByGroup({
-    groupTitles,
+    sourceId,
   }: {
-    groupTitles: string[];
+    sourceId?: string;
   }): Promise<HomeVodItem[]> {
-    const uniqueGroupTitles = Array.from(
-      new Set(
-        groupTitles
-          .map((groupTitle) => groupTitle.trim())
-          .filter(Boolean),
-      ),
-    );
-
-    if (uniqueGroupTitles.length === 0) {
+    if (!sourceId?.trim()) {
       return [];
     }
 
-    const perGroupLimit = Math.max(
-      MOVIES_CATEGORY_ROW_VISIBLE_LIMIT,
-      Math.ceil(CATEGORY_ITEM_LIMIT / uniqueGroupTitles.length),
-    );
-
     try {
-      const groupedResults = await Promise.all(
-        uniqueGroupTitles.map(async (groupTitle) =>
-          localMovieCatalogReadModel.listMovies({
-            groupTitle,
-            limit: perGroupLimit,
-          }),
-        ),
-      );
+      const localResult = await loadLocalMovieCategoryReadModel({
+        sourceId,
+        totalLimit: CATEGORY_ITEM_LIMIT,
+      });
 
-      return mapLocalMovieCatalogItemsToHomeVodItems(groupedResults.flat());
+      return localResult.status === 'ready' ? localResult.items : [];
     } catch (error) {
       const errorName = error instanceof Error ? error.name : 'UnknownError';
       console.warn('[XANDEFLIX_MOVIES_LOCAL_FIRST_LOAD_ERROR]', { errorName });
@@ -1972,7 +1959,10 @@ export function CatalogCategoryPage({
             ? await (async () => {
                 const localReadStartedAtMs = getMoviesLocalFirstMetricNowMs();
                 const localItems = await loadLocalFirstMovieCategoryItemsByGroup({
-                  groupTitles: category.groupTitles,
+                  sourceId:
+                    playlistSource?.sourceType === 'm3u'
+                      ? playlistSource.sourceId
+                      : undefined,
                 });
                 const localReadTimeMs = getMoviesLocalFirstMetricElapsedMs(localReadStartedAtMs);
 
@@ -2078,6 +2068,9 @@ export function CatalogCategoryPage({
     seriesTmdbTitle,
     seriesKey,
     seriesTitle,
+    playlistSource?.sourceId,
+    playlistSource?.sourceType,
+    playlistStatus,
   ]);
 
   const seriesDetailItems = useMemo(() => {

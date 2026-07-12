@@ -53,10 +53,12 @@ export function PreparingHomePage() {
   const navigate = useNavigate();
   const {
     channels,
+    source,
     status,
     progress,
     error,
     loadFromSource,
+    clearRuntime,
   } = usePlaylistRuntime();
 
   const [step, setStep] = useState<PreparingStep>('loading');
@@ -103,7 +105,9 @@ export function PreparingHomePage() {
       runtime: {
         currentChannelsCount: channels.length,
         currentStatus: status,
+        currentSourceId: source?.sourceId,
         loadFromSource,
+        clearRuntime,
       },
       onProgress: (nextProgress) => {
         if (!isActive) {
@@ -156,7 +160,15 @@ export function PreparingHomePage() {
     return () => {
       isActive = false;
     };
-  }, [channels.length, loadFromSource, navigate, retryKey, status]);
+  }, [
+    channels.length,
+    clearRuntime,
+    loadFromSource,
+    navigate,
+    retryKey,
+    source?.sourceId,
+    status,
+  ]);
 
   useEffect(() => {
     if (step !== 'ready') {

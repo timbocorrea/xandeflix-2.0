@@ -23,6 +23,7 @@ import {
 import { getCachedSeriesHeroBackdropUrls } from '@/features/catalog/services/seriesHeroTmdb.service';
 import { storeCachedSeriesEpisodes } from '@/features/catalog/services/seriesEpisodesCache.service';
 import { getCatalogCategoryDefinition } from '@/features/catalog/services/catalogCategoryGroups.service';
+import { prepareHomePlaylist } from '@/features/catalog/services/prepareHomePlaylist.service';
 import { storeCachedLiveTvCriticalChannels } from '@/features/live/services/liveTvCriticalCache.service';
 
 export type AppBootstrapStepId =
@@ -46,7 +47,9 @@ export type AppBootstrapProgress = {
 export type AppBootstrapRuntimeInput = {
   currentChannelsCount: number;
   currentStatus: PlaylistRuntimeStatus;
+  currentSourceId?: string;
   loadFromSource: (source: PlaylistSource) => Promise<void>;
+  clearRuntime: () => void;
 };
 
 export type RunAppBootstrapInput = {
@@ -660,7 +663,25 @@ export async function runAppBootstrap({
       getOrCreateDeviceIdentifier(),
   );
   const warnings: string[] = [];
-  void runtime;
+
+  if (normalizedLicenseCode && normalizedDeviceIdentifier) {
+    try {
+      await prepareHomePlaylist({
+        licenseCode: normalizedLicenseCode,
+        deviceIdentifier: normalizedDeviceIdentifier,
+        currentChannelsCount: runtime.currentChannelsCount,
+        currentStatus: runtime.currentStatus,
+        currentSourceId: runtime.currentSourceId,
+        loadFromSource: runtime.loadFromSource,
+        clearRuntime: runtime.clearRuntime,
+      });
+    } catch {
+      warnings.push('Catálogo local indisponível; usando fallback legado.');
+      console.warn('[XANDEFLIX_LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED]', {
+        errorCode: 'LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED',
+      });
+    }
+  }
 
   const cachedResult = getCachedAppBootstrapResult();
 

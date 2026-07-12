@@ -1,38 +1,57 @@
-import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
-import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
 import {
   getAuthorizedIptvSource,
   mapAuthorizedIptvSourceToPlaylistSource,
 } from '@/features/playlists/services/authorizedIptvSource.service';
-import type { PlaylistLoadProgress } from '@/features/playlists/types/playlist';
+import type {
+  PlaylistLoadProgress,
+  PlaylistSource,
+} from '@/features/playlists/types/playlist';
 
 export type PrepareHomePlaylistInput = {
+  licenseCode: string;
+  deviceIdentifier: string;
   currentChannelsCount: number;
   currentStatus: string;
-  loadFromSource: (source: { url: string; name?: string }) => Promise<void>;
+  currentSourceId?: string;
+  loadFromSource: (source: PlaylistSource) => Promise<void>;
+  clearRuntime: () => void;
   onProgress?: (progress: PlaylistLoadProgress) => void;
 };
 
 export async function prepareHomePlaylist({
+  licenseCode,
+  deviceIdentifier,
   currentChannelsCount,
   currentStatus,
+  currentSourceId,
   loadFromSource,
+  clearRuntime,
 }: PrepareHomePlaylistInput) {
-  if (
-    currentChannelsCount > 0 ||
-    currentStatus === 'loading' ||
-    currentStatus === 'ready'
-  ) {
-    return;
+  try {
+    const authorizedSource = await getAuthorizedIptvSource({
+      deviceIdentifier,
+      licenseCode,
+    });
+    const playlistSource = mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
+    const isCurrentAuthorizedSource =
+      Boolean(currentSourceId) && currentSourceId === playlistSource.sourceId;
+
+    if (
+      isCurrentAuthorizedSource &&
+      (currentChannelsCount > 0 ||
+        currentStatus === 'loading' ||
+        currentStatus === 'ready')
+    ) {
+      return;
+    }
+
+    if (currentSourceId && !isCurrentAuthorizedSource) {
+      clearRuntime();
+    }
+
+    void loadFromSource(playlistSource).catch(() => undefined);
+  } catch (error) {
+    clearRuntime();
+    throw error;
   }
-
-  const deviceIdentifier = getOrCreateDeviceIdentifier();
-  const storedActivation = getStoredLicenseActivation();
-
-  const authorizedSource = await getAuthorizedIptvSource({
-    deviceIdentifier,
-    licenseCode: storedActivation?.licenseCode,
-  });
-
-  await loadFromSource(mapAuthorizedIptvSourceToPlaylistSource(authorizedSource));
 }

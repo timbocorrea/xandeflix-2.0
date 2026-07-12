@@ -31,6 +31,7 @@ import {
   type HomeVodSection,
 } from '../services/homeVod.service';
 import { CATALOG_WARMUP_REFRESH_EVENT } from '../services/catalogWarmup.service';
+import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
 
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
@@ -72,7 +73,7 @@ function createHomeMovieNavigationItem(
   return {
     ...item,
     groupTitle: item.groupTitle ?? fallbackGroupTitle,
-    kind: 'movie',
+    kind: item.kind ?? 'movie',
   };
 }
 
@@ -228,6 +229,10 @@ export function CatalogPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { signOut } = useAuth();
+  const {
+    source: playlistSource,
+    status: playlistStatus,
+  } = usePlaylistRuntime();
   const deviceProfile = useDeviceProfile();
   const { isTv: legacyIsTv, isMobile } = useDeviceType();
   const isTabletPortraitTouch =
@@ -343,6 +348,8 @@ export function CatalogPage() {
 
         const homeVodSections = await loadHomeVodSections({
           ...homeVodLoadInput,
+          sourceId: playlistSource?.sourceId,
+          sourceType: playlistSource?.sourceType,
           limitPerSection: homeVodLimitPerSection,
           preferFresh: true,
         });
@@ -382,7 +389,13 @@ export function CatalogPage() {
     return () => {
       isMounted = false;
     };
-  }, [homeVodLimitPerSection, initialHomeCatalogState]);
+  }, [
+    homeVodLimitPerSection,
+    initialHomeCatalogState,
+    playlistSource?.sourceId,
+    playlistSource?.sourceType,
+    playlistStatus,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -401,6 +414,8 @@ export function CatalogPage() {
       try {
         const homeVodSections = await loadHomeVodSections({
           ...homeVodLoadInput,
+          sourceId: playlistSource?.sourceId,
+          sourceType: playlistSource?.sourceType,
           limitPerSection: homeVodLimitPerSection,
           preferFresh: true,
         });
@@ -448,7 +463,13 @@ export function CatalogPage() {
         window.clearTimeout(refreshTimeoutId);
       }
     };
-  }, [homeVodLimitPerSection, initialHomeCatalogState]);
+  }, [
+    homeVodLimitPerSection,
+    initialHomeCatalogState,
+    playlistSource?.sourceId,
+    playlistSource?.sourceType,
+    playlistStatus,
+  ]);
 
   useEffect(() => {
     if (!isTv) {

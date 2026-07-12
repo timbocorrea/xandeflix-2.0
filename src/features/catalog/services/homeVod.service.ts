@@ -1,6 +1,7 @@
 import { isVodChannel } from '@/features/playlists/lib/channelClassification';
 import { listAuthorizedLicenseChannels } from '@/features/playlists/services/authorizedLicenseChannels.service';
 import type { IptvChannel } from '@/features/playlists/types/playlist';
+import { loadLocalCatalogHomeVodSections } from '@/features/localCatalog/readModels/localCatalogHomeVodAdapter.service';
 
 export type HomeVodKind = 'movie' | 'series' | 'unknown';
 
@@ -36,6 +37,8 @@ export type HomeVodSection = {
 export type LoadHomeVodInput = {
   licenseCode: string;
   deviceIdentifier: string;
+  sourceId?: string;
+  sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown';
   limitPerSection?: number;
   launchesLimit?: number;
   preferFresh?: boolean;
@@ -917,10 +920,30 @@ async function loadHomeMovieCategorySampleItems({
 export async function loadHomeVodSections({
   licenseCode,
   deviceIdentifier,
+  sourceId,
+  sourceType,
   limitPerSection = DEFAULT_LIMIT_PER_SECTION,
   launchesLimit = 20,
   preferFresh = false,
 }: LoadHomeVodInput): Promise<HomeVodSection[]> {
+  if (sourceId?.trim() && sourceType === 'm3u') {
+    try {
+      const localSections = await loadLocalCatalogHomeVodSections({
+        sourceId,
+        maxSections: 8,
+        itemsPerSection: limitPerSection,
+      });
+
+      if (localSections.length > 0) {
+        return localSections;
+      }
+    } catch {
+      console.warn('[XANDEFLIX_HOME_LOCAL_FIRST_FALLBACK]', {
+        errorCode: 'LOCAL_CATALOG_HOME_READ_FAILED',
+      });
+    }
+  }
+
   const cacheInput = {
     licenseCode,
     deviceIdentifier,
