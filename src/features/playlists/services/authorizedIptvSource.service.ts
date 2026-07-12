@@ -70,10 +70,8 @@ async function postAuthorizedIptvSource(input: {
     headers.Authorization = `Bearer ${input.accessToken}`;
   }
 
-  console.log('[XANDEFLIX_LICENSE_AUTH_PAYLOAD]', {
-    deviceIdentifier: input.deviceIdentifier,
+  console.info('[XANDEFLIX_LICENSE_AUTH_REQUEST]', {
     hasLicenseCode: Boolean(input.licenseCode),
-    licenseCode: input.licenseCode,
     hasAccessToken: Boolean(input.accessToken),
   });
 
@@ -94,13 +92,7 @@ async function postAuthorizedIptvSource(input: {
     | null;
 
   if (!response.ok || !isAuthorizedIptvSourceSuccess(data)) {
-    const errorData = data as GetAuthorizedIptvSourceErrorResponse | null;
-
-    throw new Error(
-      errorData?.details ||
-        errorData?.error ||
-        `Não foi possível resolver a fonte IPTV autorizada. HTTP ${response.status}`,
-    );
+    throw new Error('AUTHORIZED_IPTV_SOURCE_UNAVAILABLE');
   }
 
   return {
@@ -165,5 +157,7 @@ export function mapAuthorizedIptvSourceToPlaylistSource(
   return {
     url: authorizedSource.source.url,
     name: authorizedSource.source.name,
+    sourceId: authorizedSource.source.id,
+    sourceType: authorizedSource.source.type,
   };
 }

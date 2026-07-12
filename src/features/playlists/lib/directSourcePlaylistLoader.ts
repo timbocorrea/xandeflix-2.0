@@ -82,7 +82,8 @@ const MAX_NATIVE_TEXT_FALLBACK_BYTES = getEnvNumber(
 
 type LoadDirectSourcePlaylistOptions = {
   onProgress?: (progress: PlaylistLoadProgress) => void;
-  onChannelsBatch?: (channels: IptvChannel[]) => void;
+  onChannelsBatch?: (channels: IptvChannel[]) => void | Promise<void>;
+  signal?: AbortSignal;
 };
 
 type ParsedPlaylistResult = {
@@ -178,11 +179,11 @@ function createTimeoutError() {
 function sanitizeDiagnosticLine(line: string) {
   const trimmedLine = line.trim();
 
-  if (trimmedLine.length > 160) {
-    return `${trimmedLine.slice(0, 160)}...`;
+  if (trimmedLine.toUpperCase() === '#EXTM3U') {
+    return '#EXTM3U';
   }
 
-  return trimmedLine;
+  return '[PLAYLIST_LINE_REDACTED]';
 }
 
 function readContentLengthFromHeaders(headers?: Record<string, string>) {
@@ -333,16 +334,35 @@ async function runNativeHeadCheck(
   }
 }
 
-async function fetchResponseWithTimeout(sourceUrl: string, useProxy = false) {
+async function fetchResponseWithTimeout(
+  sourceUrl: string,
+  useProxy = false,
+  signal?: AbortSignal,
+) {
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
   const timeoutId = setTimeout(
     () => controller.abort(),
     PLAYLIST_REQUEST_TIMEOUT_MS,
   );
 
   try {
+    if (signal?.aborted) {
+      controller.abort();
+    } else {
+      signal?.addEventListener('abort', abortFromCaller, { once: true });
+    }
+
     if (useProxy) {
-      return await fetchPlaylistViaProxy(sourceUrl);
+      const response = await fetchPlaylistViaProxy(sourceUrl);
+
+      if (signal?.aborted) {
+        throw Object.assign(new Error('PLAYLIST_LOAD_ABORTED'), {
+          name: 'AbortError',
+        });
+      }
+
+      return response;
     }
 
     const response = await fetch(sourceUrl, {
@@ -360,6 +380,7 @@ async function fetchResponseWithTimeout(sourceUrl: string, useProxy = false) {
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
@@ -399,6 +420,7 @@ async function parsePlaylistFromResponse(
     batchSize: PARSE_BATCH_SIZE,
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
     onChannelsBatch: options?.onChannelsBatch,
+    signal: options?.signal,
     onBytesReceived: (bytesReceived) => {
       if (MAX_PLAYLIST_BYTES && bytesReceived > MAX_PLAYLIST_BYTES) {
         throw new Error(
@@ -464,6 +486,7 @@ async function parsePlaylistFromResponse(
     batchSize: PARSE_BATCH_SIZE,
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
     onChannelsBatch: options?.onChannelsBatch,
+    signal: options?.signal,
     onProgress: applyParseProgress,
   };
 
@@ -608,6 +631,7 @@ async function loadPlaylistWithNativeHttpFallback(
     batchSize: PARSE_BATCH_SIZE,
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
     onChannelsBatch: options?.onChannelsBatch,
+    signal: options?.signal,
     onProgress: applyParseProgress,
   };
 
@@ -639,6 +663,7 @@ async function loadAndParsePlaylist(
     const response = await fetchResponseWithTimeout(
       sourceUrl,
       !Capacitor.isNativePlatform(),
+      options?.signal,
     );
 
     return await parsePlaylistFromResponse(response, progress, options, reportProgress);
@@ -733,6 +758,7 @@ export async function loadDirectSourcePlaylist(
         : error instanceof Error
           ? error.message
           : 'Erro desconhecido ao carregar playlist.',
+      { cause: error },
     );
   }
 }

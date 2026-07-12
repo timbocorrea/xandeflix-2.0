@@ -9,6 +9,10 @@ import {
 } from 'react';
 
 import { loadDirectSourcePlaylist } from '../lib/directSourcePlaylistLoader';
+import {
+  beginLocalCatalogImport,
+  type LocalCatalogImportSession,
+} from '@/features/localCatalog/services/localPlaylistImport.service';
 import type {
   IptvChannel,
   PlaylistDiagnostics,
@@ -55,8 +59,12 @@ export function PlaylistRuntimeProvider({
     useState<PlaylistLoadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
 
   const loadFromSource = useCallback(async (nextSource: PlaylistSource) => {
+    loadAbortControllerRef.current?.abort();
+    const loadAbortController = new AbortController();
+    loadAbortControllerRef.current = loadAbortController;
     const loadRequestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = loadRequestId;
 
@@ -68,8 +76,29 @@ export function PlaylistRuntimeProvider({
     setDiagnostics(null);
     setProgress(null);
 
+    let localImportSession: LocalCatalogImportSession | null = null;
+
+    if (nextSource.sourceId && nextSource.sourceType === 'm3u') {
+      try {
+        localImportSession = await beginLocalCatalogImport({
+          sourceId: nextSource.sourceId,
+          sourceType: nextSource.sourceType,
+          signal: loadAbortController.signal,
+        });
+      } catch (importError) {
+        console.warn('[XANDEFLIX_LOCAL_CATALOG_IMPORT_SKIPPED]', {
+          errorCode:
+            importError instanceof Error &&
+            /^LOCAL_CATALOG_[A-Z0-9_]+$/.test(importError.message)
+              ? importError.message
+              : 'LOCAL_CATALOG_IMPORT_INIT_FAILED',
+        });
+      }
+    }
+
     try {
       const playlist = await loadDirectSourcePlaylist(nextSource, {
+        signal: loadAbortController.signal,
         onProgress: (nextProgress) => {
           if (loadRequestIdRef.current !== loadRequestId) {
             return;
@@ -77,7 +106,7 @@ export function PlaylistRuntimeProvider({
 
           setProgress(nextProgress);
         },
-        onChannelsBatch: (channelBatch) => {
+        onChannelsBatch: async (channelBatch) => {
           if (loadRequestIdRef.current !== loadRequestId) {
             return;
           }
@@ -90,12 +119,24 @@ export function PlaylistRuntimeProvider({
             ...previousChannels,
             ...channelBatch,
           ]);
+
+          if (localImportSession) {
+            try {
+              await localImportSession.writeBatch(channelBatch);
+            } catch (importError) {
+              await localImportSession.fail(importError).catch(() => undefined);
+              localImportSession = null;
+            }
+          }
         },
       });
 
       if (loadRequestIdRef.current !== loadRequestId) {
+        await localImportSession?.cancel().catch(() => undefined);
         return;
       }
+
+      await localImportSession?.complete().catch(() => undefined);
 
       setChannels(playlist.channels);
       setDiagnostics(playlist.diagnostics);
@@ -120,6 +161,12 @@ export function PlaylistRuntimeProvider({
         );
       }
     } catch (loadError) {
+      if (loadAbortController.signal.aborted) {
+        await localImportSession?.cancel().catch(() => undefined);
+      } else {
+        await localImportSession?.fail(loadError).catch(() => undefined);
+      }
+
       if (loadRequestIdRef.current !== loadRequestId) {
         return;
       }
@@ -130,6 +177,10 @@ export function PlaylistRuntimeProvider({
           ? loadError.message
           : 'Erro desconhecido ao carregar playlist.',
       );
+    } finally {
+      if (loadAbortControllerRef.current === loadAbortController) {
+        loadAbortControllerRef.current = null;
+      }
     }
   }, []);
 
@@ -143,6 +194,8 @@ export function PlaylistRuntimeProvider({
       channels: IptvChannel[];
       diagnostics?: PlaylistDiagnostics | null;
     }) => {
+      loadAbortControllerRef.current?.abort();
+      loadAbortControllerRef.current = null;
       loadRequestIdRef.current += 1;
       setError(null);
       setSource(nextSource);
@@ -160,6 +213,8 @@ export function PlaylistRuntimeProvider({
   }, []);
 
   const clearRuntime = useCallback(() => {
+    loadAbortControllerRef.current?.abort();
+    loadAbortControllerRef.current = null;
     loadRequestIdRef.current += 1;
     setSource(null);
     setChannels([]);

@@ -180,11 +180,6 @@ function DirectSourcePlaylistContent() {
         const deviceIdentifier = getOrCreateDeviceIdentifier();
         const storedActivation = getStoredLicenseActivation();
 
-        console.log('[XANDEFLIX_LICENSE_RUNTIME]', {
-          stateLicenseCode: licenseCode,
-          storedLicenseCode: storedActivation?.licenseCode,
-        });
-
         const resolvedLicenseCode =
           storedActivation?.licenseCode?.trim() ||
           licenseCode?.trim();

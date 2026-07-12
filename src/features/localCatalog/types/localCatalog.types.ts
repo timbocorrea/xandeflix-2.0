@@ -1,11 +1,19 @@
-export type LocalCatalogContentKind = 'live' | 'movie' | 'series' | 'unknown';
+import type {
+  UniversalCatalogContentKind,
+  UniversalCatalogSourceType,
+} from '@/features/universalCatalog';
+
+export type LocalCatalogContentKind = UniversalCatalogContentKind;
 
 export type LocalCatalogItem = {
   id: string;
   sourceId: string;
+  sourceType?: UniversalCatalogSourceType;
   name: string;
+  rawName?: string;
   normalizedName: string;
   groupTitle: string | null;
+  normalizedGroup?: string | null;
   contentKind: LocalCatalogContentKind;
   streamUrl: string;
   tvgId?: string | null;
@@ -14,6 +22,8 @@ export type LocalCatalogItem = {
   seriesName?: string | null;
   seasonNumber?: number | null;
   episodeNumber?: number | null;
+  classificationVersion?: number;
+  importSessionId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -51,9 +61,46 @@ export type LocalCatalogStats = {
   byContentKind: Record<LocalCatalogContentKind, number>;
 };
 
+export type LocalCatalogImportStatus =
+  | 'idle'
+  | 'importing'
+  | 'ready'
+  | 'failed'
+  | 'canceled';
+
+export type LocalCatalogImportMetadata = {
+  sourceId: string;
+  sourceType: UniversalCatalogSourceType;
+  status: LocalCatalogImportStatus;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  lastSuccessfulImportAt?: string | null;
+  parsedCount: number;
+  importedCount: number;
+  updatedCount: number;
+  removedCount: number;
+  unknownCount: number;
+  withoutGroupCount: number;
+  classificationVersion: number;
+  errorCode?: string | null;
+};
+
+export type LocalCatalogCategory = {
+  id: string;
+  title: string;
+  normalizedTitle: string;
+  contentKind: LocalCatalogContentKind;
+  itemCount: number;
+  isUncategorized: boolean;
+  isUnknownKind: boolean;
+};
+
 export type ListLocalCatalogItemsInput = {
+  sourceId?: string;
   contentKind?: LocalCatalogContentKind;
   groupTitle?: string | null;
+  normalizedGroup?: string | null;
+  uncategorizedOnly?: boolean;
   limit?: number;
   offset?: number;
 };

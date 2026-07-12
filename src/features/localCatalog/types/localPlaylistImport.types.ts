@@ -1,15 +1,14 @@
-import type { LocalCatalogItem } from './localCatalog.types';
-
 export type LocalPlaylistImportStatus =
   | 'idle'
-  | 'running'
-  | 'completed'
-  | 'cancelled'
-  | 'error';
+  | 'importing'
+  | 'ready'
+  | 'canceled'
+  | 'failed';
 
 export type LocalPlaylistImportProgress = {
   status: LocalPlaylistImportStatus;
   sourceId: string;
+  importSessionId?: string;
   processed: number;
   inserted: number;
   updated: number;
@@ -23,6 +22,7 @@ export type LocalPlaylistImportProgress = {
 
 export type LocalPlaylistImportOptions = {
   sourceId: string;
+  sourceType?: 'm3u';
   playlistText: string;
   batchSize?: number;
   signal?: AbortSignal;
@@ -31,5 +31,8 @@ export type LocalPlaylistImportOptions = {
 
 export type LocalPlaylistImportResult = {
   progress: LocalPlaylistImportProgress;
-  sampleItems: LocalCatalogItem[];
+  removedItems: number;
+  unknownItems: number;
+  itemsWithoutGroup: number;
+  durationMs: number;
 };

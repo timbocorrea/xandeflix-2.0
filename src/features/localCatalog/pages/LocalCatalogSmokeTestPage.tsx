@@ -99,12 +99,12 @@ export default function LocalCatalogSmokeTestPage() {
       setPersistedResultRaw(
         window.localStorage.getItem(LOCAL_CATALOG_SMOKE_TEST_RESULT_STORAGE_KEY),
       );
-    } catch (error) {
+    } catch {
       setPersistedResultRaw(
         JSON.stringify({
           ok: false,
           error: 'Falha ao acessar localStorage',
-          details: error instanceof Error ? error.message : String(error),
+          details: 'LOCAL_STORAGE_READ_FAILED',
         }),
       );
     }
@@ -157,22 +157,19 @@ export default function LocalCatalogSmokeTestPage() {
 
     try {
       setImportResult(await runLocalPlaylistImportSmokeTest());
-    } catch (error) {
+    } catch {
       setImportResult({
         ok: false,
         sourceId: 'local-playlist-import-smoke-test-source',
         finalProgress: {
-          status: 'error',
+          status: 'failed',
           sourceId: 'local-playlist-import-smoke-test-source',
           processed: 0,
           inserted: 0,
           updated: 0,
           skipped: 0,
           errors: 1,
-          message:
-            error instanceof Error
-              ? error.message
-              : 'LOCAL_PLAYLIST_IMPORT_SMOKE_TEST_CRITICAL_FAILURE',
+          message: 'LOCAL_PLAYLIST_IMPORT_SMOKE_TEST_CRITICAL_FAILURE',
         },
         stats: {
           playlistItemsCount: 0,
@@ -182,16 +179,20 @@ export default function LocalCatalogSmokeTestPage() {
             live: 0,
             movie: 0,
             series: 0,
+            series_episode: 0,
+            radio: 0,
             unknown: 0,
           },
         },
-        sampleCount: 0,
         listedCount: 0,
         progressEventsCount: 0,
-        errorMessage:
-          error instanceof Error
-            ? error.message
-            : 'LOCAL_PLAYLIST_IMPORT_SMOKE_TEST_CRITICAL_FAILURE',
+        withoutExtinfPreserved: false,
+        unknownPreserved: false,
+        uncategorizedCreated: false,
+        dynamicGroupVisible: false,
+        opaqueIds: false,
+        unsafeLogoRejected: false,
+        errorCode: 'LOCAL_PLAYLIST_IMPORT_SMOKE_TEST_CRITICAL_FAILURE',
       });
     } finally {
       setIsRunningImportSmoke(false);
