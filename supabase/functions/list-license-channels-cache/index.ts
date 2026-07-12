@@ -1,4 +1,5 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// deno-lint-ignore no-import-prefix
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 type AdminRole = 'admin' | 'super_admin';
 
@@ -54,8 +55,6 @@ type ListLicenseChannelsCacheSummary = {
   activeCount: number;
   inactiveCount: number;
 };
-
-type SupabaseClient = ReturnType<typeof createClient>;
 
 type FailureStage =
   | 'ENVIRONMENT'
@@ -603,7 +602,8 @@ Deno.serve(async (request) => {
       inactiveCount,
     };
 
-    const channelRows = (channels ?? []) as LicenseChannelCacheRecord[];
+    const channelRows =
+      (channels ?? []) as unknown as LicenseChannelCacheRecord[];
     const sourceIds = await runRequiredStage('RESPONSE_ASSEMBLY', () =>
       Array.from(
         new Set(channelRows.map((channel) => channel.license_iptv_source_id)),
