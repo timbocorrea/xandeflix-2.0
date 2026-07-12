@@ -34,6 +34,21 @@ export type ListAdminLicenseChannelsCacheInput = {
   isActive?: boolean | null;
 };
 
+export type AdminLicenseChannelsCacheFailureStage =
+  | 'ENVIRONMENT'
+  | 'AUTH_USER'
+  | 'ADMIN_PROFILE'
+  | 'ACCESSIBLE_LICENSES'
+  | 'CHANNEL_PAGE'
+  | 'TOTAL_ACCESSIBLE'
+  | 'TOTAL_FILTERED'
+  | 'ACTIVE_COUNT'
+  | 'INACTIVE_COUNT'
+  | 'SOURCE_LOOKUP'
+  | 'GROUP_LIST'
+  | 'RESPONSE_ASSEMBLY'
+  | 'UNKNOWN';
+
 export type ListAdminLicenseChannelsCacheResponse = {
   ok: boolean;
   channels?: AdminLicenseChannelCacheItem[];
@@ -42,8 +57,19 @@ export type ListAdminLicenseChannelsCacheResponse = {
   pageSize?: number;
   totalPages?: number;
   groups?: string[];
+  summary?: AdminLicenseChannelsCacheSummary;
+  summaryWarnings?: string[];
   error?: string;
-  details?: string;
+  failureStage?: AdminLicenseChannelsCacheFailureStage;
+  traceId?: string;
+};
+
+export type AdminLicenseChannelsCacheSummary = {
+  totalAccessible: number;
+  totalFiltered: number;
+  sourceCount: number | null;
+  activeCount: number;
+  inactiveCount: number;
 };
 
 export type AdminLicenseChannelsCacheResult = {
@@ -53,6 +79,8 @@ export type AdminLicenseChannelsCacheResult = {
   pageSize: number;
   totalPages: number;
   groups: string[];
+  summary: AdminLicenseChannelsCacheSummary;
+  summaryWarnings: string[];
 };
 
 export type UpdateAdminLicenseChannelStatusInput = {
@@ -67,6 +95,65 @@ export type UpdateAdminLicenseChannelStatusResponse = {
   details?: string;
 };
 
+function getFunctionErrorStatus(error: unknown) {
+  const context = (error as { context?: { status?: unknown } })?.context;
+
+  return typeof context?.status === 'number' ? context.status : null;
+}
+
+function normalizeListFunctionError(error: unknown) {
+  const status = getFunctionErrorStatus(error);
+
+  if (status === 401) {
+    return 'UNAUTHORIZED';
+  }
+
+  if (status === 403) {
+    return 'FORBIDDEN';
+  }
+
+  if (status === 404) {
+    return 'EDGE_FUNCTION_UNAVAILABLE';
+  }
+
+  if (status && status >= 500) {
+    return 'ADMIN_CHANNELS_LOAD_FAILED';
+  }
+
+  const message = error instanceof Error ? error.message : '';
+
+  if (/failed to send a request/i.test(message)) {
+    return 'EDGE_FUNCTION_REQUEST_FAILED';
+  }
+
+  return 'ADMIN_CHANNELS_LOAD_FAILED';
+}
+
+function isNonNegativeNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function normalizeSummary(summary: AdminLicenseChannelsCacheSummary | undefined) {
+  if (!summary) {
+    throw new Error('RESPONSE_SCHEMA_INVALID');
+  }
+
+  if (
+    !isNonNegativeNumber(summary.totalAccessible) ||
+    !isNonNegativeNumber(summary.totalFiltered) ||
+    !isNonNegativeNumber(summary.activeCount) ||
+    !isNonNegativeNumber(summary.inactiveCount) ||
+    !(
+      summary.sourceCount === null ||
+      isNonNegativeNumber(summary.sourceCount)
+    )
+  ) {
+    throw new Error('RESPONSE_SCHEMA_INVALID');
+  }
+
+  return summary;
+}
+
 export async function listAdminLicenseChannelsCache(
   input: ListAdminLicenseChannelsCacheInput = {},
 ): Promise<AdminLicenseChannelsCacheResult> {
@@ -79,20 +166,26 @@ export async function listAdminLicenseChannelsCache(
     );
 
   if (error) {
-    throw error;
+    throw new Error(normalizeListFunctionError(error));
   }
 
   if (!data?.ok) {
     throw new Error(data?.error ?? 'LIST_LICENSE_CHANNELS_CACHE_FAILED');
   }
 
+  const summary = normalizeSummary(data.summary);
+
   return {
     channels: data.channels ?? [],
-    totalCount: data.totalCount ?? 0,
+    totalCount: data.totalCount ?? summary.totalFiltered,
     page: data.page ?? input.page ?? 1,
     pageSize: data.pageSize ?? input.pageSize ?? 25,
     totalPages: data.totalPages ?? 0,
     groups: data.groups ?? [],
+    summary,
+    summaryWarnings: (data.summaryWarnings ?? []).filter(
+      (warning): warning is string => typeof warning === 'string',
+    ),
   };
 }
 
