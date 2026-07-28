@@ -1,12 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 
 import { rememberLastCatalogFocusKey } from '@/lib/spatial/focusNavigation';
+import {
+  reportLocalCatalogArtworkLoadFailure,
+  type LocalCatalogArtworkCandidate,
+} from '@/features/localCatalog/services/localCatalogArtwork.service';
 
 interface FocusableMediaCardProps {
   title: string;
   subtitle?: string;
   posterUrl?: string;
+  artworkCandidates?: LocalCatalogArtworkCandidate[];
+  kind?: 'movie' | 'series' | 'unknown';
   eagerLoad?: boolean;
   focusKey: string;
   onEnterPress?: () => void;
@@ -42,6 +48,8 @@ export function FocusableMediaCard({
   title,
   subtitle,
   posterUrl,
+  artworkCandidates,
+  kind = 'unknown',
   eagerLoad = false,
   focusKey,
   onEnterPress,
@@ -50,12 +58,25 @@ export function FocusableMediaCard({
   hideTextOverlay = false,
   sizeScale = 'default',
 }: FocusableMediaCardProps) {
+  const [activeArtworkIndex, setActiveArtworkIndex] = useState(0);
   const [hasPosterError, setHasPosterError] = useState(false);
-  const shouldShowPoster = Boolean(posterUrl) && !hasPosterError;
+  const artworkCandidatesKey = artworkCandidates
+    ?.map((candidate) => candidate.url)
+    .join('|');
+  const activeArtworkCandidate = artworkCandidates?.[activeArtworkIndex];
+  const activePosterUrl = artworkCandidates?.length
+    ? activeArtworkCandidate?.url
+    : posterUrl;
+  const shouldShowPoster = Boolean(activePosterUrl) && !hasPosterError;
   const shouldShowFallbackTextOverlay = !shouldShowPoster;
   const shouldRenderTextOverlay = !hideTextOverlay || shouldShowFallbackTextOverlay;
 
   const fallbackPalette = useMemo(() => getFallbackPalette(title), [title]);
+
+  useEffect(() => {
+    setActiveArtworkIndex(0);
+    setHasPosterError(false);
+  }, [artworkCandidatesKey, posterUrl]);
   const cardSizeClass =
     sizeScale === 'large'
       ? 'w-[9.4rem] md:w-[10.4rem] lg:w-[11.4rem] xl:w-[12.2rem]'
@@ -105,14 +126,31 @@ export function FocusableMediaCard({
     >
       {shouldShowPoster ? (
         <img
-          src={posterUrl}
+          src={activePosterUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
           style={{ borderRadius: 'inherit' }}
           loading={eagerLoad ? 'eager' : 'lazy'}
           decoding="async"
           fetchPriority={eagerLoad ? 'high' : 'auto'}
-          onError={() => setHasPosterError(true)}
+          onError={() => {
+            if (activeArtworkCandidate) {
+              reportLocalCatalogArtworkLoadFailure(
+                activeArtworkCandidate,
+                kind,
+              );
+            }
+
+            if (
+              artworkCandidates &&
+              activeArtworkIndex + 1 < artworkCandidates.length
+            ) {
+              setActiveArtworkIndex((current) => current + 1);
+              return;
+            }
+
+            setHasPosterError(true);
+          }}
         />
       ) : (
         <div

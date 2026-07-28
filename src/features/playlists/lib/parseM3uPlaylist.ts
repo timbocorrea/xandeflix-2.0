@@ -24,7 +24,9 @@ export type ParseM3uPlaylistProgressiveOptions =
   ParseM3uPlaylistOptions & {
     batchSize?: number;
     yieldEveryLines?: number;
-    onChannelsBatch?: (channels: IptvChannel[]) => void;
+    collectChannels?: boolean;
+    signal?: AbortSignal;
+    onChannelsBatch?: (channels: IptvChannel[]) => void | Promise<void>;
     onProgress?: (progress: ParseM3uPlaylistProgress) => void;
   };
 
@@ -97,6 +99,16 @@ function resolvePositiveIntegerOrFallback(value: number | undefined, fallback: n
   }
 
   return Math.max(1, Math.floor(value));
+}
+
+function throwIfParsingAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  const error = new Error('M3U_PARSE_ABORTED');
+  error.name = 'AbortError';
+  throw error;
 }
 
 function forEachNonEmptyLine(
@@ -217,6 +229,7 @@ export async function parseM3uPlaylistProgressive(
     options?.yieldEveryLines,
     DEFAULT_YIELD_EVERY_LINES,
   );
+  const collectChannels = options?.collectChannels !== false;
 
   const channels: IptvChannel[] = [];
   const channelBatch: IptvChannel[] = [];
@@ -229,18 +242,20 @@ export async function parseM3uPlaylistProgressive(
     firstNonEmptyLine: '',
   };
 
-  const flushBatch = () => {
+  const flushBatch = async () => {
     if (channelBatch.length === 0) {
       return;
     }
 
-    options?.onChannelsBatch?.([...channelBatch]);
+    const nextBatch = [...channelBatch];
     channelBatch.length = 0;
+    await options?.onChannelsBatch?.(nextBatch);
   };
 
   let lineStart = 0;
 
   for (let index = 0; index <= content.length; index += 1) {
+    throwIfParsingAborted(options?.signal);
     const charCode = content.charCodeAt(index);
     const reachedEnd = index === content.length;
     const isLineBreak = charCode === 10 || charCode === 13;
@@ -275,10 +290,10 @@ export async function parseM3uPlaylistProgressive(
         const name =
           pendingMetadata?.name ||
           pendingMetadata?.tvgName ||
-          `Canal ${channels.length + 1}`;
+          `Canal ${progress.channelsParsed + 1}`;
 
         const channel: IptvChannel = {
-          id: `${channels.length + 1}`,
+          id: `${progress.channelsParsed + 1}`,
           name,
           url: line,
           logo: pendingMetadata?.logo,
@@ -287,22 +302,28 @@ export async function parseM3uPlaylistProgressive(
           tvgName: pendingMetadata?.tvgName,
         };
 
-        channels.push(channel);
+        if (collectChannels) {
+          channels.push(channel);
+        }
+
         channelBatch.push(channel);
-        progress.channelsParsed = channels.length;
+        progress.channelsParsed += 1;
         pendingMetadata = null;
 
         if (channelBatch.length >= batchSize) {
-          flushBatch();
+          await flushBatch();
         }
 
-        if (maxChannels !== undefined && channels.length >= maxChannels) {
+        if (
+          maxChannels !== undefined &&
+          progress.channelsParsed >= maxChannels
+        ) {
           break;
         }
       }
 
       if (progress.parsedLines % yieldEveryLines === 0) {
-        flushBatch();
+        await flushBatch();
         options?.onProgress?.(cloneProgress(progress));
         await yieldToMainThread();
       }
@@ -315,7 +336,7 @@ export async function parseM3uPlaylistProgressive(
     lineStart = index + 1;
   }
 
-  flushBatch();
+  await flushBatch();
   options?.onProgress?.(cloneProgress(progress));
 
   return {
@@ -337,6 +358,7 @@ export async function parseM3uPlaylistProgressiveFromStream(
     options?.yieldEveryLines,
     DEFAULT_YIELD_EVERY_LINES,
   );
+  const collectChannels = options?.collectChannels !== false;
 
   const channels: IptvChannel[] = [];
   const channelBatch: IptvChannel[] = [];
@@ -351,16 +373,18 @@ export async function parseM3uPlaylistProgressiveFromStream(
     firstNonEmptyLine: '',
   };
 
-  const flushBatch = () => {
+  const flushBatch = async () => {
     if (channelBatch.length === 0) {
       return;
     }
 
-    options?.onChannelsBatch?.([...channelBatch]);
+    const nextBatch = [...channelBatch];
     channelBatch.length = 0;
+    await options?.onChannelsBatch?.(nextBatch);
   };
 
   const processLine = async (rawLine: string) => {
+    throwIfParsingAborted(options?.signal);
     const line = rawLine.trim();
 
     if (!line) {
@@ -390,10 +414,10 @@ export async function parseM3uPlaylistProgressiveFromStream(
       const name =
         pendingMetadata?.name ||
         pendingMetadata?.tvgName ||
-        `Canal ${channels.length + 1}`;
+        `Canal ${progress.channelsParsed + 1}`;
 
       const channel: IptvChannel = {
-        id: `${channels.length + 1}`,
+        id: `${progress.channelsParsed + 1}`,
         name,
         url: line,
         logo: pendingMetadata?.logo,
@@ -402,24 +426,30 @@ export async function parseM3uPlaylistProgressiveFromStream(
         tvgName: pendingMetadata?.tvgName,
       };
 
-      channels.push(channel);
+      if (collectChannels) {
+        channels.push(channel);
+      }
+
       channelBatch.push(channel);
-      progress.channelsParsed = channels.length;
+      progress.channelsParsed += 1;
       pendingMetadata = null;
 
       if (channelBatch.length >= batchSize) {
-        flushBatch();
+        await flushBatch();
       }
 
-      if (maxChannels !== undefined && channels.length >= maxChannels) {
-        flushBatch();
+      if (
+        maxChannels !== undefined &&
+        progress.channelsParsed >= maxChannels
+      ) {
+        await flushBatch();
         options?.onProgress?.(cloneProgress(progress));
         return false;
       }
     }
 
     if (progress.parsedLines % yieldEveryLines === 0) {
-      flushBatch();
+      await flushBatch();
       options?.onProgress?.(cloneProgress(progress));
       await yieldToMainThread();
     }
@@ -464,38 +494,56 @@ export async function parseM3uPlaylistProgressiveFromStream(
   const decoder = new TextDecoder('utf-8', { fatal: false });
   let textBuffer = '';
   let keepReading = true;
+  const cancelReaderOnAbort = () => {
+    void reader.cancel('M3U_PARSE_ABORTED').catch(() => undefined);
+  };
 
-  while (keepReading) {
-    const { value, done } = await reader.read();
+  options?.signal?.addEventListener('abort', cancelReaderOnAbort, {
+    once: true,
+  });
 
-    if (done) {
-      break;
+  try {
+    while (keepReading) {
+      throwIfParsingAborted(options?.signal);
+      const { value, done } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      if (!value) {
+        continue;
+      }
+
+      bytesReceived += value.byteLength;
+      options?.onBytesReceived?.(bytesReceived);
+      textBuffer += decoder.decode(value, { stream: true });
+
+      const chunkResult = await processChunkLines(textBuffer);
+      keepReading = chunkResult.continueReading;
+      textBuffer = chunkResult.remainingBuffer;
     }
 
-    if (!value) {
-      continue;
+    throwIfParsingAborted(options?.signal);
+
+    if (!keepReading) {
+      await reader.cancel();
+    } else {
+      textBuffer += decoder.decode();
+
+      if (textBuffer.trim()) {
+        await processLine(textBuffer);
+      }
     }
-
-    bytesReceived += value.byteLength;
-    options?.onBytesReceived?.(bytesReceived);
-    textBuffer += decoder.decode(value, { stream: true });
-
-    const chunkResult = await processChunkLines(textBuffer);
-    keepReading = chunkResult.continueReading;
-    textBuffer = chunkResult.remainingBuffer;
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    options?.signal?.removeEventListener('abort', cancelReaderOnAbort);
+    reader.releaseLock();
   }
 
-  if (!keepReading) {
-    await reader.cancel();
-  } else {
-    textBuffer += decoder.decode();
-
-    if (textBuffer.trim()) {
-      await processLine(textBuffer);
-    }
-  }
-
-  flushBatch();
+  await flushBatch();
   options?.onProgress?.(cloneProgress(progress));
 
   return {

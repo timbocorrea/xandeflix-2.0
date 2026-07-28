@@ -137,7 +137,7 @@ Deno.serve(async (request) => {
     const { data: existingSession, error: existingSessionError } =
       await supabaseAdmin
         .from('playback_sessions')
-        .select('*')
+        .select('id, license_id, license_device_id, device_identifier, status, started_at, last_heartbeat_at, ended_at, expires_at')
         .eq('id', sessionId)
         .maybeSingle();
 
@@ -158,7 +158,7 @@ Deno.serve(async (request) => {
 
     const { data: license, error: licenseError } = await supabaseAdmin
       .from('licenses')
-      .select('id, license_code, admin_owner_id')
+      .select('id, admin_owner_id')
       .eq('id', existingSession.license_id)
       .maybeSingle();
 
@@ -206,7 +206,7 @@ Deno.serve(async (request) => {
         })
         .eq('id', sessionId)
         .eq('status', 'active')
-        .select('*')
+        .select('id, license_id, license_device_id, device_identifier, status, started_at, last_heartbeat_at, ended_at, expires_at')
         .maybeSingle();
 
     if (updateSessionError) {
@@ -235,10 +235,8 @@ Deno.serve(async (request) => {
       metadata: {
         sessionId: updatedSession.id,
         licenseId: license.id,
-        licenseCode: license.license_code,
         licenseDeviceId: updatedSession.license_device_id,
         deviceIdentifier: updatedSession.device_identifier,
-        channelName: updatedSession.channel_name,
         previousStatus: existingSession.status,
         nextStatus: updatedSession.status,
         startedAt: updatedSession.started_at,

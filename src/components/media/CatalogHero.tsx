@@ -1,7 +1,9 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Info, Play } from 'lucide-react';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { cn } from '@/utils/cn';
+import type { LocalCatalogArtworkCandidate } from '@/features/localCatalog/services/localCatalogArtwork.service';
 
 import { FOCUS_KEYS } from '../../lib/spatial/focusKeys';
 import { FocusableButton } from '../tv/FocusableButton';
@@ -17,6 +19,7 @@ interface CatalogHeroProps {
   description?: string;
   metadata?: string;
   posterUrl?: string;
+  artworkCandidates?: LocalCatalogArtworkCandidate[];
   eyebrow?: string;
   stats?: CatalogHeroStat[];
   onSectionArrowPress?: (direction: string) => boolean;
@@ -36,6 +39,7 @@ export function CatalogHero({
   description = 'Explore recomendacoes, retome o que voce ja assiste e navegue rapido com controle remoto em uma experiencia pensada para TV.',
   metadata,
   posterUrl,
+  artworkCandidates,
   eyebrow,
   stats = [
     { label: 'Navegacao', value: 'D-pad otimizada' },
@@ -53,6 +57,27 @@ export function CatalogHero({
   onPreviousHeroItem,
   onNextHeroItem,
 }: CatalogHeroProps) {
+  const imageCandidates = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            posterUrl,
+            ...(artworkCandidates?.map((candidate) => candidate.url) ?? []),
+          ].filter((value): value is string => Boolean(value?.trim())),
+        ),
+      ),
+    [artworkCandidates, posterUrl],
+  );
+  const imageCandidatesKey = imageCandidates.join('|');
+  const [imageIndex, setImageIndex] = useState(0);
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [imageCandidatesKey, title]);
+
+  const activeImageUrl = imageCandidates[imageIndex] ?? posterUrl;
+
   function handlePlay() {
     spatialDebug('hero', 'Assistir agora:', title);
     onPlayPress?.();
@@ -232,15 +257,20 @@ export function CatalogHero({
           `}
         </style>
 
-      {posterUrl && (
+      {activeImageUrl && (
         <img
-          key={posterUrl}
-          src={posterUrl}
+          key={activeImageUrl}
+          src={activeImageUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover opacity-100"
           style={{ animation: 'xfHeroFadeIn 560ms ease-out both' }}
           loading="eager"
           decoding="async"
+          onError={() => {
+            if (imageIndex + 1 < imageCandidates.length) {
+              setImageIndex((current) => current + 1);
+            }
+          }}
         />
       )}
         <div

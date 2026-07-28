@@ -3,6 +3,7 @@ import type { CatalogRepository } from '../repositories/catalogRepository.types'
 import type { LocalCatalogItem } from '../types/localCatalog.types';
 
 export type ListLocalMovieCatalogItemsInput = {
+  readonly sourceId: string;
   readonly groupTitle?: string;
   readonly limit?: number;
   readonly offset?: number;
@@ -10,7 +11,7 @@ export type ListLocalMovieCatalogItemsInput = {
 
 export type LocalMovieCatalogReadModel = {
   readonly source: 'local-first-foundation';
-  listMovies(input?: ListLocalMovieCatalogItemsInput): Promise<LocalCatalogItem[]>;
+  listMovies(input: ListLocalMovieCatalogItemsInput): Promise<LocalCatalogItem[]>;
 };
 
 export function createLocalMovieCatalogReadModel(
@@ -18,7 +19,7 @@ export function createLocalMovieCatalogReadModel(
 ): LocalMovieCatalogReadModel {
   return {
     source: 'local-first-foundation',
-    listMovies: (input = {}) =>
+    listMovies: (input) =>
       repository.listItems({
         ...input,
         contentKind: 'movie',

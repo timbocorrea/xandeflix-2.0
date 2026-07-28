@@ -6,9 +6,7 @@ import {
   createAdminLicense,
   createAdminLicenseDevice,
   createAdminLicenseIptvSource,
-  importAdminLicenseIptvSourceChannels,
   listAdminClients,
-  testAdminLicenseIptvSource,
   updateAdminLicenseDetails,
   updateAdminLicenseDeviceStatus,
   updateAdminLicenseStatus,
@@ -16,11 +14,6 @@ import {
   listAdminLicenseIptvSources,
   listAdminLicenses,
   listAdminPlaybackSessions,
-} from '../services';
-
-import type {
-  ImportLicenseIptvSourceChannelsResult,
-  LicenseIptvSourceDiagnostic,
 } from '../services';
 
 import type {
@@ -238,52 +231,6 @@ function getCreateLicenseIptvSourceErrorMessage(error: unknown) {
   return messages[error.message] ?? error.message;
 }
 
-function getTestLicenseIptvSourceErrorMessage(error: unknown) {
-  if (!(error instanceof Error)) {
-    return 'Não foi possível testar a fonte IPTV da licença.';
-  }
-
-  const messages: Record<string, string> = {
-    INVALID_PAYLOAD: 'Fonte IPTV inválida para teste.',
-    UNAUTHORIZED: 'Sessão administrativa inválida. Faça login novamente.',
-    FORBIDDEN: 'Você não tem permissão para testar esta fonte IPTV.',
-    LICENSE_IPTV_SOURCE_NOT_FOUND: 'Fonte IPTV não encontrada.',
-    LICENSE_NOT_FOUND: 'Licença não encontrada.',
-    TEST_LICENSE_IPTV_SOURCE_FAILED:
-      'Não foi possível testar a fonte IPTV da licença.',
-  };
-
-  return messages[error.message] ?? error.message;
-}
-
-function getImportLicenseIptvSourceChannelsErrorMessage(error: unknown) {
-  if (!(error instanceof Error)) {
-    return 'Não foi possível importar os canais desta fonte.';
-  }
-
-  const messages: Record<string, string> = {
-    INVALID_PAYLOAD: 'Fonte inválida para importação.',
-    UNAUTHORIZED: 'Sessão administrativa inválida.',
-    FORBIDDEN: 'Você não tem permissão para importar esta fonte.',
-    LICENSE_IPTV_SOURCE_NOT_FOUND: 'Fonte IPTV não encontrada.',
-    LICENSE_NOT_FOUND: 'Licença vinculada não encontrada.',
-    IPTV_SOURCE_TYPE_NOT_SUPPORTED:
-      'Tipo de fonte ainda não suportado para importação.',
-    XTREAM_IMPORT_NOT_SUPPORTED_YET:
-      'Importação Xtream ainda não suportada nesta fase.',
-    IPTV_SOURCE_FETCH_FAILED: 'Não foi possível acessar a fonte IPTV.',
-    IPTV_SOURCE_PARSE_FAILED: 'Não foi possível interpretar a playlist.',
-    IPTV_SOURCE_PARTIAL_IMPORT:
-      'A importação foi interrompida antes de percorrer a lista inteira.',
-    CHANNELS_CACHE_IMPORT_FAILED:
-      'Não foi possível gravar os canais no cache.',
-    IMPORT_LICENSE_IPTV_SOURCE_CHANNELS_FAILED:
-      'Não foi possível importar os canais desta fonte.',
-  };
-
-  return messages[error.message] ?? error.message;
-}
-
 function getUpdateLicenseDeviceStatusErrorMessage(error: unknown) {
   if (!(error instanceof Error)) {
     return 'Não foi possível atualizar o dispositivo.';
@@ -339,32 +286,6 @@ function getLicenseDevicesForLicense(
   return devicesByLicenseId[licenseId] ?? [];
 }
 
-function formatDiagnosticBytes(value: number | null) {
-  if (value === null || !Number.isFinite(value)) {
-    return 'Não informado';
-  }
-
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function formatDiagnosticHttpStatus(diagnostic: LicenseIptvSourceDiagnostic) {
-  if (!diagnostic.responded || diagnostic.httpStatus === null) {
-    return 'Sem resposta';
-  }
-
-  return diagnostic.httpStatusText
-    ? `${diagnostic.httpStatus} ${diagnostic.httpStatusText}`
-    : String(diagnostic.httpStatus);
-}
-
 export function AdminLicensesPage() {
   const [licenses, setLicenses] = useState<License[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -396,17 +317,6 @@ export function AdminLicensesPage() {
   const [sourceName, setSourceName] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [sourceType, setSourceType] = useState<LicenseIptvSource['type']>('m3u');
-  const [testingSourceId, setTestingSourceId] = useState<string | null>(null);
-  const [sourceDiagnostics, setSourceDiagnostics] = useState<
-    Record<string, LicenseIptvSourceDiagnostic>
-  >({});
-  const [sourceTestErrors, setSourceTestErrors] = useState<Record<string, string>>(
-    {},
-  );
-  const [importingSourceId, setImportingSourceId] = useState<string | null>(null);
-  const [sourceImportResults, setSourceImportResults] = useState<
-    Record<string, ImportLicenseIptvSourceChannelsResult>
-  >({});
   const [updatingLicenseStatusId, setUpdatingLicenseStatusId] = useState<string | null>(
     null,
   );
@@ -582,57 +492,6 @@ export function AdminLicensesPage() {
       setErrorMessage(getCreateLicenseIptvSourceErrorMessage(error));
     } finally {
       setIsCreatingSource(false);
-    }
-  }
-
-  async function handleTestLicenseIptvSource(source: LicenseIptvSource) {
-    try {
-      setTestingSourceId(source.id);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-      setSourceTestErrors((currentErrors) => {
-        const nextErrors = { ...currentErrors };
-        delete nextErrors[source.id];
-        return nextErrors;
-      });
-
-      const diagnostic = await testAdminLicenseIptvSource(source.id);
-
-      setSourceDiagnostics((currentDiagnostics) => ({
-        ...currentDiagnostics,
-        [source.id]: diagnostic,
-      }));
-
-    } catch (error) {
-      setSourceTestErrors((currentErrors) => ({
-        ...currentErrors,
-        [source.id]: getTestLicenseIptvSourceErrorMessage(error),
-      }));
-    } finally {
-      setTestingSourceId(null);
-    }
-  }
-
-  async function handleImportLicenseIptvSourceChannels(source: LicenseIptvSource) {
-    try {
-      setImportingSourceId(source.id);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-
-      const result = await importAdminLicenseIptvSourceChannels(source.id, 1000);
-
-      setSourceImportResults((currentResults) => ({
-        ...currentResults,
-        [source.id]: result,
-      }));
-
-      setSuccessMessage(
-        result.skipped ? result.message : 'Importação de canais concluída.',
-      );
-    } catch (error) {
-      setErrorMessage(getImportLicenseIptvSourceChannelsErrorMessage(error));
-    } finally {
-      setImportingSourceId(null);
     }
   }
 
@@ -915,8 +774,6 @@ export function AdminLicensesPage() {
       setLicenseDevices([]);
       setLicenseSources([]);
       setPlaybackSessions([]);
-      setSourceDiagnostics({});
-      setSourceImportResults({});
 
       await loadLicenses();
     } catch (error) {
@@ -1502,14 +1359,7 @@ export function AdminLicensesPage() {
                     Nenhuma fonte IPTV vinculada.
                   </p>
                 ) : (
-                  licenseSources.map((source) => {
-                    const diagnostic = sourceDiagnostics[source.id];
-                    const sourceTestError = sourceTestErrors[source.id];
-                    const importResult = sourceImportResults[source.id];
-                    const isTestingSource = testingSourceId === source.id;
-                    const isImportingSource = importingSourceId === source.id;
-
-                    return (
+                  licenseSources.map((source) => (
                       <div
                         key={source.id}
                         className="rounded-xl border border-white/10 bg-black/20 p-3"
@@ -1526,212 +1376,14 @@ export function AdminLicensesPage() {
                             </p>
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void handleTestLicenseIptvSource(source)}
-                              disabled={isTestingSource}
-                              className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {isTestingSource ? 'Testando...' : 'Testar fonte'}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void handleImportLicenseIptvSourceChannels(source)
-                              }
-                              disabled={isImportingSource}
-                              className="rounded-xl bg-xf-red px-3 py-2 text-xs font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {isImportingSource
-                                ? 'Importando...'
-                                : 'Importar canais'}
-                            </button>
-                          </div>
+                          <p className="max-w-xs text-xs font-semibold text-xf-muted">
+                            Teste e importação server-side indisponíveis. O conteúdo
+                            da fonte é processado somente no dispositivo autorizado.
+                          </p>
                         </div>
 
-                        {sourceTestError ? (
-                          <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-100">
-                            {sourceTestError}
-                          </p>
-                        ) : null}
-
-                        {isTestingSource ? (
-                          <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-xf-muted">
-                            Testando a fonte IPTV...
-                          </p>
-                        ) : diagnostic ? (
-                          <p
-                            className={
-                              diagnostic.success
-                                ? 'mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100'
-                                : 'mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100'
-                            }
-                          >
-                            {diagnostic.success
-                              ? 'Teste concluído com sucesso'
-                              : 'Teste concluído com alerta'}
-                            {' · '}
-                            {formatDiagnosticHttpStatus(diagnostic)}
-                            {' · '}
-                            {diagnostic.entryCount} entrada(s)
-                          </p>
-                        ) : null}
-
-                        {diagnostic ? (
-                          <div
-                            className={
-                              diagnostic.success
-                                ? 'mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3'
-                                : 'mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3'
-                            }
-                          >
-                            <div className="grid gap-3 text-xs sm:grid-cols-2">
-                              <div>
-                                <p className="font-black text-white">HTTP</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {formatDiagnosticHttpStatus(diagnostic)}
-                                </p>
-                              </div>
-
-                              <div>
-                                <p className="font-black text-white">Content-Type</p>
-                                <p className="mt-1 break-words text-xf-muted">
-                                  {diagnostic.contentType || 'Não informado'}
-                                </p>
-                              </div>
-
-                              <div>
-                                <p className="font-black text-white">Tamanho</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {formatDiagnosticBytes(
-                                    diagnostic.contentLength ?? diagnostic.bytesRead,
-                                  )}
-                                  {diagnostic.wasTruncated ? ' lido parcialmente' : ''}
-                                </p>
-                              </div>
-
-                              <div>
-                                <p className="font-black text-white">Playlist</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {diagnostic.looksLikeM3u ? 'M3U detectada' : 'Não detectada'} ·{' '}
-                                  {diagnostic.entryCount} entrada(s)
-                                </p>
-                              </div>
-                            </div>
-
-                            <p className="mt-3 text-xs text-xf-muted">
-                              EXTINF: {diagnostic.extinfLines} · URLs: {diagnostic.playableUrlLines}
-                            </p>
-
-                            {diagnostic.errorMessage ? (
-                              <p className="mt-3 rounded-lg bg-black/30 px-3 py-2 text-xs font-semibold text-amber-100">
-                                {diagnostic.errorMessage}
-                              </p>
-                            ) : null}
-
-                            {diagnostic.sampleGroups.length > 0 ? (
-                              <p className="mt-3 text-xs text-xf-muted">
-                                Grupos: {diagnostic.sampleGroups.join(', ')}
-                              </p>
-                            ) : null}
-
-                            {diagnostic.sampleChannels.length > 0 ? (
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {diagnostic.sampleChannels.map((channel) => (
-                                  <span
-                                    key={`${channel.name}-${channel.groupTitle ?? 'sem-grupo'}`}
-                                    className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white"
-                                  >
-                                    {channel.groupTitle
-                                      ? `${channel.name} · ${channel.groupTitle}`
-                                      : channel.name}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-
-                        {importResult ? (
-                          <div className="mt-4 rounded-xl border border-sky-500/30 bg-sky-500/10 p-3">
-                            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                              <div>
-                                <p className="text-sm font-black text-sky-100">
-                                  {importResult.skipped
-                                    ? 'Importação ignorada'
-                                    : 'Importação concluída'}
-                                </p>
-                                <p className="mt-1 text-xs text-sky-100/80">
-                                  {importResult.message}
-                                </p>
-                              </div>
-                              <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-black text-white">
-                                Limite: {importResult.limit}
-                              </span>
-                            </div>
-
-                            <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
-                              <div>
-                                <p className="font-black text-white">Lidos</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {importResult.totalParsed}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-black text-white">Importados</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {importResult.totalImported}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-black text-white">Atualizados</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {importResult.totalUpdated}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-black text-white">Ignorados</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {importResult.totalSkipped}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-black text-white">Falhas</p>
-                                <p className="mt-1 text-xf-muted">
-                                  {importResult.totalFailed}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-black text-white">
-                                  Limite aplicado
-                                </p>
-                                <p className="mt-1 text-xf-muted">
-                                  {importResult.wasLimited ? 'Sim' : 'Não'}
-                                </p>
-                              </div>
-                            </div>
-
-                            {importResult.sampleChannels.length > 0 ? (
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {importResult.sampleChannels.map((channel) => (
-                                  <span
-                                    key={`${channel.name}-${channel.groupTitle ?? 'sem-grupo'}`}
-                                    className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white"
-                                  >
-                                    {channel.groupTitle
-                                      ? `${channel.name} · ${channel.groupTitle}`
-                                      : channel.name}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
-                    );
-                  })
+                    ))
                 )}
               </div>
             </article>

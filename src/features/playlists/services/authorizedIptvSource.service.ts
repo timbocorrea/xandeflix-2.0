@@ -2,7 +2,10 @@ import { env } from '@/config/env';
 import { supabase } from '@/lib/supabase/supabaseClient';
 
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
-import type { PlaylistSource } from '../types/playlist';
+import type {
+  PlaylistRuntimeAuthorizationContext,
+  PlaylistSource,
+} from '../types/playlist';
 
 export type AuthorizedIptvSourceMode = 'license' | 'legacy';
 
@@ -70,10 +73,8 @@ async function postAuthorizedIptvSource(input: {
     headers.Authorization = `Bearer ${input.accessToken}`;
   }
 
-  console.log('[XANDEFLIX_LICENSE_AUTH_PAYLOAD]', {
-    deviceIdentifier: input.deviceIdentifier,
+  console.info('[XANDEFLIX_LICENSE_AUTH_REQUEST]', {
     hasLicenseCode: Boolean(input.licenseCode),
-    licenseCode: input.licenseCode,
     hasAccessToken: Boolean(input.accessToken),
   });
 
@@ -94,13 +95,7 @@ async function postAuthorizedIptvSource(input: {
     | null;
 
   if (!response.ok || !isAuthorizedIptvSourceSuccess(data)) {
-    const errorData = data as GetAuthorizedIptvSourceErrorResponse | null;
-
-    throw new Error(
-      errorData?.details ||
-        errorData?.error ||
-        `Não foi possível resolver a fonte IPTV autorizada. HTTP ${response.status}`,
-    );
+    throw new Error('AUTHORIZED_IPTV_SOURCE_UNAVAILABLE');
   }
 
   return {
@@ -165,5 +160,15 @@ export function mapAuthorizedIptvSourceToPlaylistSource(
   return {
     url: authorizedSource.source.url,
     name: authorizedSource.source.name,
+    sourceId: authorizedSource.source.id,
+    sourceType: authorizedSource.source.type,
   };
+}
+
+export function mapAuthorizedIptvSourceToRuntimeAuthorizationContext(
+  authorizedSource: AuthorizedIptvSource,
+): PlaylistRuntimeAuthorizationContext | null {
+  const internalLicenseId = authorizedSource.license?.id.trim() ?? '';
+
+  return internalLicenseId ? { internalLicenseId } : null;
 }

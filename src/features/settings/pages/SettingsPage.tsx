@@ -238,6 +238,31 @@ export default function SettingsPage() {
           </section>
         ) : null}
 
+        {/* TEST-ONLY U2-F2: ponto de entrada para Gate físico. Não publicar sem decisão explícita. */}
+        <section className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6">
+          <p className="text-xs font-bold uppercase tracking-[0.3em] text-amber-200">
+            Validação U2-F2
+          </p>
+
+          <h2 className="mt-3 text-2xl font-black">
+            Fonte IPTV autorizada
+          </h2>
+
+          <p className="mt-3 max-w-3xl text-sm text-amber-100/80">
+            Acesso temporário para validar carregamento, progresso,
+            cancelamento e nova tentativa sem limpar os dados do aplicativo.
+          </p>
+
+          <FocusableButton
+            focusKey="settings-u2f2-direct-source-button"
+            className="mt-5 rounded-xl bg-amber-500 px-6 py-4 text-base font-black text-black transition hover:bg-amber-400"
+            onEnterPress={() => navigate('/playlists/direct-source')}
+            onClick={() => navigate('/playlists/direct-source')}
+          >
+            Abrir teste da fonte autorizada
+          </FocusableButton>
+        </section>
+
         <section className="mt-6 rounded-2xl border border-white/10 bg-black/60 p-6">
           <p className="text-xs font-bold uppercase tracking-[0.3em] text-xf-red">
             URL manual
@@ -270,6 +295,28 @@ export default function SettingsPage() {
               URL protegida: {maskedSourceUrl}
             </p>
           ) : null}
+        </section>
+
+        <section className="mt-6 rounded-2xl border border-white/10 bg-black/60 p-6" data-settings-attribution="tvmaze">
+          <p className="text-xs font-bold uppercase tracking-[0.3em] text-xf-red">
+            Créditos e Licenças
+          </p>
+
+          <h2 className="mt-3 text-2xl font-black">
+            Provedores de Metadados
+          </h2>
+
+          <p className="mt-3 max-w-3xl text-sm text-xf-muted">
+            Dados de séries fornecidos por{' '}
+            <a
+              href="https://www.tvmaze.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xf-red font-bold underline"
+            >
+              TVmaze
+            </a>.
+          </p>
         </section>
       </section>
 

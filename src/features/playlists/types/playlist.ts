@@ -83,4 +83,10 @@ export type PlaylistRuntimeStatus =
 export type PlaylistSource = {
   url: string;
   name?: string;
+  sourceId?: string;
+  sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown';
+};
+
+export type PlaylistRuntimeAuthorizationContext = {
+  internalLicenseId: string;
 };

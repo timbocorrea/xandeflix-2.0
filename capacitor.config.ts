@@ -7,6 +7,10 @@ const config: CapacitorConfig = {
   backgroundColor: '#050505',
   loggingBehavior: 'none',
 
+  android: {
+    allowMixedContent: true,
+  },
+
   plugins: {
     CapacitorHttp: {
       enabled: true,

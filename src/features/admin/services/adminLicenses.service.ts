@@ -1,8 +1,4 @@
 import { supabase } from '../../../lib/supabase/supabaseClient';
-import {
-  areSupabaseContentWritesDisabled,
-  SUPABASE_CONTENT_WRITES_DISABLED_REASON,
-} from '@/config/env';
 
 import type {
   License,
@@ -12,34 +8,6 @@ import type {
   LicenseStatus,
   PlaybackSession,
 } from '../types/admin.types';
-
-async function throwFunctionInvokeError(error: unknown): Promise<never> {
-  const context = (error as { context?: { json?: () => Promise<unknown> } }).context;
-  let structuredError: string | null = null;
-
-  if (context && typeof context.json === 'function') {
-    try {
-      const body = await context.json();
-
-      if (
-        body &&
-        typeof body === 'object' &&
-        'error' in body &&
-        typeof body.error === 'string'
-      ) {
-        structuredError = body.error;
-      }
-    } catch {
-      structuredError = null;
-    }
-  }
-
-  if (structuredError) {
-    throw new Error(structuredError);
-  }
-
-  throw error;
-}
 
 export interface CreateLicenseInput {
   license_code: string;
@@ -115,93 +83,6 @@ export interface UpdateLicenseIptvSourceInput {
 export interface UpdateAdminLicenseIptvSourceResponse {
   ok: boolean;
   source?: LicenseIptvSource;
-  error?: string;
-  details?: string;
-}
-
-export interface LicenseIptvSourceDiagnosticChannel {
-  name: string;
-  groupTitle: string | null;
-}
-
-export interface LicenseIptvSourceDiagnostic {
-  success: boolean;
-  responded: boolean;
-  httpStatus: number | null;
-  httpStatusText: string | null;
-  contentType: string | null;
-  contentLength: number | null;
-  bytesRead: number;
-  wasTruncated: boolean;
-  looksLikeM3u: boolean;
-  startsWithExtM3u: boolean;
-  extinfLines: number;
-  playableUrlLines: number;
-  entryCount: number;
-  sampleGroups: string[];
-  sampleChannels: LicenseIptvSourceDiagnosticChannel[];
-  firstNonEmptyLine: string | null;
-  errorMessage: string | null;
-  testedAt: string;
-}
-
-export interface TestAdminLicenseIptvSourceResponse {
-  ok: boolean;
-  diagnostic?: LicenseIptvSourceDiagnostic;
-  error?: string;
-  details?: string;
-}
-
-export interface ImportLicenseIptvSourceChannelSample {
-  name: string;
-  groupTitle: string | null;
-}
-
-export interface ImportLicenseIptvSourceChannelsResult {
-  skipped?: boolean;
-  reason?: string;
-  fetched: boolean;
-  parsed: boolean;
-  totalParsed: number;
-  totalImported: number;
-  totalUpdated: number;
-  totalReactivated: number;
-  totalSkipped: number;
-  totalFailed: number;
-  totalDeactivatedMissing: number;
-  wasLimited: boolean;
-  limit: number;
-  sampleChannels: ImportLicenseIptvSourceChannelSample[];
-  message: string;
-}
-
-function createSkippedImportLicenseIptvSourceChannelsResult(
-  limit?: number,
-): ImportLicenseIptvSourceChannelsResult {
-  return {
-    skipped: true,
-    reason: SUPABASE_CONTENT_WRITES_DISABLED_REASON,
-    fetched: false,
-    parsed: false,
-    totalParsed: 0,
-    totalImported: 0,
-    totalUpdated: 0,
-    totalReactivated: 0,
-    totalSkipped: 0,
-    totalFailed: 0,
-    totalDeactivatedMissing: 0,
-    wasLimited: false,
-    limit: limit ?? 0,
-    sampleChannels: [],
-    message:
-      'Importacao ignorada: escritas de conteudo no Supabase estao desabilitadas pelo modo local.',
-  };
-}
-
-export interface ImportAdminLicenseIptvSourceChannelsResponse {
-  ok: boolean;
-  sourceId?: string;
-  result?: ImportLicenseIptvSourceChannelsResult;
   error?: string;
   details?: string;
 }
@@ -439,60 +320,6 @@ export async function updateAdminLicenseIptvSource(
   }
 
   return data.source;
-}
-
-export async function testAdminLicenseIptvSource(
-  sourceId: string,
-): Promise<LicenseIptvSourceDiagnostic> {
-  const { data, error } =
-    await supabase.functions.invoke<TestAdminLicenseIptvSourceResponse>(
-      'test-license-iptv-source',
-      {
-        body: {
-          sourceId,
-        },
-      },
-    );
-
-  if (error) {
-    throw error;
-  }
-
-  if (!data?.ok || !data.diagnostic) {
-    throw new Error(data?.error ?? 'TEST_LICENSE_IPTV_SOURCE_FAILED');
-  }
-
-  return data.diagnostic;
-}
-
-export async function importAdminLicenseIptvSourceChannels(
-  sourceId: string,
-  limit?: number,
-): Promise<ImportLicenseIptvSourceChannelsResult> {
-  if (areSupabaseContentWritesDisabled()) {
-    return createSkippedImportLicenseIptvSourceChannelsResult(limit);
-  }
-
-  const { data, error } =
-    await supabase.functions.invoke<ImportAdminLicenseIptvSourceChannelsResponse>(
-      'import-license-iptv-source-channels',
-      {
-        body: {
-          sourceId,
-          ...(limit === undefined ? {} : { limit }),
-        },
-      },
-    );
-
-  if (error) {
-    await throwFunctionInvokeError(error);
-  }
-
-  if (!data?.ok || !data.result) {
-    throw new Error(data?.error ?? 'IMPORT_LICENSE_IPTV_SOURCE_CHANNELS_FAILED');
-  }
-
-  return data.result;
 }
 
 export async function createAdminLicenseDevice(

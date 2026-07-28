@@ -1,5 +1,5 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { fetchPlaylistViaProxy } from '../services/playlistProxy.service';
+import { Capacitor } from '@capacitor/core';
+import { fetchPlaylistTransport } from '../services/playlistTransport.service';
 
 import {
   parseM3uPlaylistProgressive,
@@ -23,7 +23,6 @@ const PROGRESS_LOG_THROTTLE_MS = 1_000;
 const PROGRESS_LOG_BYTES_STEP = 512 * 1024;
 const PROGRESS_LOG_CHANNELS_STEP = 500;
 const PROGRESS_LOG_TAG = 'XANDEFLIX_PLAYLIST_PROGRESS';
-const DEFAULT_NATIVE_TEXT_FALLBACK_MAX_BYTES = 20 * 1024 * 1024;
 
 function getEnvNumber(name: string, fallback: number) {
   const rawValue = (import.meta.env as Record<string, string | undefined>)[name];
@@ -75,14 +74,11 @@ const MAX_PLAYLIST_BYTES = getOptionalEnvNumber(
 const MAX_PLAYLIST_CHANNELS = getOptionalEnvNumber(
   'VITE_DIRECT_SOURCE_MAX_CHANNELS',
 );
-const MAX_NATIVE_TEXT_FALLBACK_BYTES = getEnvNumber(
-  'VITE_DIRECT_SOURCE_NATIVE_TEXT_FALLBACK_MAX_BYTES',
-  DEFAULT_NATIVE_TEXT_FALLBACK_MAX_BYTES,
-);
 
 type LoadDirectSourcePlaylistOptions = {
   onProgress?: (progress: PlaylistLoadProgress) => void;
-  onChannelsBatch?: (channels: IptvChannel[]) => void;
+  onChannelsBatch?: (channels: IptvChannel[]) => void | Promise<void>;
+  signal?: AbortSignal;
 };
 
 type ParsedPlaylistResult = {
@@ -178,35 +174,19 @@ function createTimeoutError() {
 function sanitizeDiagnosticLine(line: string) {
   const trimmedLine = line.trim();
 
-  if (trimmedLine.length > 160) {
-    return `${trimmedLine.slice(0, 160)}...`;
+  if (trimmedLine.toUpperCase() === '#EXTM3U') {
+    return '#EXTM3U';
   }
 
-  return trimmedLine;
-}
-
-function readContentLengthFromHeaders(headers?: Record<string, string>) {
-  if (!headers) {
-    return null;
-  }
-
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() !== 'content-length') {
-      continue;
-    }
-
-    const parsedValue = Number(value);
-
-    if (Number.isFinite(parsedValue) && parsedValue >= 0) {
-      return parsedValue;
-    }
-  }
-
-  return null;
+  return '[PLAYLIST_LINE_REDACTED]';
 }
 
 function readContentLengthFromResponse(response: Response) {
-  const contentLength = Number(response.headers.get('content-length'));
+  const rawContentLength =
+    response.headers.get(
+      'x-xandeflix-upstream-content-length',
+    ) ?? response.headers.get('content-length');
+  const contentLength = Number(rawContentLength);
 
   if (!Number.isFinite(contentLength) || contentLength < 0) {
     return null;
@@ -243,41 +223,31 @@ function ensureLoadedContentWithinSizeLimit(content: string) {
   );
 }
 
-async function withTimeout<T>(promise: Promise<T>) {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+function isAbortError(error: unknown) {
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  );
+}
 
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(createTimeoutError());
-    }, PLAYLIST_REQUEST_TIMEOUT_MS);
+function createCallerAbortError() {
+  return Object.assign(new Error('PLAYLIST_LOAD_ABORTED'), {
+    name: 'AbortError',
   });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
 }
 
 async function runBrowserHeadCheck(
   sourceUrl: string,
   progress: PlaylistLoadProgress,
   reportProgress: (force?: boolean) => void,
+  signal?: AbortSignal,
 ) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    PLAYLIST_REQUEST_TIMEOUT_MS,
-  );
-
   try {
-    const response = await fetch(sourceUrl, {
-      method: 'HEAD',
-      cache: 'no-store',
-      signal: controller.signal,
-    });
+    const response = await fetchResponseWithTimeout(
+      sourceUrl,
+      'HEAD',
+      signal,
+    );
 
     if (!response.ok) {
       return;
@@ -290,76 +260,57 @@ async function runBrowserHeadCheck(
       progress.bytesTotal = contentLength;
       reportProgress(true);
     }
-  } catch {
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw createCallerAbortError();
+    }
+
     // Alguns servidores/CORS bloqueiam HEAD. Nesse caso seguimos para GET.
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
-async function runNativeHeadCheck(
+async function fetchResponseWithTimeout(
   sourceUrl: string,
-  progress: PlaylistLoadProgress,
-  reportProgress: (force?: boolean) => void,
+  method: 'GET' | 'HEAD',
+  signal?: AbortSignal,
 ) {
-  try {
-    const response = await withTimeout(
-      CapacitorHttp.request({
-        url: sourceUrl,
-        method: 'HEAD',
-        headers: {
-          Accept:
-            'application/vnd.apple.mpegurl, application/x-mpegURL, audio/mpegurl, text/plain, */*',
-          'User-Agent': 'Xandeflix/1.0',
-        },
-        connectTimeout: PLAYLIST_REQUEST_TIMEOUT_MS,
-        readTimeout: PLAYLIST_REQUEST_TIMEOUT_MS,
-      }),
-    );
-
-    if (response.status < 200 || response.status >= 300) {
-      return;
-    }
-
-    const contentLength = readContentLengthFromHeaders(response.headers);
-    ensurePlaylistWithinSizeLimit(contentLength);
-
-    if (contentLength !== null) {
-      progress.bytesTotal = contentLength;
-      reportProgress(true);
-    }
-  } catch {
-    // Alguns servidores recusam HEAD. Nesse caso seguimos para GET.
-  }
-}
-
-async function fetchResponseWithTimeout(sourceUrl: string, useProxy = false) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    PLAYLIST_REQUEST_TIMEOUT_MS,
-  );
+  const abortFromCaller = () => controller.abort();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, PLAYLIST_REQUEST_TIMEOUT_MS);
 
   try {
-    if (useProxy) {
-      return await fetchPlaylistViaProxy(sourceUrl);
+    if (signal?.aborted) {
+      controller.abort();
+    } else {
+      signal?.addEventListener('abort', abortFromCaller, {
+        once: true,
+      });
     }
 
-    const response = await fetch(sourceUrl, {
-      method: 'GET',
-      cache: 'no-store',
+    return await fetchPlaylistTransport({
+      sourceUrl,
+      method,
       signal: controller.signal,
     });
-
-    return response;
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw createTimeoutError();
+    if (isAbortError(error)) {
+      if (signal?.aborted) {
+        throw createCallerAbortError();
+      }
+
+      if (timedOut) {
+        throw createTimeoutError();
+      }
     }
 
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
@@ -399,6 +350,7 @@ async function parsePlaylistFromResponse(
     batchSize: PARSE_BATCH_SIZE,
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
     onChannelsBatch: options?.onChannelsBatch,
+    signal: options?.signal,
     onBytesReceived: (bytesReceived) => {
       if (MAX_PLAYLIST_BYTES && bytesReceived > MAX_PLAYLIST_BYTES) {
         throw new Error(
@@ -436,16 +388,6 @@ async function parsePlaylistFromResponse(
     };
   }
 
-  if (Capacitor.isNativePlatform()) {
-    if (
-      contentLength === null ||
-      contentLength > MAX_NATIVE_TEXT_FALLBACK_BYTES
-    ) {
-      throw new Error(
-        `A fonte não liberou stream incremental e o fallback em texto foi bloqueado para evitar travamento/OOM. Limite atual do fallback: ${formatMegabytes(MAX_NATIVE_TEXT_FALLBACK_BYTES)}.`,
-      );
-    }
-  }
 
   const content = await response.text();
   ensureLoadedContentWithinSizeLimit(content);
@@ -464,150 +406,7 @@ async function parsePlaylistFromResponse(
     batchSize: PARSE_BATCH_SIZE,
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
     onChannelsBatch: options?.onChannelsBatch,
-    onProgress: applyParseProgress,
-  };
-
-  const parsedFromText = await parseM3uPlaylistProgressive(content, parseOptions);
-
-  return {
-    channels: parsedFromText.channels,
-    stats: parsedFromText.stats,
-    contentLength: content.length,
-  };
-}
-
-function shouldUseNativeHttpFallback(error: unknown) {
-  if (!Capacitor.isNativePlatform()) {
-    return false;
-  }
-
-  if (error instanceof TypeError) {
-    return true;
-  }
-
-  const errorMessage =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-
-  return (
-    errorMessage.includes('failed to fetch') ||
-    errorMessage.includes('networkerror') ||
-    errorMessage.includes('cors') ||
-    errorMessage.includes('load failed') ||
-    errorMessage.includes('tempo limite')
-  );
-}
-
-function normalizeNativeResponseText(data: unknown) {
-  if (typeof data === 'string') {
-    return data;
-  }
-
-  if (data === null || data === undefined) {
-    return '';
-  }
-
-  if (typeof data === 'object') {
-    return JSON.stringify(data);
-  }
-
-  return String(data);
-}
-
-function ensureNativeFallbackWithinSizeLimit(contentLength: number | null) {
-  ensurePlaylistWithinSizeLimit(contentLength);
-
-  if (contentLength === null || contentLength <= MAX_NATIVE_TEXT_FALLBACK_BYTES) {
-    return;
-  }
-
-  throw new Error(
-    `A playlist é muito grande para o fallback nativo (${formatMegabytes(contentLength)}). Limite atual: ${formatMegabytes(MAX_NATIVE_TEXT_FALLBACK_BYTES)}.`,
-  );
-}
-
-async function loadPlaylistWithNativeHttpFallback(
-  sourceUrl: string,
-  progress: PlaylistLoadProgress,
-  options: LoadDirectSourcePlaylistOptions | undefined,
-  reportProgress: (force?: boolean) => void,
-): Promise<ParsedPlaylistResult> {
-  console.info(
-    PROGRESS_LOG_TAG,
-    JSON.stringify({
-      phase: 'native_http_fallback',
-      platform: Capacitor.getPlatform(),
-      timestamp: new Date().toISOString(),
-    }),
-  );
-
-  progress.phase = 'downloading';
-  reportProgress(true);
-
-  const response = await withTimeout(
-    CapacitorHttp.request({
-      url: sourceUrl,
-      method: 'GET',
-      responseType: 'text' as const,
-      headers: {
-        Accept:
-          'application/vnd.apple.mpegurl, application/x-mpegURL, audio/mpegurl, text/plain, */*',
-        'User-Agent': 'Xandeflix/1.0',
-      },
-      connectTimeout: PLAYLIST_REQUEST_TIMEOUT_MS,
-      readTimeout: PLAYLIST_REQUEST_TIMEOUT_MS,
-    }),
-  );
-
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Falha ao carregar playlist via fallback nativo. HTTP ${response.status}.`);
-  }
-
-  const contentLength = readContentLengthFromHeaders(response.headers);
-  ensureNativeFallbackWithinSizeLimit(contentLength);
-
-  if (contentLength !== null) {
-    progress.bytesTotal = contentLength;
-    reportProgress(true);
-  }
-
-  const content = normalizeNativeResponseText(response.data);
-
-  ensureLoadedContentWithinSizeLimit(content);
-
-  if (content.length > MAX_NATIVE_TEXT_FALLBACK_BYTES) {
-    throw new Error(
-      `A playlist recebida ultrapassou o limite do fallback nativo (${formatMegabytes(MAX_NATIVE_TEXT_FALLBACK_BYTES)}).`,
-    );
-  }
-
-  progress.phase = 'parsing';
-  progress.bytesReceived = content.length;
-
-  if (progress.bytesTotal === null) {
-    progress.bytesTotal = content.length;
-  }
-
-  reportProgress(true);
-
-  const applyParseProgress = (parseProgress: {
-    parsedLines: number;
-    channelsParsed: number;
-    extinfLines: number;
-    playableUrlLines: number;
-  }) => {
-    progress.phase = 'parsing';
-    progress.parsedLines = parseProgress.parsedLines;
-    progress.channelsParsed = parseProgress.channelsParsed;
-    progress.extinfLines = parseProgress.extinfLines;
-    progress.playableUrlLines = parseProgress.playableUrlLines;
-    reportProgress();
-  };
-
-  const parseOptions: ParseM3uPlaylistProgressiveOptions = {
-    maxChannels: MAX_PLAYLIST_CHANNELS,
-    batchSize: PARSE_BATCH_SIZE,
-    yieldEveryLines: PARSE_YIELD_EVERY_LINES,
-    onChannelsBatch: options?.onChannelsBatch,
+    signal: options?.signal,
     onProgress: applyParseProgress,
   };
 
@@ -626,34 +425,30 @@ async function loadAndParsePlaylist(
   options: LoadDirectSourcePlaylistOptions | undefined,
   reportProgress: (force?: boolean) => void,
 ) {
-  if (Capacitor.isNativePlatform()) {
-    await runNativeHeadCheck(sourceUrl, progress, reportProgress);
-  } else {
-    await runBrowserHeadCheck(sourceUrl, progress, reportProgress);
+  if (!Capacitor.isNativePlatform()) {
+    await runBrowserHeadCheck(
+      sourceUrl,
+      progress,
+      reportProgress,
+      options?.signal,
+    );
   }
 
   progress.phase = 'downloading';
   reportProgress(true);
 
-  try {
-    const response = await fetchResponseWithTimeout(
-      sourceUrl,
-      !Capacitor.isNativePlatform(),
-    );
+  const response = await fetchResponseWithTimeout(
+    sourceUrl,
+    'GET',
+    options?.signal,
+  );
 
-    return await parsePlaylistFromResponse(response, progress, options, reportProgress);
-  } catch (error) {
-    if (shouldUseNativeHttpFallback(error)) {
-      return loadPlaylistWithNativeHttpFallback(
-        sourceUrl,
-        progress,
-        options,
-        reportProgress,
-      );
-    }
-
-    throw error;
-  }
+  return parsePlaylistFromResponse(
+    response,
+    progress,
+    options,
+    reportProgress,
+  );
 }
 
 function buildDiagnostics(
@@ -727,12 +522,17 @@ export async function loadDirectSourcePlaylist(
       diagnostics,
     };
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+
     throw new Error(
       error instanceof TypeError
         ? 'Falha ao carregar playlist. Verifique conexão, CORS e disponibilidade da fonte.'
         : error instanceof Error
           ? error.message
           : 'Erro desconhecido ao carregar playlist.',
+      { cause: error },
     );
   }
 }

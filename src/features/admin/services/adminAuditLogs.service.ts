@@ -17,6 +17,7 @@ export interface ListAdminAuditLogsFilters {
   endDate?: string;
   page?: number;
   pageSize?: number;
+  excludeIptvDataPlane?: boolean;
 }
 
 export interface ListAdminAuditLogsResult {
@@ -28,6 +29,12 @@ export interface ListAdminAuditLogsResult {
 
 const DEFAULT_AUDIT_LOGS_PAGE_SIZE = 25;
 const MAX_AUDIT_LOGS_PAGE_SIZE = 100;
+const IPTV_DATA_PLANE_AUDIT_ACTIONS = [
+  'license_iptv_source_channels_imported',
+  'license_iptv_source_tested',
+  'license_channel_manually_activated',
+  'license_channel_manually_deactivated',
+];
 
 function normalizeOptionalFilter(value?: string) {
   const normalized = value?.trim();
@@ -103,6 +110,13 @@ export async function listAdminAuditLogs(
 
   if (endDate) {
     query = query.lte('created_at', endDate);
+  }
+
+  if (filters.excludeIptvDataPlane) {
+    IPTV_DATA_PLANE_AUDIT_ACTIONS.forEach((dataPlaneAction) => {
+      query = query.neq('action', dataPlaneAction);
+    });
+    query = query.neq('entity', 'license_channels_cache');
   }
 
   const { data, error, count } = await query

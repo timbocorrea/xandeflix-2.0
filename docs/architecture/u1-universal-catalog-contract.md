@@ -1,8 +1,23 @@
 # U1 — contrato do catálogo universal
 
+> **STATUS: HISTÓRICO / SUPERSEDIDO**
+>
+> Este documento registra o contrato e o estado arquitetural existentes durante a fase U1.
+> Ele não é mais o contrato normativo do Xandeflix 2.0.
+>
+> O contrato arquitetural vigente e obrigatório está em:
+>
+> `docs/architecture/XANDEFLIX_ARCHITECTURE_CONTRACT.md`
+>
+> Em caso de conflito, o contrato arquitetural vigente prevalece.
+> Referências neste documento a cache remoto, importadores remotos,
+> `license_channels_cache`, fallback legado, reconciliação remota ou
+> transporte backend de catálogo devem ser interpretadas como histórico
+> ou dívida de migração, e não como autorização para novas implementações.
+
 ## Objetivo e limite
 
-A U1 define a versão 1 do contrato canônico, seu inventário legado e métricas agregadas. Ela não conecta o contrato ao runtime, não importa conteúdo e não altera banco, Edge Functions, player ou telas. O rollback é a remoção exclusiva dos arquivos da U1.
+A U1 definiu, naquele estágio do projeto, a versão 1 do contrato do catálogo universal, seu inventário legado e métricas agregadas. Ela não conecta o contrato ao runtime, não importa conteúdo e não altera banco, Edge Functions, player ou telas. O rollback é a remoção exclusiva dos arquivos da U1.
 
 ## Estado atual e fluxos
 
@@ -45,4 +60,4 @@ O item preserva os valores brutos necessários à reclassificação, valores nor
 
 ## Decisões adiadas
 
-U2 deve implementar importação M3U local-first, lotes, categorias dinâmicas e fallback legado. U3 pode tratar Xtream Series/Episodes, reconciliação remota, políticas de retry, evolução de classificação e observabilidade sanitizada. Migração de dados, cardinalidade definitiva, esquema remoto canônico e política de expiração também permanecem adiados.
+À época da U1, a U2 estava planejada para implementar importação M3U local-first, lotes, categorias dinâmicas e coexistência temporária com o fallback legado durante a migração. Essa referência é histórica. O fallback legado não constitui arquitetura final autorizada e está subordinado ao contrato vigente em `docs/architecture/XANDEFLIX_ARCHITECTURE_CONTRACT.md`. U3 poderia tratar Xtream Series/Episodes, reconciliação remota, políticas de retry, evolução de classificação e observabilidade sanitizada. Migração de dados, cardinalidade definitiva, esquema remoto canônico e política de expiração também permaneciam adiados.

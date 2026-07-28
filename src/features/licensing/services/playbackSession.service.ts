@@ -4,17 +4,11 @@ import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActi
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-type StartPlaybackInput = {
-  channelName: string;
-  streamUrl: string;
-};
-
 export type PlaybackSession = {
   id: string;
   licenseId: string;
   licenseDeviceId: string;
   deviceIdentifier: string;
-  channelName: string;
   status: string;
   startedAt: string;
   lastHeartbeatAt: string;
@@ -41,9 +35,7 @@ async function postFunction<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-export async function startPlaybackSession(
-  input: StartPlaybackInput,
-): Promise<PlaybackSession> {
+export async function startPlaybackSession(): Promise<PlaybackSession> {
   const activation = getStoredLicenseActivation();
 
   if (!activation?.licenseCode) {
@@ -58,8 +50,6 @@ export async function startPlaybackSession(
   }>('start-playback-session', {
     licenseCode: activation.licenseCode,
     deviceIdentifier,
-    channelName: input.channelName,
-    streamUrl: input.streamUrl,
   });
 
   return result.session;

@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
@@ -28,6 +29,7 @@ public class MainActivity extends BridgeActivity {
             webView = getBridge().getWebView();
             if (webView != null) {
                 configureFocus(webView);
+                webView.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
             }
         } catch (Exception e) {
             Log.e(TAG, "Falha ao configurar WebView", e);
@@ -35,8 +37,8 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void configureFocus(View view) {
-        view.setFocusable(false);
-        view.setFocusableInTouchMode(false);
+        view.setFocusable(true);
+        view.setFocusableInTouchMode(true);
 
         // Remove o highlight de foco nativo (borda amarela/laranja)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

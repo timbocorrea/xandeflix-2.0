@@ -3,13 +3,9 @@ import {
   getStoredLicenseActivation,
 } from '@/features/licensing/lib/licenseActivationStorage';
 import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
-import { isLiveChannel } from '@/features/playlists/lib/channelClassification';
-import {
-  clearAuthorizedLicenseChannelsCache,
-  listAuthorizedLicenseChannels,
-} from '@/features/playlists/services/authorizedLicenseChannels.service';
 import type {
   IptvChannel,
+  PlaylistRuntimeAuthorizationContext,
   PlaylistRuntimeStatus,
   PlaylistSource,
 } from '@/features/playlists/types/playlist';
@@ -22,8 +18,11 @@ import {
 } from '@/features/catalog/services/homeVod.service';
 import { getCachedSeriesHeroBackdropUrls } from '@/features/catalog/services/seriesHeroTmdb.service';
 import { storeCachedSeriesEpisodes } from '@/features/catalog/services/seriesEpisodesCache.service';
+import { loadLocalCatalogHomeVodSections } from '@/features/localCatalog/readModels/localCatalogHomeVodAdapter.service';
 import { getCatalogCategoryDefinition } from '@/features/catalog/services/catalogCategoryGroups.service';
-import { storeCachedLiveTvCriticalChannels } from '@/features/live/services/liveTvCriticalCache.service';
+import { prepareHomePlaylist } from '@/features/catalog/services/prepareHomePlaylist.service';
+import { clearValidatedLicenseSessionCache } from '@/features/licensing/services/licenseSessionValidation.service';
+import { clearDiscoveryRuntimePresentationState } from '@/features/catalog/services/discoveryRuntimePresentationStore.service';
 
 export type AppBootstrapStepId =
   | 'license'
@@ -46,7 +45,16 @@ export type AppBootstrapProgress = {
 export type AppBootstrapRuntimeInput = {
   currentChannelsCount: number;
   currentStatus: PlaylistRuntimeStatus;
-  loadFromSource: (source: PlaylistSource) => Promise<void>;
+  currentSourceId?: string;
+  loadFromSource: (
+    source: PlaylistSource,
+    authorizationContext?: PlaylistRuntimeAuthorizationContext | null,
+  ) => Promise<void>;
+  loadFromChannels: (input: {
+    source: PlaylistSource;
+    channels: IptvChannel[];
+  }) => void;
+  clearRuntime: () => void;
 };
 
 export type RunAppBootstrapInput = {
@@ -54,11 +62,13 @@ export type RunAppBootstrapInput = {
   deviceIdentifier?: string | null;
   runtime: AppBootstrapRuntimeInput;
   onProgress?: (progress: AppBootstrapProgress) => void;
+  criticalOnly?: boolean;
 };
 
 export type AppBootstrapResult = {
   licenseCode: string;
   deviceIdentifier: string;
+  sourceId: string;
   homeSections: HomeVodSection[];
   livePreviewChannels: IptvChannel[];
   movieItems: HomeVodItem[];
@@ -73,15 +83,13 @@ export type AppBootstrapResult = {
   };
 };
 
-const APP_BOOTSTRAP_STORAGE_KEY = 'xandeflix:critical-bootstrap:v5';
+const APP_BOOTSTRAP_STORAGE_KEY = 'xandeflix:critical-bootstrap:v6';
 const BOOTSTRAP_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const HOME_LIMIT_PER_SECTION = 12;
 const HOME_LAUNCHES_LIMIT = 20;
 const CATEGORY_FIRST_FOLD_LIMIT = 60;
 const SERIES_EPISODES_PRECACHE_LIMIT = 500;
 const SERIES_COLLECTIONS_PRECACHE_LIMIT = 4;
-const LIVE_PREVIEW_PAGE_SIZE = 200;
-const LIVE_PREVIEW_MAX_PAGES = 5;
 const IMAGE_PRELOAD_LIMIT = 60;
 const IMAGE_PRELOAD_CONCURRENCY = 6;
 const IMAGE_PRELOAD_TIMEOUT_MS = 2500;
@@ -89,7 +97,7 @@ const HOME_HERO_PRELOAD_ITEM_LIMIT = 5;
 const SERIES_HERO_PRELOAD_ITEM_LIMIT = 10;
 const SERIES_VISIBLE_CARD_PRELOAD_LIMIT = 15;
 const HOME_VISIBLE_CARD_PRELOAD_LIMIT = 15;
-const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v1:';
+const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v2:';
 const LIVE_TV_CRITICAL_CACHE_STORAGE_KEY = 'xandeflix:live-tv-critical-cache:v5';
 const SERIES_DETAIL_EPISODES_CACHE_PREFIX = 'xandeflix:series-detail-episodes:v1:';
 const CATALOG_WARMUP_STORAGE_PREFIX = 'xandeflix.catalogVodWarmup:';
@@ -197,9 +205,10 @@ function clearClientRuntimeStorage(storage: Storage) {
 
 export function clearClientRuntimeAccessState(): void {
   appBootstrapCache = null;
+  clearValidatedLicenseSessionCache();
   clearStoredLicenseActivation({ markSignedOut: true });
   clearHomeVodCache();
-  clearAuthorizedLicenseChannelsCache();
+  clearDiscoveryRuntimePresentationState();
 
   if (typeof window === 'undefined') {
     return;
@@ -251,19 +260,22 @@ function createStoredBootstrapResult(result: AppBootstrapResult) {
   };
 }
 
-function isBootstrapResultForActivation({
+function isBootstrapResultForScope({
   result,
   licenseCode,
   deviceIdentifier,
+  sourceId,
 }: {
   result: AppBootstrapResult;
   licenseCode: string;
   deviceIdentifier: string;
+  sourceId: string;
 }) {
   return (
     normalizeLicenseCode(result.licenseCode) === normalizeLicenseCode(licenseCode) &&
     normalizeDeviceIdentifier(result.deviceIdentifier) ===
-      normalizeDeviceIdentifier(deviceIdentifier)
+      normalizeDeviceIdentifier(deviceIdentifier) &&
+    result.sourceId?.trim() === sourceId.trim()
   );
 }
 
@@ -313,6 +325,40 @@ function writeStoredBootstrapResult(result: AppBootstrapResult) {
     );
   } catch {
     // Cache persistente é otimização. Falha não deve impedir o app de abrir.
+  }
+}
+
+export function cacheAppBootstrapResultForSession(result: AppBootstrapResult) {
+  appBootstrapCache = {
+    createdAt: Date.now(),
+    result: cloneBootstrapResult(result),
+  };
+  writeStoredBootstrapResult(result);
+}
+
+export function updateAppBootstrapHomeSections(
+  sourceId: string,
+  sections: HomeVodSection[],
+) {
+  const currentCache = appBootstrapCache;
+
+  if (
+    currentCache &&
+    currentCache.result.sourceId.trim() === sourceId.trim() &&
+    sections.length > 0
+  ) {
+    const updatedResult: AppBootstrapResult = {
+      ...currentCache.result,
+      homeSections: sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => ({ ...item })),
+      })),
+    };
+    appBootstrapCache = {
+      createdAt: Date.now(),
+      result: cloneBootstrapResult(updatedResult),
+    };
+    writeStoredBootstrapResult(updatedResult);
   }
 }
 
@@ -475,61 +521,16 @@ async function preloadImages(urls: string[]) {
   };
 }
 
-function isVodGroupTitleForLiveBootstrap(groupTitle?: string | null) {
-  const normalizedGroupTitle = groupTitle
-    ?.normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-
-  if (!normalizedGroupTitle) {
-    return false;
-  }
-
-  return (
-    /^filmes\s*\|/.test(normalizedGroupTitle) ||
-    /^series\s*\|/.test(normalizedGroupTitle)
-  );
-}
-
-function isLiveBootstrapChannel(channel: IptvChannel) {
-  if (isVodGroupTitleForLiveBootstrap(channel.groupTitle)) {
-    return false;
-  }
-
-  if (channel.contentKind) {
-    return channel.contentKind === 'live';
-  }
-
-  return isLiveChannel(channel);
-}
-
-async function loadLivePreviewChannels({
-  licenseCode,
-  deviceIdentifier,
-}: {
-  licenseCode: string;
-  deviceIdentifier: string;
-}) {
-  const channels = await listAuthorizedLicenseChannels({
-    licenseCode,
-    deviceIdentifier,
-    pageSize: LIVE_PREVIEW_PAGE_SIZE,
-    maxPages: LIVE_PREVIEW_MAX_PAGES,
-    contentKind: 'live',
-  });
-
-  return channels.filter(isLiveBootstrapChannel);
-}
-
 async function loadCategoryFirstFold({
   slug,
   licenseCode,
   deviceIdentifier,
+  sourceId,
 }: {
   slug: string;
   licenseCode: string;
   deviceIdentifier: string;
+  sourceId?: string;
 }) {
   const category = getCatalogCategoryDefinition(slug);
 
@@ -540,6 +541,7 @@ async function loadCategoryFirstFold({
   return loadHomeVodCategoryItems({
     licenseCode,
     deviceIdentifier,
+    sourceId,
     groupTitles: category.groupTitles,
     limit: CATEGORY_FIRST_FOLD_LIMIT,
     slug,
@@ -564,10 +566,12 @@ function getSeriesPrecacheIdentity(item: HomeVodItem) {
 async function precacheSeriesEpisodesFromHomeSections({
   licenseCode,
   deviceIdentifier,
+  sourceId,
   homeSections,
 }: {
   licenseCode: string;
   deviceIdentifier: string;
+  sourceId?: string;
   homeSections: HomeVodSection[];
 }) {
   const candidates = homeSections
@@ -599,6 +603,7 @@ async function precacheSeriesEpisodesFromHomeSections({
     const episodes = await loadHomeVodCategoryItems({
       licenseCode,
       deviceIdentifier,
+      sourceId,
       groupTitles: [candidate.groupTitle],
       limit: SERIES_EPISODES_PRECACHE_LIMIT,
     });
@@ -649,6 +654,7 @@ export async function runAppBootstrap({
   deviceIdentifier,
   runtime,
   onProgress,
+  criticalOnly = false,
 }: RunAppBootstrapInput): Promise<AppBootstrapResult> {
   const storedActivation = getStoredLicenseActivation();
   const normalizedLicenseCode = normalizeLicenseCode(
@@ -660,27 +666,67 @@ export async function runAppBootstrap({
       getOrCreateDeviceIdentifier(),
   );
   const warnings: string[] = [];
-  void runtime;
+  let resolvedSourceId = runtime.currentSourceId;
+  const cachedResultBeforePreparation = getCachedAppBootstrapResult();
+
+  if (
+    normalizedLicenseCode &&
+    normalizedDeviceIdentifier &&
+    runtime.currentSourceId?.trim() &&
+    cachedResultBeforePreparation &&
+    isBootstrapResultForScope({
+      result: cachedResultBeforePreparation,
+      licenseCode: normalizedLicenseCode,
+      deviceIdentifier: normalizedDeviceIdentifier,
+      sourceId: runtime.currentSourceId,
+    })
+  ) {
+    emitProgress(onProgress, {
+      stepId: 'done',
+      label: 'Abrindo dados da sessão...',
+      completedSteps: TOTAL_BOOTSTRAP_STEPS,
+      totalSteps: TOTAL_BOOTSTRAP_STEPS,
+    });
+
+    return cachedResultBeforePreparation;
+  }
+
+  if (normalizedLicenseCode && normalizedDeviceIdentifier) {
+    try {
+      const preparedSource = await prepareHomePlaylist({
+        licenseCode: normalizedLicenseCode,
+        deviceIdentifier: normalizedDeviceIdentifier,
+        currentChannelsCount: runtime.currentChannelsCount,
+        currentStatus: runtime.currentStatus,
+        currentSourceId: runtime.currentSourceId,
+        loadFromSource: runtime.loadFromSource,
+        loadFromChannels: runtime.loadFromChannels,
+        clearRuntime: runtime.clearRuntime,
+      });
+
+      resolvedSourceId = preparedSource.sourceId;
+    } catch {
+      warnings.push(
+        'Catálogo local indisponível; a importação direta poderá ser repetida.',
+      );
+      console.warn('[XANDEFLIX_LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED]', {
+        errorCode: 'LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED',
+      });
+    }
+  }
 
   const cachedResult = getCachedAppBootstrapResult();
 
   if (
     cachedResult &&
-    isBootstrapResultForActivation({
+    resolvedSourceId?.trim() &&
+    isBootstrapResultForScope({
       result: cachedResult,
       licenseCode: normalizedLicenseCode,
       deviceIdentifier: normalizedDeviceIdentifier,
+      sourceId: resolvedSourceId,
     })
   ) {
-    storeCachedLiveTvCriticalChannels({
-      licenseCode: normalizedLicenseCode,
-      deviceIdentifier: normalizedDeviceIdentifier,
-      channels: cachedResult.livePreviewChannels,
-    });
-    console.info('[XANDEFLIX_BOOTSTRAP_RESTORE_LIVE_CACHE]', {
-      channels: cachedResult.livePreviewChannels.length,
-    });
-
     emitProgress(onProgress, {
       stepId: 'done',
       label: 'Abrindo dados já preparados...',
@@ -689,6 +735,63 @@ export async function runAppBootstrap({
     });
 
     return cachedResult;
+  }
+
+  if (criticalOnly) {
+    if (!resolvedSourceId?.trim()) {
+      throw new Error('Não foi possível resolver a fonte autorizada deste aparelho.');
+    }
+
+    emitProgress(onProgress, {
+      stepId: 'home',
+      label: 'Carregando início da Home...',
+      completedSteps: 2,
+      totalSteps: TOTAL_BOOTSTRAP_STEPS,
+    });
+
+    const movieGroupTitles =
+      getCatalogCategoryDefinition('filmes')?.groupTitles ?? [];
+    const seriesGroupTitles =
+      getCatalogCategoryDefinition('series')?.groupTitles ?? [];
+
+    const homeSections = await loadLocalCatalogHomeVodSections({
+      sourceId: resolvedSourceId.trim(),
+      maxSections: 4,
+      itemsPerSection: 20,
+      movieGroupTitles: movieGroupTitles.slice(0, 2),
+      seriesGroupTitles: seriesGroupTitles.slice(0, 2),
+      skipTmdbMetadata: true,
+    });
+
+    const criticalResult: AppBootstrapResult = {
+      licenseCode: normalizedLicenseCode,
+      deviceIdentifier: normalizedDeviceIdentifier,
+      sourceId: resolvedSourceId.trim(),
+      homeSections,
+      livePreviewChannels: [],
+      movieItems: [],
+      seriesItems: [],
+      preloadedImages: 0,
+      failedImages: 0,
+      warnings,
+      seriesEpisodesPrecache: {
+        candidates: 0,
+        storedSeriesCount: 0,
+        storedEpisodeCount: 0,
+      },
+    };
+
+    cacheAppBootstrapResultForSession(criticalResult);
+
+    emitProgress(onProgress, {
+      stepId: 'done',
+      label: 'Abrindo catálogo local...',
+      completedSteps: TOTAL_BOOTSTRAP_STEPS,
+      totalSteps: TOTAL_BOOTSTRAP_STEPS,
+      warning: warnings[0],
+    });
+
+    return criticalResult;
   }
 
   emitProgress(onProgress, {
@@ -719,6 +822,7 @@ export async function runAppBootstrap({
   const homeSections = await loadHomeVodSections({
     licenseCode: normalizedLicenseCode,
     deviceIdentifier: normalizedDeviceIdentifier,
+    sourceId: resolvedSourceId,
     limitPerSection: HOME_LIMIT_PER_SECTION,
     launchesLimit: HOME_LAUNCHES_LIMIT,
   });
@@ -730,26 +834,7 @@ export async function runAppBootstrap({
     totalSteps: TOTAL_BOOTSTRAP_STEPS,
   });
 
-  let livePreviewChannels: IptvChannel[] = [];
-
-  try {
-    livePreviewChannels = await loadLivePreviewChannels({
-      licenseCode: normalizedLicenseCode,
-      deviceIdentifier: normalizedDeviceIdentifier,
-    });
-
-    storeCachedLiveTvCriticalChannels({
-      licenseCode: normalizedLicenseCode,
-      deviceIdentifier: normalizedDeviceIdentifier,
-      channels: livePreviewChannels,
-    });
-  } catch (error) {
-    warnings.push(
-      error instanceof Error
-        ? `Live TV será carregada pelo runtime da playlist: ${error.message}`
-        : 'Live TV será carregada pelo runtime da playlist.',
-    );
-  }
+  const livePreviewChannels: IptvChannel[] = [];
 
   emitProgress(onProgress, {
     stepId: 'movies',
@@ -762,6 +847,7 @@ export async function runAppBootstrap({
     slug: 'filmes-lancamentos',
     licenseCode: normalizedLicenseCode,
     deviceIdentifier: normalizedDeviceIdentifier,
+    sourceId: resolvedSourceId,
   });
 
   emitProgress(onProgress, {
@@ -775,6 +861,7 @@ export async function runAppBootstrap({
     slug: 'series',
     licenseCode: normalizedLicenseCode,
     deviceIdentifier: normalizedDeviceIdentifier,
+    sourceId: resolvedSourceId,
   });
 
   writeStoredSeriesLandingItemsForInitialOpen({
@@ -793,6 +880,7 @@ export async function runAppBootstrap({
   void precacheSeriesEpisodesFromHomeSections({
     licenseCode: normalizedLicenseCode,
     deviceIdentifier: normalizedDeviceIdentifier,
+    sourceId: resolvedSourceId,
     homeSections,
   }).then((precacheResult) => {
     console.info('[XANDEFLIX_BOOTSTRAP_SERIES_PRECACHE_BG_SUCCESS]', precacheResult);
@@ -825,7 +913,8 @@ export async function runAppBootstrap({
     ...collectImageUrlsFromChannels(livePreviewChannels),
   ]);
 
-  const imagePreloadResult = await preloadImages(imageUrls);
+  const imagePreloadResult = { preloadedImages: 0, failedImages: 0 };
+  void preloadImages(imageUrls).catch(() => undefined);
 
   if (imagePreloadResult.failedImages > 0) {
     warnings.push(
@@ -836,21 +925,18 @@ export async function runAppBootstrap({
   const result: AppBootstrapResult = {
     licenseCode: normalizedLicenseCode,
     deviceIdentifier: normalizedDeviceIdentifier,
+    sourceId: resolvedSourceId?.trim() ?? '',
     homeSections,
     livePreviewChannels,
     movieItems,
     seriesItems,
-    preloadedImages: imagePreloadResult.preloadedImages,
-    failedImages: imagePreloadResult.failedImages,
+    preloadedImages: 0,
+    failedImages: 0,
     warnings,
     seriesEpisodesPrecache: seriesEpisodesPrecacheResult,
   };
 
-  appBootstrapCache = {
-    createdAt: Date.now(),
-    result: cloneBootstrapResult(result),
-  };
-  writeStoredBootstrapResult(result);
+  cacheAppBootstrapResultForSession(result);
 
   emitProgress(onProgress, {
     stepId: 'done',

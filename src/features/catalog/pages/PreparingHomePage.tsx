@@ -6,58 +6,17 @@ import {
   clearStoredLicenseActivation,
   getStoredLicenseActivation,
 } from '@/features/licensing/lib/licenseActivationStorage';
+import type { AppBootstrapProgress } from '@/features/bootstrap/services/appBootstrap.service';
 import {
-  runAppBootstrap,
-  type AppBootstrapProgress,
-} from '@/features/bootstrap/services/appBootstrap.service';
-import { startCatalogVodWarmup } from '@/features/catalog/services/catalogWarmup.service';
-import {
-  areSupabaseContentWritesDisabled,
-  env,
-  SUPABASE_CONTENT_WRITES_DISABLED_REASON,
-} from '@/config/env';
+  createPreparingHomeOrchestrator,
+  type PreparingStep,
+} from '@/features/catalog/services/preparingHomeOrchestrator.service';
 
-const MIN_PREPARING_HOME_DELAY_MS = 900;
-
-type PreparingStep = 'loading' | 'ready' | 'error';
-
-function runLocalCatalogSmokeTestInBackground() {
-  if (!env.localCatalogSmokeTestEnabled) {
-    return;
-  }
-
-  console.warn('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_START');
-
-  void import('@/features/localCatalog/services/localCatalogSmokeTest.service')
-    .then(({ runLocalCatalogSmokeTest }) => runLocalCatalogSmokeTest())
-    .then((result) => {
-      if (result.ok) {
-        console.warn('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT', JSON.stringify(result));
-      } else {
-        console.error('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT', JSON.stringify(result));
-      }
-    })
-    .catch((error: unknown) => {
-      const errorResult = {
-        ok: false,
-        errorMessage:
-          error instanceof Error
-            ? error.message
-            : 'LOCAL_CATALOG_SMOKE_TEST_IMPORT_FAILED',
-      };
-      console.error('XANDEFLIX_LOCAL_CATALOG_SMOKE_TEST_RESULT', JSON.stringify(errorResult));
-    });
-}
+const MIN_PREPARING_HOME_DELAY_MS = 0;
 
 export function PreparingHomePage() {
   const navigate = useNavigate();
-  const {
-    channels,
-    status,
-    progress,
-    error,
-    loadFromSource,
-  } = usePlaylistRuntime();
+  const runtime = usePlaylistRuntime();
 
   const [step, setStep] = useState<PreparingStep>('loading');
   const [bootstrapProgress, setBootstrapProgress] =
@@ -65,98 +24,39 @@ export function PreparingHomePage() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [bootstrapWarning, setBootstrapWarning] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
-  const hasStartedPreparingRef = useRef(false);
+
+  const runtimeRef = useRef(runtime);
+  useEffect(() => {
+    runtimeRef.current = runtime;
+  }, [runtime]);
 
   useEffect(() => {
-    let isActive = true;
-
-    if (hasStartedPreparingRef.current) {
-      return () => {
-        isActive = false;
-      };
-    }
-
-    hasStartedPreparingRef.current = true;
-    setStep('loading');
-    setLocalError(null);
-    setBootstrapWarning(null);
-    setBootstrapProgress(null);
-
-    const storedActivation = getStoredLicenseActivation();
-
-    if (!storedActivation?.licenseCode || !storedActivation.deviceIdentifier) {
-      setLocalError('Este aparelho precisa ser ativado antes de carregar a Home.');
-      setStep('error');
-
-      window.setTimeout(() => {
-        navigate('/settings', { replace: true });
-      }, 1800);
-
-      return () => {
-        isActive = false;
-      };
-    }
-
-    void runAppBootstrap({
-      licenseCode: storedActivation.licenseCode,
-      deviceIdentifier: storedActivation.deviceIdentifier,
+    const orchestrator = createPreparingHomeOrchestrator({
+      getStoredActivation: getStoredLicenseActivation,
+      clearActivation: clearStoredLicenseActivation,
+      navigate,
       runtime: {
-        currentChannelsCount: channels.length,
-        currentStatus: status,
-        loadFromSource,
+        currentChannelsCount: runtimeRef.current.channels.length,
+        currentStatus: runtimeRef.current.status,
+        currentSourceId: runtimeRef.current.source?.sourceId,
+        loadFromSource: (...args) => runtimeRef.current.loadFromSource(...args),
+        loadFromChannels: (...args) => runtimeRef.current.loadFromChannels(...args),
+        clearRuntime: () => runtimeRef.current.clearRuntime(),
       },
-      onProgress: (nextProgress) => {
-        if (!isActive) {
-          return;
-        }
-
-        setBootstrapProgress(nextProgress);
-
-        if (nextProgress.warning) {
-          setBootstrapWarning(nextProgress.warning);
-        }
+      onStateChange: (state) => {
+        setStep(state.step);
+        setBootstrapProgress(state.bootstrapProgress);
+        setLocalError(state.localError);
+        setBootstrapWarning(state.bootstrapWarning);
       },
-    })
-      .then((result) => {
-        if (!isActive) {
-          return;
-        }
+    });
 
-        setBootstrapWarning(result.warnings[0] ?? null);
-
-        // Chamar warmup do catálogo VOD de forma não bloqueante em background
-        if (areSupabaseContentWritesDisabled()) {
-          console.info('[XANDEFLIX_BOOTSTRAP_WARMUP_SKIPPED]', {
-            reason: SUPABASE_CONTENT_WRITES_DISABLED_REASON,
-          });
-        } else {
-          void startCatalogVodWarmup({
-            licenseCode: result.licenseCode,
-            deviceIdentifier: result.deviceIdentifier,
-          });
-        }
-
-        runLocalCatalogSmokeTestInBackground();
-
-        setStep('ready');
-      })
-      .catch((prepareError) => {
-        if (!isActive) {
-          return;
-        }
-
-        setLocalError(
-          prepareError instanceof Error
-            ? prepareError.message
-            : 'Não foi possível preparar os dados iniciais do app.',
-        );
-        setStep('error');
-      });
+    orchestrator.startAttempt();
 
     return () => {
-      isActive = false;
+      orchestrator.unmount();
     };
-  }, [channels.length, loadFromSource, navigate, retryKey, status]);
+  }, [navigate, retryKey]);
 
   useEffect(() => {
     if (step !== 'ready') {
@@ -171,7 +71,6 @@ export function PreparingHomePage() {
   }, [navigate, step]);
 
   function handleRetry() {
-    hasStartedPreparingRef.current = false;
     setLocalError(null);
     setBootstrapWarning(null);
     setBootstrapProgress(null);
@@ -186,19 +85,19 @@ export function PreparingHomePage() {
 
   const progressLabel = useMemo(() => {
     if (step === 'error') {
-      return localError ?? error ?? 'Falha ao preparar a Home.';
+      return localError ?? runtime.error ?? 'Falha ao preparar a Home.';
     }
 
     if (bootstrapProgress?.stepId === 'playlist') {
-      if (progress?.phase === 'downloading') {
+      if (runtime.progress?.phase === 'downloading') {
         return 'Baixando lista autorizada...';
       }
 
-      if (progress?.phase === 'parsing') {
-        return `Organizando canais e catálogo (${progress.channelsParsed} itens processados)...`;
+      if (runtime.progress?.phase === 'parsing') {
+        return `Organizando canais e catálogo (${runtime.progress.channelsParsed} itens processados)...`;
       }
 
-      if (progress?.phase === 'finalizing') {
+      if (runtime.progress?.phase === 'finalizing') {
         return 'Finalizando lista autorizada...';
       }
     }
@@ -208,7 +107,7 @@ export function PreparingHomePage() {
     }
 
     return bootstrapProgress?.label ?? 'Iniciando preparação...';
-  }, [bootstrapProgress, error, localError, progress, step]);
+  }, [bootstrapProgress, runtime.error, runtime.progress, localError, step]);
 
   const progressPercent = useMemo(() => {
     if (step === 'ready') {

@@ -6,8 +6,6 @@ type StartPlaybackSessionRequest = {
   licenseCode?: string;
   deviceIdentifier?: string;
   iptvSourceId?: string;
-  channelName?: string;
-  streamUrl?: string;
 };
 
 const corsHeaders = {
@@ -69,8 +67,6 @@ Deno.serve(async (request) => {
     const licenseCode = normalizeLicenseCode(payload.licenseCode);
     const deviceIdentifier = normalizeText(payload.deviceIdentifier);
     const iptvSourceId = normalizeText(payload.iptvSourceId);
-    const channelName = normalizeText(payload.channelName);
-    const streamUrl = normalizeText(payload.streamUrl);
 
     if (!licenseCode || !deviceIdentifier) {
       return jsonResponse({ ok: false, error: 'INVALID_PAYLOAD' }, 400);
@@ -165,14 +161,12 @@ Deno.serve(async (request) => {
         license_device_id: device.id,
         iptv_source_id: iptvSourceId,
         device_identifier: deviceIdentifier,
-        channel_name: channelName,
-        stream_url: streamUrl,
         status: 'active',
         started_at: nowIso,
         last_heartbeat_at: nowIso,
         expires_at: expiresAt,
       })
-      .select('id, license_id, license_device_id, device_identifier, channel_name, status, started_at, last_heartbeat_at, expires_at')
+      .select('id, license_id, license_device_id, device_identifier, status, started_at, last_heartbeat_at, expires_at')
       .single();
 
     if (sessionError) {
@@ -186,7 +180,6 @@ Deno.serve(async (request) => {
         licenseId: session.license_id,
         licenseDeviceId: session.license_device_id,
         deviceIdentifier: session.device_identifier,
-        channelName: session.channel_name,
         status: session.status,
         startedAt: session.started_at,
         lastHeartbeatAt: session.last_heartbeat_at,

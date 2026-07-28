@@ -19,6 +19,7 @@ import {
 import {
   getAuthorizedIptvSource,
   mapAuthorizedIptvSourceToPlaylistSource,
+  mapAuthorizedIptvSourceToRuntimeAuthorizationContext,
 } from '../services/authorizedIptvSource.service';
 import { usePlaylistRuntime } from '../providers/PlaylistRuntimeProvider';
 import type { IptvChannel } from '../types/playlist';
@@ -111,6 +112,8 @@ function DirectSourcePlaylistContent() {
     const nextDeviceIdentifier = getOrCreateDeviceIdentifier();
     const storedActivation = getStoredLicenseActivation();
 
+    // Existing initialization flow is intentionally preserved in this subcycle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDeviceIdentifier(nextDeviceIdentifier);
 
     if (storedActivation?.licenseCode) {
@@ -180,11 +183,6 @@ function DirectSourcePlaylistContent() {
         const deviceIdentifier = getOrCreateDeviceIdentifier();
         const storedActivation = getStoredLicenseActivation();
 
-        console.log('[XANDEFLIX_LICENSE_RUNTIME]', {
-          stateLicenseCode: licenseCode,
-          storedLicenseCode: storedActivation?.licenseCode,
-        });
-
         const resolvedLicenseCode =
           storedActivation?.licenseCode?.trim() ||
           licenseCode?.trim();
@@ -194,9 +192,11 @@ function DirectSourcePlaylistContent() {
           licenseCode: resolvedLicenseCode,
         });
         const playlistSource = mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
+        const authorizationContext =
+          mapAuthorizedIptvSourceToRuntimeAuthorizationContext(authorizedSource);
 
         setSourceUrl(playlistSource.url);
-        await loadFromSource(playlistSource);
+        await loadFromSource(playlistSource, authorizationContext);
       } catch (loadError) {
         setAuthorizedLoadError(
           loadError instanceof Error
@@ -205,7 +205,7 @@ function DirectSourcePlaylistContent() {
         );
       }
     })();
-  }, [loadFromSource]);
+  }, [licenseCode, loadFromSource]);
 
   const handleUrlInputArrowPress = useCallback((direction: string) => {
     if (direction === 'down') {
@@ -300,6 +300,8 @@ function DirectSourcePlaylistContent() {
       return;
     }
 
+    // Existing progress display flow is intentionally preserved in this subcycle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLastProgressAt(new Date().toLocaleTimeString());
   }, [status, progress]);
 
@@ -308,6 +310,8 @@ function DirectSourcePlaylistContent() {
       return;
     }
 
+    // Existing progress display flow is intentionally preserved in this subcycle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLastProgressAt(null);
   }, [status]);
 
@@ -455,7 +459,7 @@ function DirectSourcePlaylistContent() {
               onClick={clearRuntime}
               onArrowPress={handleTopButtonsArrowPress}
             >
-              Limpar memória
+              {status === 'loading' ? 'Cancelar carregamento' : 'Limpar memória'}
             </FocusableButton>
 
             <FocusableButton

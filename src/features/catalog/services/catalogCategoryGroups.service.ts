@@ -1,3 +1,9 @@
+import {
+  dedupeLocalCatalogGroupTitles,
+  normalizeLocalCatalogGroupIdentity,
+  slugifyLocalCatalogGroupIdentity,
+} from '@/features/localCatalog/services/localCatalogGroupIdentity.service';
+
 export type CatalogCategoryDefinition = {
   slug: string;
   title: string;
@@ -235,20 +241,63 @@ export function getCategoryRouteByHomeSectionId(sectionId: string) {
 }
 
 export function getSlugByGroupTitle(groupTitle: string): string {
-  const definition = CATALOG_CATEGORY_DEFINITIONS.find((cat) =>
-    cat.groupTitles.some(
-      (gt) => gt.toLowerCase().trim() === groupTitle.toLowerCase().trim(),
-    ),
+  const normalizedGroupTitle = normalizeLocalCatalogGroupIdentity(groupTitle);
+  const definition = CATALOG_CATEGORY_DEFINITIONS.find(
+    (cat) =>
+      cat.slug !== 'filmes' &&
+      cat.slug !== 'series' &&
+      cat.groupTitles.some(
+        (gt) => normalizeLocalCatalogGroupIdentity(gt) === normalizedGroupTitle,
+      ),
   );
 
   if (definition) {
     return definition.slug;
   }
 
-  return groupTitle
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gi, '-');
+  return slugifyLocalCatalogGroupIdentity(groupTitle);
+}
+
+export function getExactCategoryRouteByGroupTitle(
+  groupTitle: string,
+  kind?: 'movie' | 'series' | 'unknown',
+) {
+  const normalizedGroupTitle = normalizeLocalCatalogGroupIdentity(groupTitle);
+
+  if (!normalizedGroupTitle) {
+    return null;
+  }
+
+  const exactDefinition = CATALOG_CATEGORY_DEFINITIONS.find(
+    (definition) =>
+      definition.slug !== 'filmes' &&
+      definition.slug !== 'series' &&
+      definition.groupTitles.some(
+        (title) =>
+          normalizeLocalCatalogGroupIdentity(title) === normalizedGroupTitle,
+      ),
+  );
+
+  if (exactDefinition) {
+    return `/category/${exactDefinition.slug}`;
+  }
+
+  const params = new URLSearchParams({ groupTitle });
+
+  if (kind === 'series') {
+    return `/category/series-group?${params.toString()}`;
+  }
+
+  const slug = slugifyLocalCatalogGroupIdentity(groupTitle);
+
+  return slug ? `/category/${slug}` : null;
+}
+
+export function dedupeCatalogCategoryDefinitionGroups(
+  definition: CatalogCategoryDefinition,
+): CatalogCategoryDefinition {
+  return {
+    ...definition,
+    groupTitles: dedupeLocalCatalogGroupTitles(definition.groupTitles),
+  };
 }

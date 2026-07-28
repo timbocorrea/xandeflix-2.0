@@ -1,11 +1,12 @@
 import type { HomeVodItem } from './homeVod.service';
 
-const SERIES_DETAIL_EPISODES_CACHE_PREFIX = 'xandeflix:series-detail-episodes:v1:';
-const SERIES_DETAIL_EPISODES_CACHE_LIMIT = 500;
+const SERIES_DETAIL_EPISODES_CACHE_PREFIX = 'xandeflix:series-detail-episodes:v2:';
 
 export type SeriesEpisodesCacheInput = {
   licenseCode: string;
   deviceIdentifier: string;
+  sourceId?: string | null;
+  seriesKey?: string | null;
   groupTitles: string[];
   tmdbId?: string | null;
   tmdbTitle?: string | null;
@@ -23,6 +24,7 @@ function normalizeSeriesCacheKey(value: string | null | undefined) {
 
 export function getSeriesEpisodesCacheKey(input: SeriesEpisodesCacheInput) {
   const identity =
+    normalizeSeriesCacheKey(input.seriesKey) ||
     normalizeSeriesCacheKey(input.tmdbId) ||
     normalizeSeriesCacheKey(input.tmdbTitle);
 
@@ -40,9 +42,28 @@ export function getSeriesEpisodesCacheKey(input: SeriesEpisodesCacheInput) {
     SERIES_DETAIL_EPISODES_CACHE_PREFIX,
     normalizeSeriesCacheKey(input.licenseCode),
     normalizeSeriesCacheKey(input.deviceIdentifier),
+    normalizeSeriesCacheKey(input.sourceId) || 'source-unavailable',
     groupsKey,
     identity,
   ].join(':');
+}
+
+function isCachedSeriesEpisode(item: unknown): item is HomeVodItem {
+  if (!item || typeof item !== 'object') {
+    return false;
+  }
+
+  const candidate = item as Partial<HomeVodItem>;
+
+  return (
+    typeof candidate.id === 'string' &&
+    Boolean(candidate.id.trim()) &&
+    typeof candidate.title === 'string' &&
+    Boolean(candidate.title.trim()) &&
+    typeof candidate.streamUrl === 'string' &&
+    Boolean(candidate.streamUrl.trim()) &&
+    candidate.isSeriesCollection !== true
+  );
 }
 
 export function readCachedSeriesEpisodes(input: SeriesEpisodesCacheInput) {
@@ -69,7 +90,7 @@ export function readCachedSeriesEpisodes(input: SeriesEpisodesCacheInput) {
       return [];
     }
 
-    return parsed as HomeVodItem[];
+    return parsed.filter(isCachedSeriesEpisode);
   } catch {
     return [];
   }
@@ -92,7 +113,7 @@ export function storeCachedSeriesEpisodes(
 
     window.localStorage.setItem(
       cacheKey,
-      JSON.stringify(items.slice(0, SERIES_DETAIL_EPISODES_CACHE_LIMIT)),
+      JSON.stringify(items.filter(isCachedSeriesEpisode)),
     );
   } catch {
     // Cache best-effort. Falha nao deve bloquear a navegacao.

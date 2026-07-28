@@ -7,9 +7,13 @@ import type {
 } from './catalogRepository.types';
 
 function toStorageListInput(
-  input: CatalogRepositoryListItemsInput = {},
+  input: CatalogRepositoryListItemsInput,
 ): ListLocalCatalogItemsInput {
   const storageInput: ListLocalCatalogItemsInput = {};
+
+  if (input.sourceId !== undefined) {
+    storageInput.sourceId = input.sourceId;
+  }
 
   if (input.contentKind !== undefined) {
     storageInput.contentKind = input.contentKind;
@@ -17,6 +21,14 @@ function toStorageListInput(
 
   if (input.groupTitle !== undefined && input.groupTitle !== null) {
     storageInput.groupTitle = input.groupTitle;
+  }
+
+  if (input.normalizedGroup !== undefined && input.normalizedGroup !== null) {
+    storageInput.normalizedGroup = input.normalizedGroup;
+  }
+
+  if (input.uncategorizedOnly !== undefined) {
+    storageInput.uncategorizedOnly = input.uncategorizedOnly;
   }
 
   if (input.limit !== undefined) {
@@ -36,7 +48,11 @@ export function createLocalCatalogRepository(
   return {
     kind: 'local-indexeddb',
     getStats: () => storage.getStats(),
-    listItems: (input = {}) => storage.listItems(toStorageListInput(input)),
+    listItems: (input) => storage.listItems(toStorageListInput(input)),
+    getTmdbMetadataBySourceItemIds: (sourceItemIds) =>
+      storage.getTmdbMetadataBySourceItemIds(sourceItemIds),
+    getImportMetadata: (sourceId) => storage.getImportMetadata(sourceId),
+    listCategories: (input) => storage.listCategories(input),
   };
 }
 
