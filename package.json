@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "governance:check": "node scripts/guardrails/check-data-governance.mjs",
+    "governance:test": "node scripts/guardrails/check-data-governance.test.mjs",
     "postinstall": "node scripts/patch-capacitor-java17.cjs"
   },
   "dependencies": {
