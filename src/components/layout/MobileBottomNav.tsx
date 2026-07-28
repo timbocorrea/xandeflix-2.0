@@ -2,6 +2,7 @@ import { Home, Search, Settings, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { LOCAL_CATALOG_SEARCH_ROUTE } from '@/features/localCatalog/lib/localCatalogSearchUiContract';
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 
@@ -16,6 +17,7 @@ const mobileItems = [
     label: 'Buscar',
     icon: Search,
     navId: 'mobile-search',
+    path: LOCAL_CATALOG_SEARCH_ROUTE,
   },
   {
     label: 'Ajustes',

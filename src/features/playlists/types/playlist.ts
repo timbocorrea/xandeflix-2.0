@@ -86,3 +86,7 @@ export type PlaylistSource = {
   sourceId?: string;
   sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown';
 };
+
+export type PlaylistRuntimeAuthorizationContext = {
+  internalLicenseId: string;
+};

@@ -5,6 +5,7 @@ import type {
   LocalCatalogImportMetadata,
   LocalCatalogItem,
   LocalCatalogStats,
+  LocalTmdbMetadata,
 } from '../types/localCatalog.types';
 
 export type LocalCatalogStorage = {
@@ -15,6 +16,9 @@ export type LocalCatalogStorage = {
     contentKind?: LocalCatalogContentKind;
   }): Promise<LocalCatalogCategory[]>;
   listItems(input?: ListLocalCatalogItemsInput): Promise<LocalCatalogItem[]>;
+  getTmdbMetadataBySourceItemIds(
+    sourceItemIds: string[],
+  ): Promise<Map<string, LocalTmdbMetadata>>;
   putItems(items: LocalCatalogItem[]): Promise<void>;
   deleteItems(itemIds: string[]): Promise<void>;
   clear(): Promise<void>;

@@ -11,13 +11,11 @@ const adminNavItems = [
   { label: 'Licenças', to: '/admin/licenses' },
   { label: 'Sessões', to: '/admin/playback-sessions' },
   { label: 'Fontes IPTV', to: '/admin/iptv-sources' },
-  { label: 'Canais', to: '/admin/license-channels' },
 ];
 
 const superAdminNavItems = [
   { label: 'Instalações', to: '/admin/app-installations' },
   { label: 'Administradores', to: '/admin/admin-users' },
-  { label: 'Importações IPTV', to: '/admin/license-imports' },
   { label: 'Auditoria', to: '/admin/audit-logs' },
 ];
 

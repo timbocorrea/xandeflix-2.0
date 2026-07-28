@@ -14,12 +14,10 @@ import { AdminClientsPage } from '../features/admin/pages/AdminClientsPage';
 import { AdminDevicesPage } from '../features/admin/pages/AdminDevicesPage';
 import { AdminIptvSourcesPage } from '../features/admin/pages/AdminIptvSourcesPage';
 import { AdminLicensesPage } from '../features/admin/pages/AdminLicensesPage';
-import { AdminLicenseChannelsCachePage } from '../features/admin/pages/AdminLicenseChannelsCachePage';
 import { AdminPlaybackSessionsPage } from '../features/admin/pages/AdminPlaybackSessionsPage';
 import { AdminAppInstallationsPage } from '../features/admin/pages/AdminAppInstallationsPage';
 import { AdminAppInstallationDetailsPage } from '../features/admin/pages/AdminAppInstallationDetailsPage';
 import { AdminAuditLogsPage } from '../features/admin/pages/AdminAuditLogsPage';
-import { AdminLicenseImportsPage } from '../features/admin/pages/AdminLicenseImportsPage';
 import { AdminUsersPage } from '../features/admin/pages/AdminUsersPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { AdminLoginPage } from '../features/admin/pages/AdminLoginPage';
@@ -32,8 +30,9 @@ import { CatalogLaunchesPage } from '../features/catalog/pages/CatalogLaunchesPa
 import { CatalogCategoryPage } from '../features/catalog/pages/CatalogCategoryPage';
 import { PreparingHomePage } from '../features/catalog/pages/PreparingHomePage';
 import { clearClientRuntimeAccessState } from '../features/bootstrap/services/appBootstrap.service';
-import { PlaylistRuntimeProvider } from '../features/playlists/providers/PlaylistRuntimeProvider';
+import { PlaylistRuntimeProvider, usePlaylistRuntime } from '../features/playlists/providers/PlaylistRuntimeProvider';
 import { env } from '../config/env';
+import { LOCAL_CATALOG_SEARCH_ROUTE } from '../features/localCatalog/lib/localCatalogSearchUiContract';
 // Warmup VOD pausado temporariamente para validar D-pad sem carga em background.
 
 const LocalCatalogSmokeTestPage = lazy(
@@ -56,7 +55,12 @@ const SettingsPage = lazy(
   () => import('../features/settings/pages/SettingsPage'),
 );
 
+const LocalCatalogSearchPage = lazy(
+  () => import('../features/localCatalog/pages/LocalCatalogSearchPage'),
+);
+
 function LicenseRoute({ children }: { children: ReactNode }) {
+  const { source: playlistSource } = usePlaylistRuntime();
   const storedActivation = getStoredLicenseActivation();
   const licenseCode = storedActivation?.licenseCode?.trim() ?? '';
   const deviceIdentifier = storedActivation?.deviceIdentifier?.trim() ?? '';
@@ -112,7 +116,11 @@ function LicenseRoute({ children }: { children: ReactNode }) {
     );
   }
 
-  return children;
+  if (playlistSource?.sourceId) {
+    return children;
+  }
+
+  return <Navigate to="/preparing-home" replace />;
 }
 
 function AdminRoute({ children }: { children: ReactNode }) {
@@ -286,15 +294,6 @@ export function AppRoutes() {
             />
 
             <Route
-              path="/admin/license-channels"
-              element={
-                <AdminRoute>
-                  <AdminLicenseChannelsCachePage />
-                </AdminRoute>
-              }
-            />
-
-            <Route
               path="/admin/iptv-sources"
               element={
                 <AdminRoute>
@@ -337,17 +336,6 @@ export function AppRoutes() {
             />
 
             <Route
-              path="/admin/license-imports"
-              element={
-                <AdminRoute>
-                  <SuperAdminOnly>
-                    <AdminLicenseImportsPage />
-                  </SuperAdminOnly>
-                </AdminRoute>
-              }
-            />
-
-            <Route
               path="/admin/audit-logs"
               element={
                 <AdminRoute>
@@ -355,6 +343,15 @@ export function AppRoutes() {
                     <AdminAuditLogsPage />
                   </SuperAdminOnly>
                 </AdminRoute>
+              }
+            />
+
+            <Route
+              path={LOCAL_CATALOG_SEARCH_ROUTE}
+              element={
+                <LicenseRoute>
+                  <LocalCatalogSearchPage />
+                </LicenseRoute>
               }
             />
 

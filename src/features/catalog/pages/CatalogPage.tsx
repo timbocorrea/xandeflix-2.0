@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Clapperboard, MonitorPlay, Tv } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
@@ -22,6 +22,22 @@ import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
 import { getCachedAppBootstrapResult } from '@/features/bootstrap/services/appBootstrap.service';
 import { getSlugByGroupTitle } from '@/features/catalog/services/catalogCategoryGroups.service';
+import {
+  executeHomeDiscoveryPresentation,
+  overlayStoredHomeDiscoverySnapshots,
+} from '@/features/catalog/services/homeDiscoveryPresentation.service';
+import {
+  getHorizontalHeroArtworkCandidateRecords,
+  resolveHomeHeroArtworkUrl,
+} from '@/features/catalog/services/heroArtworkPolicy.service';
+import {
+  getOrCreateDiscoveryRuntimeContext,
+  markDiscoveryRuntimeSurfaceInteracted,
+  updateDiscoveryRuntimeSnapshotItemPayloads,
+  type DiscoveryRuntimeAccessScope,
+} from '@/features/catalog/services/discoveryRuntimePresentationStore.service';
+import { enrichMovieHeroItems } from '@/features/catalog/services/movieHeroMetadata.service';
+import { enrichSeriesHeroHighlights } from '@/features/catalog/services/seriesHeroTmdb.service';
 
 import { catalogSections } from '../data/catalogSections';
 import {
@@ -29,15 +45,13 @@ import {
   loadHomeVodSections,
   type LoadHomeVodInput,
   type HomeVodSection,
+  type HomeVodItem,
 } from '../services/homeVod.service';
-import { CATALOG_WARMUP_REFRESH_EVENT } from '../services/catalogWarmup.service';
 import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
-
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 const SECTION_LOADING_CARD_COUNT = 4;
-const WARMUP_HOME_REFRESH_DEBOUNCE_MS = 2000;
 const TOP_CATEGORY_ITEMS = [
   { label: 'Ao Vivo', path: '/live', Icon: Tv },
   { label: 'Filmes', path: '/category/filmes', Icon: Clapperboard },
@@ -55,6 +69,7 @@ type CatalogPageItem = (typeof catalogSections)[number]['items'][number] & {
   tmdbReleaseYear?: string;
   seriesKey?: string;
   episodeCount?: number;
+  artworkCandidates?: HomeVodItem['artworkCandidates'];
   isSeriesCollection?: boolean;
 };
 
@@ -108,6 +123,7 @@ function mapHomeVodSectionsToCatalogSections(
       subtitle: item.subtitle,
       posterUrl: item.posterUrl,
       backdropUrl: item.backdropUrl,
+      artworkCandidates: item.artworkCandidates,
       overview: item.overview,
       streamUrl: item.streamUrl,
       groupTitle: item.groupTitle,
@@ -125,6 +141,73 @@ function mapHomeVodSectionsToCatalogSections(
 
 function getHomeVodLimitPerSection(isTv: boolean) {
   return isTv ? 15 : 20;
+}
+
+async function enrichHomeVodSectionsInBackground(
+  sections: HomeVodSection[],
+  sourceId: string | undefined,
+  scope: DiscoveryRuntimeAccessScope | null,
+  onEnriched: (enrichedSections: HomeVodSection[]) => void,
+) {
+  if (!sections || sections.length === 0 || !sourceId?.trim()) {
+    return;
+  }
+
+  const allItems = sections.flatMap((sec) => sec.items);
+  if (allItems.length === 0) {
+    return;
+  }
+
+  const movieCandidates = allItems.filter(
+    (item) => item.kind === 'movie' && (!item.backdropUrl || !item.overview),
+  );
+  const seriesCandidates = allItems.filter(
+    (item) => item.kind === 'series' && (!item.backdropUrl || !item.overview),
+  );
+
+  if (movieCandidates.length === 0 && seriesCandidates.length === 0) {
+    return;
+  }
+
+  try {
+    const [enrichedMovies, enrichedSeries] = await Promise.all([
+      movieCandidates.length > 0
+        ? enrichMovieHeroItems(movieCandidates, { sourceId, limit: 12 }).catch(
+            () => movieCandidates,
+          )
+        : Promise.resolve([]),
+      seriesCandidates.length > 0
+        ? enrichSeriesHeroHighlights(seriesCandidates, { sourceId }).catch(
+            () => seriesCandidates,
+          )
+        : Promise.resolve([]),
+    ]);
+
+    const enrichedMap = new Map<string, HomeVodItem>();
+    for (const item of [...enrichedMovies, ...enrichedSeries]) {
+      enrichedMap.set(item.id, item);
+    }
+
+    if (enrichedMap.size === 0) {
+      return;
+    }
+
+    const updatedSections = sections.map((sec) => ({
+      ...sec,
+      items: sec.items.map((item) => enrichedMap.get(item.id) ?? item),
+    }));
+
+    if (scope) {
+      updateDiscoveryRuntimeSnapshotItemPayloads(
+        scope,
+        Array.from(enrichedMap.values()),
+      );
+    }
+
+    onEnriched(updatedSections);
+  } catch (err) {
+    console.warn('[XANDEFLIX_HOME_BACKGROUND_ENRICHMENT_FAILED]', err);
+  }
 }
 
 function normalizeHomeSectionTitle(value?: string | null) {
@@ -180,6 +263,8 @@ function buildMobileHomeHeroMetadata(item?: CatalogPageItem) {
 
 function createHomeVodLoadInput(
   limitPerSection: number,
+  sourceId?: string,
+  sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown',
 ): LoadHomeVodInput | null {
   const storedActivation = getStoredLicenseActivation();
 
@@ -192,13 +277,19 @@ function createHomeVodLoadInput(
   return {
     licenseCode,
     deviceIdentifier: storedActivation.deviceIdentifier,
+    sourceId,
+    sourceType,
     limitPerSection,
   };
 }
 
-function createInitialHomeCatalogState(isTv: boolean) {
+function createInitialHomeCatalogState(
+  isTv: boolean,
+  sourceId?: string,
+  sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown',
+) {
   const limitPerSection = getHomeVodLimitPerSection(isTv);
-  const loadInput = createHomeVodLoadInput(limitPerSection);
+  const loadInput = createHomeVodLoadInput(limitPerSection, sourceId, sourceType);
   const cachedSections = loadInput ? getCachedHomeVodSections(loadInput) : null;
   const cachedBootstrap = loadInput ? getCachedAppBootstrapResult() : null;
   const bootstrapSections =
@@ -210,12 +301,31 @@ function createInitialHomeCatalogState(isTv: boolean) {
       : null;
   const safeCachedSections = filterRenderableVodHomeSections(cachedSections);
   const safeBootstrapSections = filterRenderableVodHomeSections(bootstrapSections);
-
-  const sections = safeCachedSections.length
-    ? mapHomeVodSectionsToCatalogSections(safeCachedSections)
+  const rawSections = safeCachedSections.length
+    ? safeCachedSections
     : safeBootstrapSections.length
-      ? mapHomeVodSectionsToCatalogSections(safeBootstrapSections)
+      ? safeBootstrapSections
       : null;
+
+  const discoveryScope: DiscoveryRuntimeAccessScope | null = loadInput?.sourceId?.trim()
+    ? {
+        licenseCode: loadInput.licenseCode,
+        deviceIdentifier: loadInput.deviceIdentifier,
+        sourceId: loadInput.sourceId.trim(),
+      }
+    : null;
+
+  if (discoveryScope) {
+    getOrCreateDiscoveryRuntimeContext(discoveryScope);
+  }
+
+  const overlaySections = discoveryScope && rawSections
+    ? overlayStoredHomeDiscoverySnapshots({ scope: discoveryScope, sections: rawSections })
+    : rawSections;
+
+  const sections = overlaySections?.length
+    ? mapHomeVodSectionsToCatalogSections(overlaySections)
+    : null;
 
   return {
     limitPerSection,
@@ -244,7 +354,7 @@ export function CatalogPage() {
     (deviceProfile.formFactor === 'tv' || legacyIsTv);
   const shouldShowTopCategoryChips = isMobile || isTabletPortraitTouch;
   const [initialHomeCatalogState] = useState(() =>
-    createInitialHomeCatalogState(isTv),
+    createInitialHomeCatalogState(isTv, playlistSource?.sourceId, playlistSource?.sourceType),
   );
   const [realCatalogSections, setRealCatalogSections] = useState<
     CatalogPageSection[] | null
@@ -257,6 +367,22 @@ export function CatalogPage() {
   const wasInitialCatalogHydratedFromCache =
     initialHomeCatalogState.wasHydratedFromCache &&
     initialHomeCatalogState.limitPerSection === homeVodLimitPerSection;
+
+  const loadInput = initialHomeCatalogState.loadInput;
+  const currentHomeDiscoveryScope: DiscoveryRuntimeAccessScope | null =
+    loadInput?.licenseCode && loadInput?.deviceIdentifier && playlistSource?.sourceId?.trim()
+      ? {
+          licenseCode: loadInput.licenseCode,
+          deviceIdentifier: loadInput.deviceIdentifier,
+          sourceId: playlistSource.sourceId.trim(),
+        }
+      : null;
+
+  useLayoutEffect(() => {
+    if (currentHomeDiscoveryScope) {
+      getOrCreateDiscoveryRuntimeContext(currentHomeDiscoveryScope);
+    }
+  }, [currentHomeDiscoveryScope]);
 
   const resolvedCatalogSections = realCatalogSections?.length
     ? realCatalogSections
@@ -362,10 +488,70 @@ export function CatalogPage() {
 
         const safeHomeVodSections =
           filterRenderableVodHomeSections(homeVodSections);
+
+        const discoveryScope: DiscoveryRuntimeAccessScope | null = homeVodLoadInput?.sourceId?.trim()
+          ? {
+              licenseCode: homeVodLoadInput.licenseCode,
+              deviceIdentifier: homeVodLoadInput.deviceIdentifier,
+              sourceId: homeVodLoadInput.sourceId.trim(),
+            }
+          : null;
+
+        const overlaySections = discoveryScope
+          ? overlayStoredHomeDiscoverySnapshots({
+              scope: discoveryScope,
+              sections: safeHomeVodSections,
+            })
+          : safeHomeVodSections;
+
         const nextSections =
-          mapHomeVodSectionsToCatalogSections(safeHomeVodSections);
+          mapHomeVodSectionsToCatalogSections(overlaySections);
 
         setRealCatalogSections(nextSections.length > 0 ? nextSections : null);
+
+        void enrichHomeVodSectionsInBackground(
+          overlaySections,
+          playlistSource?.sourceId,
+          discoveryScope,
+          (enrichedSections) => {
+            if (isMounted) {
+              setRealCatalogSections(
+                mapHomeVodSectionsToCatalogSections(enrichedSections),
+              );
+            }
+          },
+        );
+
+        if (playlistStatus === 'ready' && discoveryScope && safeHomeVodSections.length > 0) {
+          void executeHomeDiscoveryPresentation({
+            scope: discoveryScope,
+            sections: safeHomeVodSections,
+          })
+            .then((discoverySections) => {
+              if (!isMounted || !discoverySections || discoverySections.length === 0) {
+                return;
+              }
+              const finalSections =
+                mapHomeVodSectionsToCatalogSections(discoverySections);
+              setRealCatalogSections(finalSections);
+
+              void enrichHomeVodSectionsInBackground(
+                discoverySections,
+                playlistSource?.sourceId,
+                discoveryScope,
+                (enrichedSections) => {
+                  if (isMounted) {
+                    setRealCatalogSections(
+                      mapHomeVodSectionsToCatalogSections(enrichedSections),
+                    );
+                  }
+                },
+              );
+            })
+            .catch((err) => {
+              console.warn('[XANDEFLIX_HOME_DISCOVERY_BACKGROUND_ERROR]', err);
+            });
+        }
       } catch (error) {
         window.clearTimeout(timeoutId);
         spatialDebug(
@@ -397,79 +583,7 @@ export function CatalogPage() {
     playlistStatus,
   ]);
 
-  useEffect(() => {
-    let isMounted = true;
-    let refreshTimeoutId: number | null = null;
 
-    async function refreshHomeAfterWarmup() {
-      const homeVodLoadInput =
-        initialHomeCatalogState.limitPerSection === homeVodLimitPerSection
-          ? initialHomeCatalogState.loadInput
-          : createHomeVodLoadInput(homeVodLimitPerSection);
-
-      if (!homeVodLoadInput) {
-        return;
-      }
-
-      try {
-        const homeVodSections = await loadHomeVodSections({
-          ...homeVodLoadInput,
-          sourceId: playlistSource?.sourceId,
-          sourceType: playlistSource?.sourceType,
-          limitPerSection: homeVodLimitPerSection,
-          preferFresh: true,
-        });
-
-        if (!isMounted) {
-          return;
-        }
-
-        const safeHomeVodSections =
-          filterRenderableVodHomeSections(homeVodSections);
-        const nextSections =
-          mapHomeVodSectionsToCatalogSections(safeHomeVodSections);
-
-        setRealCatalogSections(nextSections.length > 0 ? nextSections : null);
-      } catch (error) {
-        spatialDebug(
-          'catalog-grid',
-          'Falha ao atualizar Home apos warmup TMDB:',
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    }
-
-    function handleWarmupRefresh() {
-      if (refreshTimeoutId !== null) {
-        window.clearTimeout(refreshTimeoutId);
-      }
-
-      refreshTimeoutId = window.setTimeout(() => {
-        refreshTimeoutId = null;
-        void refreshHomeAfterWarmup();
-      }, WARMUP_HOME_REFRESH_DEBOUNCE_MS);
-    }
-
-    window.addEventListener(CATALOG_WARMUP_REFRESH_EVENT, handleWarmupRefresh);
-
-    return () => {
-      isMounted = false;
-      window.removeEventListener(
-        CATALOG_WARMUP_REFRESH_EVENT,
-        handleWarmupRefresh,
-      );
-
-      if (refreshTimeoutId !== null) {
-        window.clearTimeout(refreshTimeoutId);
-      }
-    };
-  }, [
-    homeVodLimitPerSection,
-    initialHomeCatalogState,
-    playlistSource?.sourceId,
-    playlistSource?.sourceType,
-    playlistStatus,
-  ]);
 
   useEffect(() => {
     if (!isTv) {
@@ -528,11 +642,12 @@ export function CatalogPage() {
     }
 
     return Array.from(uniqueItems.values())
+      .filter((item) => Boolean(resolveHomeHeroArtworkUrl(item, isMobile ? 'mobile' : 'horizontal')))
       .sort((firstItem, secondItem) => {
         return Number(Boolean(secondItem.backdropUrl)) - Number(Boolean(firstItem.backdropUrl));
       })
       .slice(0, 5);
-  }, [resolvedCatalogSections]);
+  }, [isMobile, resolvedCatalogSections]);
 
   useEffect(() => {
     setActiveHeroIndex(0);
@@ -675,7 +790,27 @@ export function CatalogPage() {
       }}
       mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
-      <section className="mx-auto w-full max-w-[1920px]">
+      <section
+        className="mx-auto w-full max-w-[1920px]"
+        onPointerDownCapture={() => {
+          if (currentHomeDiscoveryScope) {
+            markDiscoveryRuntimeSurfaceInteracted(currentHomeDiscoveryScope, 'home');
+          }
+        }}
+        onKeyDownCapture={(event) => {
+          const isTargetKey = [
+            'ArrowLeft',
+            'ArrowRight',
+            'ArrowUp',
+            'ArrowDown',
+            'Enter',
+          ].includes(event.key);
+
+          if (isTargetKey && currentHomeDiscoveryScope) {
+            markDiscoveryRuntimeSurfaceInteracted(currentHomeDiscoveryScope, 'home');
+          }
+        }}
+      >
         <style>{`
 
           .xf-app[data-device-form-factor="tablet"] [data-xf-home-section-header="true"] button {
@@ -725,7 +860,8 @@ export function CatalogPage() {
             'Conteudos recomendados para sua licenca.'
           }
           metadata={isMobile ? buildMobileHomeHeroMetadata(heroItem) : undefined}
-          posterUrl={isMobile ? (heroItem?.posterUrl ?? heroItem?.backdropUrl) : (heroItem?.backdropUrl ?? heroItem?.posterUrl)}
+          posterUrl={resolveHomeHeroArtworkUrl(heroItem, isMobile ? 'mobile' : 'horizontal')}
+          artworkCandidates={isMobile ? undefined : getHorizontalHeroArtworkCandidateRecords(heroItem)}
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
           onInfoArrowPress={spatialNavigation.handleHeroInfoArrowPress}

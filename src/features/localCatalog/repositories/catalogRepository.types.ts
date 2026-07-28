@@ -4,6 +4,7 @@ import type {
   LocalCatalogImportMetadata,
   LocalCatalogItem,
   LocalCatalogStats,
+  LocalTmdbMetadata,
 } from '../types/localCatalog.types';
 
 export type CatalogRepositoryKind = 'local-indexeddb';
@@ -22,6 +23,9 @@ export type CatalogRepository = {
   readonly kind: CatalogRepositoryKind;
   getStats(): Promise<LocalCatalogStats>;
   listItems(input: CatalogRepositoryListItemsInput): Promise<LocalCatalogItem[]>;
+  getTmdbMetadataBySourceItemIds?(
+    sourceItemIds: string[],
+  ): Promise<Map<string, LocalTmdbMetadata>>;
   getImportMetadata(sourceId: string): Promise<LocalCatalogImportMetadata | null>;
   listCategories(input: {
     sourceId: string;

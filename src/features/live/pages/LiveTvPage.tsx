@@ -30,14 +30,11 @@ import { getOrCreateDeviceIdentifier } from "@/features/playlists/lib/deviceIden
 import {
   getAuthorizedIptvSource,
   mapAuthorizedIptvSourceToPlaylistSource,
+  mapAuthorizedIptvSourceToRuntimeAuthorizationContext,
 } from "@/features/playlists/services/authorizedIptvSource.service";
-import { listAuthorizedLicenseChannels } from "@/features/playlists/services/authorizedLicenseChannels.service";
 import { usePlaylistRuntime } from "@/features/playlists/providers/PlaylistRuntimeProvider";
-import { getCachedAppBootstrapResult } from "@/features/bootstrap/services/appBootstrap.service";
-import {
-  getCachedLiveTvCriticalChannels,
-  storeCachedLiveTvCriticalChannels,
-} from "../services/liveTvCriticalCache.service";
+import { localCatalogRepository } from "@/features/localCatalog/repositories/localCatalogRepository.service";
+import { loadReadableLocalLiveChannels } from "@/features/live/services/localLiveCatalog.service";
 import type { IptvChannel } from "@/features/playlists/types/playlist";
 import type {
   PlayerTelemetryEvent,
@@ -46,8 +43,6 @@ import type {
 
 const MAX_VISIBLE_CHANNELS_PER_GROUP = 160;
 let lastLiveTvGroupVerticalNavigationAt = 0;
-
-type ChannelSourceMode = "cache" | "playlist" | null;
 
 function normalizeLiveGroupTitle(groupTitle?: string | null) {
   return groupTitle
@@ -88,22 +83,6 @@ function isLiveTvPageChannel(channel: IptvChannel) {
 
   return isLiveChannel(channel);
 }
-
-function readInitialLiveTvCriticalChannels() {
-  const storedActivation = getStoredLicenseActivation();
-
-  if (!storedActivation) {
-    return [];
-  }
-
-  return (
-    getCachedLiveTvCriticalChannels({
-      licenseCode: storedActivation.licenseCode,
-      deviceIdentifier: storedActivation.deviceIdentifier,
-    })?.filter(isLiveTvPageChannel) ?? []
-  );
-}
-
 
 type PreviewStatus = "idle" | "loading" | "playing" | "error";
 
@@ -177,11 +156,6 @@ export default function LiveTvPage() {
     null,
   );
   const [, setSourceLoadError] = useState<string | null>(null);
-  const [, setChannelSourceMode] = useState<ChannelSourceMode>(null);
-  const [instantLiveChannels, setInstantLiveChannels] = useState<IptvChannel[]>(
-    () => readInitialLiveTvCriticalChannels(),
-  );
-  const [, setCacheFallbackMessage] = useState<string | null>(null);
   const hasRequestedSourceRef = useRef(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -244,124 +218,8 @@ export default function LiveTvPage() {
     let isMounted = true;
 
     if (
-      !hasRequestedSourceRef.current &&
-      status !== "loading" &&
-      status !== "ready" &&
-      channels.length === 0
-    ) {
-      const storedActivation = getStoredLicenseActivation();
-      const cachedLiveChannels = getCachedLiveTvCriticalChannels({
-        licenseCode: storedActivation?.licenseCode,
-        deviceIdentifier: storedActivation?.deviceIdentifier,
-      })?.filter(isLiveTvPageChannel);
-
-      if (storedActivation && cachedLiveChannels?.length) {
-        hasRequestedSourceRef.current = true;
-        setSourceLoadError(null);
-        setChannelSourceMode("cache");
-        setCacheFallbackMessage(null);
-        setInstantLiveChannels(cachedLiveChannels);
-
-        loadFromChannels({
-          source: {
-            url: "live-tv-critical-cache:" + storedActivation.licenseCode,
-            name:
-              "Canais ao vivo preparados da licença " +
-              storedActivation.licenseCode,
-          },
-          channels: cachedLiveChannels,
-        });
-
-        void (async () => {
-          try {
-            const fullChannels = await listAuthorizedLicenseChannels({
-              licenseCode: storedActivation.licenseCode,
-              deviceIdentifier: storedActivation.deviceIdentifier,
-              pageSize: 500,
-              maxPages: 20,
-              contentKind: 'live',
-            });
-
-            const fullLiveChannels = fullChannels.filter(isLiveTvPageChannel);
-
-            if (
-              !isMounted ||
-              fullLiveChannels.length <= cachedLiveChannels.length
-            ) {
-              return;
-            }
-
-            storeCachedLiveTvCriticalChannels({
-              licenseCode: storedActivation.licenseCode,
-              deviceIdentifier: storedActivation.deviceIdentifier,
-              channels: fullLiveChannels,
-            });
-            setInstantLiveChannels(fullLiveChannels);
-
-            loadFromChannels({
-              source: {
-                url: "license-cache-background:" + storedActivation.licenseCode,
-                name:
-                  "Canais autorizados completos da licença " +
-                  storedActivation.licenseCode,
-              },
-              channels: fullLiveChannels,
-            });
-          } catch (backgroundLoadError) {
-            console.info("[XANDEFLIX_LIVE_BACKGROUND_EXPAND_FALLBACK]", {
-              reason:
-                backgroundLoadError instanceof Error
-                  ? backgroundLoadError.message
-                  : "Erro desconhecido ao expandir canais ao vivo.",
-            });
-          }
-        })();
-
-        return () => {
-          isMounted = false;
-        };
-      }
-
-      const cachedBootstrap = getCachedAppBootstrapResult();
-      const isSameActivation =
-        cachedBootstrap &&
-        storedActivation?.licenseCode?.trim().toUpperCase() ===
-          cachedBootstrap.licenseCode.trim().toUpperCase() &&
-        storedActivation.deviceIdentifier === cachedBootstrap.deviceIdentifier;
-
-      if (isSameActivation && cachedBootstrap.livePreviewChannels.length > 0) {
-        hasRequestedSourceRef.current = true;
-        setSourceLoadError(null);
-        setChannelSourceMode("cache");
-        setCacheFallbackMessage(null);
-
-        storeCachedLiveTvCriticalChannels({
-          licenseCode: storedActivation?.licenseCode,
-          deviceIdentifier: storedActivation?.deviceIdentifier,
-          channels: cachedBootstrap.livePreviewChannels,
-        });
-
-        loadFromChannels({
-          source: {
-            url: "bootstrap-cache:" + cachedBootstrap.licenseCode,
-            name:
-              "Canais críticos preparados da licença " +
-              cachedBootstrap.licenseCode,
-          },
-          channels: cachedBootstrap.livePreviewChannels,
-        });
-
-        return () => {
-          isMounted = false;
-        };
-      }
-    }
-
-    if (
       hasRequestedSourceRef.current ||
-      status === "loading" ||
-      status === "ready" ||
-      channels.length > 0
+      status === "loading"
     ) {
       return () => {
         isMounted = false;
@@ -370,8 +228,6 @@ export default function LiveTvPage() {
 
     hasRequestedSourceRef.current = true;
     setSourceLoadError(null);
-    setChannelSourceMode(null);
-    setCacheFallbackMessage(null);
 
     void (async () => {
       try {
@@ -385,72 +241,37 @@ export default function LiveTvPage() {
 
         const playlistSource =
           mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
-        const licenseId = authorizedSource.license?.id;
-        const licenseCode =
-          authorizedSource.license?.code ?? storedActivation?.licenseCode;
+        const authorizationContext =
+          mapAuthorizedIptvSourceToRuntimeAuthorizationContext(
+            authorizedSource,
+          );
+        const sourceId = playlistSource.sourceId?.trim();
 
-        if (licenseId && licenseCode) {
+        if (playlistSource.sourceType === "m3u" && sourceId) {
           try {
-            const cachedChannels = await listAuthorizedLicenseChannels({
-              licenseCode,
-              deviceIdentifier,
-              pageSize: 500,
-              maxPages: 20,
-              contentKind: 'live',
-            });
+            const localLiveChannels =
+              await loadReadableLocalLiveChannels(
+                sourceId,
+                localCatalogRepository,
+              );
 
-            if (!isMounted) {
-              return;
-            }
-
-            const liveCachedChannels = cachedChannels.filter(isLiveTvPageChannel);
-
-            if (liveCachedChannels.length > 0) {
-              storeCachedLiveTvCriticalChannels({
-                licenseCode,
-                deviceIdentifier,
-                channels: liveCachedChannels,
-              });
-              setInstantLiveChannels(liveCachedChannels);
-
+            if (localLiveChannels !== null) {
               loadFromChannels({
-                source: {
-                  url: "license-cache:" + licenseId,
-                  name:
-                    "Canais autorizados da licença " +
-                    (authorizedSource.license?.code ?? ""),
-                },
-                channels: liveCachedChannels,
+                source: playlistSource,
+                channels: localLiveChannels,
               });
-              setChannelSourceMode("cache");
+
               return;
             }
-
-            setCacheFallbackMessage(
-              "Cache da licença sem canais ativos. Usando playlist direta autorizada.",
-            );
-          } catch (cacheError) {
-            if (!isMounted) {
-              return;
-            }
-
-            console.info("[XANDEFLIX_LICENSE_CHANNEL_CACHE_FALLBACK]", {
-              reason:
-                cacheError instanceof Error
-                  ? cacheError.message
-                  : "Erro desconhecido ao carregar cache de canais.",
-            });
-            setCacheFallbackMessage(
-              "Cache de canais indisponível. Usando playlist direta autorizada.",
-            );
+          } catch {
+            // Falha local não bloqueia o fallback direto autorizado.
           }
         }
 
-        await loadFromSource(playlistSource);
-
-        if (isMounted) {
-          setChannelSourceMode("playlist");
-        }
+        await loadFromSource(
+          playlistSource,
+          authorizationContext,
+        );
       } catch (loadError) {
         if (isMounted) {
           setSourceLoadError(
@@ -467,15 +288,10 @@ export default function LiveTvPage() {
     };
   }, [channels.length, loadFromChannels, loadFromSource, status]);
 
-  const liveTvChannels = useMemo(() => {
-    const runtimeLiveChannels = channels.filter(isLiveTvPageChannel);
-
-    if (runtimeLiveChannels.length > 0) {
-      return runtimeLiveChannels;
-    }
-
-    return instantLiveChannels;
-  }, [channels, instantLiveChannels]);
+  const liveTvChannels = useMemo(
+    () => channels.filter(isLiveTvPageChannel),
+    [channels],
+  );
 
   const groups = useMemo<ChannelGroup[]>(() => {
     const groupMap = new Map<string, number>();

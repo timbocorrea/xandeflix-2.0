@@ -3,6 +3,7 @@
 import { execFileSync } from 'node:child_process';
 
 const PROTECTED_ALLOWLIST = [
+  'AGENTS.md',
   'docs/product/',
   'docs/architecture/',
   'docs/governance/',

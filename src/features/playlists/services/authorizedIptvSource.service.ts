@@ -2,7 +2,10 @@ import { env } from '@/config/env';
 import { supabase } from '@/lib/supabase/supabaseClient';
 
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
-import type { PlaylistSource } from '../types/playlist';
+import type {
+  PlaylistRuntimeAuthorizationContext,
+  PlaylistSource,
+} from '../types/playlist';
 
 export type AuthorizedIptvSourceMode = 'license' | 'legacy';
 
@@ -160,4 +163,12 @@ export function mapAuthorizedIptvSourceToPlaylistSource(
     sourceId: authorizedSource.source.id,
     sourceType: authorizedSource.source.type,
   };
+}
+
+export function mapAuthorizedIptvSourceToRuntimeAuthorizationContext(
+  authorizedSource: AuthorizedIptvSource,
+): PlaylistRuntimeAuthorizationContext | null {
+  const internalLicenseId = authorizedSource.license?.id.trim() ?? '';
+
+  return internalLicenseId ? { internalLicenseId } : null;
 }

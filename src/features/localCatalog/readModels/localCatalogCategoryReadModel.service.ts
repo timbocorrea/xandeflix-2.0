@@ -2,6 +2,7 @@ import type { HomeVodItem } from '../../catalog/services/homeVod.service';
 import { localCatalogRepository } from '../repositories/localCatalogRepository.service';
 import type { CatalogRepository } from '../repositories/catalogRepository.types';
 import { listLocalCatalogCategories } from '../services/localCatalogCategoryIndex.service';
+import { isLocalCatalogReadable } from '../services/localCatalogReadability.service';
 import type { LocalCatalogCategory } from '../types/localCatalog.types';
 import { mapLocalCatalogItemsToHomeVodItems } from './localCatalogHomeVodAdapter.service';
 
@@ -31,11 +32,7 @@ export async function loadLocalMovieCategoryReadModel(
 
   const metadata = await repository.getImportMetadata(sourceId);
 
-  if (
-    metadata?.status !== 'ready' ||
-    metadata.sourceType !== 'm3u' ||
-    metadata.importedCount <= 0
-  ) {
+  if (!isLocalCatalogReadable(metadata)) {
     return { status: 'unavailable', categories: [], items: [] };
   }
 
@@ -66,7 +63,18 @@ export async function loadLocalMovieCategoryReadModel(
         limit: perCategoryLimit,
       });
 
-      return mapLocalCatalogItemsToHomeVodItems(items, category.title).sort(
+      const tmdbMetadata =
+        repository.getTmdbMetadataBySourceItemIds && items.length > 0
+          ? await repository.getTmdbMetadataBySourceItemIds(
+              items.map((item) => item.id),
+            )
+          : new Map();
+
+      return mapLocalCatalogItemsToHomeVodItems(
+        items,
+        category.title,
+        tmdbMetadata,
+      ).sort(
         (first, second) =>
           first.title.localeCompare(second.title, 'pt-BR', {
             sensitivity: 'base',

@@ -17,7 +17,6 @@ import {
   isNativeAndroidPlayerAvailable,
 } from '../lib/nativeAndroidPlayerAdapter';
 import { createNativeVideoAdapter } from '../lib/nativeVideoAdapter';
-import { maskStreamUrl } from '@/lib/security/maskStreamUrl';
 import { logPlayerDebugEvent } from '../lib/playerDebug';
 import { prepareUniversalPlayerSource } from '../lib/playerFactory';
 import {
@@ -58,6 +57,17 @@ function createPlayerEvent(
     message,
     timestamp: Date.now(),
     data,
+  };
+}
+
+function sanitizePlayerTelemetryEvent(
+  event: PlayerTelemetryEvent,
+): PlayerTelemetryEvent {
+  return {
+    source: event.source,
+    name: event.name,
+    level: event.level,
+    timestamp: event.timestamp,
   };
 }
 
@@ -159,7 +169,6 @@ export default function UniversalPlayerPage() {
   const seriesGroupTitle = searchParams.get('seriesGroupTitle');
   const seriesTmdbId = searchParams.get('seriesTmdbId');
   const seriesTmdbTitle = searchParams.get('seriesTmdbTitle');
-  const maskedStreamUrl = useMemo(() => maskStreamUrl(streamUrl), [streamUrl]);
 
   const preparation = useMemo(() => {
     return prepareUniversalPlayerSource({
@@ -184,11 +193,16 @@ export default function UniversalPlayerPage() {
       : 'Reproduzir';
 
   const pushTelemetryEvent = useCallback((event: PlayerTelemetryEvent) => {
+    const sanitizedEvent = sanitizePlayerTelemetryEvent(event);
+
     setTelemetryEvents((currentEvents) => {
-      return [event, ...currentEvents].slice(0, MAX_PLAYER_TELEMETRY_EVENTS);
+      return [sanitizedEvent, ...currentEvents].slice(
+        0,
+        MAX_PLAYER_TELEMETRY_EVENTS,
+      );
     });
 
-    logPlayerDebugEvent(event);
+    logPlayerDebugEvent(sanitizedEvent);
   }, []);
 
   const restorePlayerFocus = useCallback(() => {
@@ -235,7 +249,7 @@ export default function UniversalPlayerPage() {
           'Tela do Player recuperou foco após retorno do player nativo.',
           {
             kind: stream?.kind ?? null,
-            url: maskedStreamUrl,
+            hasStreamUrl: Boolean(streamUrl),
           },
         ),
       );
@@ -263,10 +277,10 @@ export default function UniversalPlayerPage() {
       });
     };
   }, [
-    maskedStreamUrl,
     pushTelemetryEvent,
     restorePlayerFocus,
     stream?.kind,
+    streamUrl,
     usesNativeAndroidPlayer,
   ]);
 
@@ -319,10 +333,7 @@ export default function UniversalPlayerPage() {
         return;
       }
 
-      const playbackSession = await startPlaybackSession({
-        channelName: title,
-        streamUrl,
-      });
+      const playbackSession = await startPlaybackSession();
 
       playbackSessionIdRef.current = playbackSession.id;
 
@@ -343,8 +354,6 @@ export default function UniversalPlayerPage() {
         'Sessão de reprodução iniciada para controle de telas simultâneas.',
         {
           sessionId: playbackSession.id,
-          channelName: title,
-          url: maskedStreamUrl,
         },
       );
 
@@ -359,7 +368,6 @@ export default function UniversalPlayerPage() {
       episodeId,
       episodeIndex,
       startPositionMs,
-      maskedStreamUrl,
       pushPlayerEvent,
       seriesGroupTitle,
       seriesTitle,
@@ -387,7 +395,7 @@ export default function UniversalPlayerPage() {
           preparation.error.message,
           {
             code: preparation.error.code,
-            url: maskedStreamUrl,
+            hasStreamUrl: Boolean(streamUrl),
           },
         );
 
@@ -450,7 +458,7 @@ export default function UniversalPlayerPage() {
         'Iniciando carga da fonte.',
         {
           kind: stream.kind,
-          url: maskedStreamUrl,
+          hasStreamUrl: Boolean(streamUrl),
           attempt: loadAttempt + 1,
         },
       );
@@ -471,7 +479,7 @@ export default function UniversalPlayerPage() {
             'Fonte carregada e pronta para reprodução.',
             {
               kind: stream.kind,
-              url: maskedStreamUrl,
+              hasStreamUrl: Boolean(streamUrl),
               attempt: loadAttempt + 1,
             },
           );
@@ -493,8 +501,7 @@ export default function UniversalPlayerPage() {
             'Falha ao carregar a fonte.',
             {
               kind: stream.kind,
-              url: maskedStreamUrl,
-              message: errorMessage,
+              hasStreamUrl: Boolean(streamUrl),
               attempt: loadAttempt + 1,
             },
           );
@@ -522,7 +529,6 @@ export default function UniversalPlayerPage() {
       pushTelemetryEvent,
       stream,
       streamUrl,
-      maskedStreamUrl,
       title,
     ]);
 
@@ -556,16 +562,11 @@ export default function UniversalPlayerPage() {
           'Player nativo Android aberto para reprodução.',
         );
 
-        void ensurePlaybackSessionStarted().catch((sessionError: unknown) => {
-          const sessionErrorMessage = normalizePlaybackError(sessionError);
-
+        void ensurePlaybackSessionStarted().catch(() => {
           pushPlayerEvent(
             'PLAYBACK_SESSION_START_BEST_EFFORT_FAILED',
             'warn',
             'Sessão de reprodução falhou após abertura do player nativo, sem bloquear playback.',
-            {
-              message: sessionErrorMessage,
-            },
           );
         });
       } catch (error) {
@@ -581,9 +582,6 @@ export default function UniversalPlayerPage() {
           'NATIVE_PLAYER_OPEN_FAILED',
           'error',
           'Falha ao abrir player nativo Android.',
-          {
-            message: errorMessage,
-          },
         );
       }
 
@@ -623,9 +621,6 @@ export default function UniversalPlayerPage() {
         'PLAY_REQUEST_FAILED',
         'error',
         'Falha ao iniciar reprodução.',
-        {
-          message: errorMessage,
-        },
       );
     }
   }, [ensurePlaybackSessionStarted, pushPlayerEvent, status, usesNativeAndroidPlayer]);
@@ -685,13 +680,11 @@ export default function UniversalPlayerPage() {
 
       await requestPlayerFullscreen(videoElement);
       pushPlayerEvent('FULLSCREEN_ENTER', 'info', 'Entrando no fullscreen.');
-    } catch (error) {
-      const errorMessage = normalizePlaybackError(error);
-
+    } catch {
       pushPlayerEvent(
         'FULLSCREEN_ERROR',
         'warn',
-        `Não foi possível alternar fullscreen: ${errorMessage}`,
+        'Não foi possível alternar fullscreen.',
       );
     }
   }, [pushPlayerEvent]);
@@ -1021,26 +1014,21 @@ export default function UniversalPlayerPage() {
                 const videoElement = videoRef.current;
                 const mediaError = videoElement?.error;
                 const nativeCode = mediaError?.code ?? null;
-                const nativeMessage =
-                  mediaError?.message || 'Erro nativo de mídia sem descrição.';
                 const readyState = videoElement?.readyState ?? null;
                 const networkState = videoElement?.networkState ?? null;
-                const currentSrc = videoElement?.currentSrc
-                  ? maskStreamUrl(videoElement.currentSrc)
-                  : null;
+                const hasCurrentSource = Boolean(videoElement?.currentSrc);
 
                 setStatus('error');
                 setPlaybackError({
                   code: 'PLAYBACK_ERROR',
                   message:
-                    `Erro no elemento de vídeo: ${nativeMessage} ` +
+                    'Erro no elemento de vídeo ' +
                     `(nativeCode=${nativeCode ?? 'n/a'}, readyState=${readyState ?? 'n/a'}, networkState=${networkState ?? 'n/a'})`,
                   details: {
                     nativeCode,
-                    nativeMessage,
                     readyState,
                     networkState,
-                    currentSrc,
+                    hasCurrentSource,
                   },
                 });
 
@@ -1050,10 +1038,9 @@ export default function UniversalPlayerPage() {
                   'Erro detectado no HTMLVideoElement.',
                   {
                     nativeCode,
-                    nativeMessage,
                     readyState,
                     networkState,
-                    currentSrc,
+                    hasCurrentSource,
                   },
                 );
               }}
@@ -1146,9 +1133,9 @@ export default function UniversalPlayerPage() {
               </div>
 
               <div>
-                <dt className="text-xf-muted">URL</dt>
-                <dd className="break-all font-mono text-sm text-white/80">
-                  {maskedStreamUrl || 'nenhuma URL informada'}
+                <dt className="text-xf-muted">Fonte</dt>
+                <dd className="font-bold text-white">
+                  {streamUrl ? 'informada localmente' : 'não informada'}
                 </dd>
               </div>
             </dl>

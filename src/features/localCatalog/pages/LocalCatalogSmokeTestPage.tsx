@@ -14,8 +14,28 @@ import {
   runLocalPlaylistImportSmokeTest,
   type LocalPlaylistImportSmokeTestResult,
 } from '../services/localPlaylistImportSmokeTest.service';
+import {
+  runLocalCatalogRuntimeSnapshotBridgeSmokeTest,
+  type LocalCatalogRuntimeSnapshotBridgeSmokeTestResult,
+} from '../services/localCatalogRuntimeSnapshotBridgeSmokeTest.service';
+import {
+  runLocalCatalogSearchSmokeTest,
+  type LocalCatalogSearchSmokeTestResult,
+} from '../services/localCatalogSearchSmokeTest.service';
 
-type JsonValue = LocalCatalogSmokeTestResult | LocalPlaylistImportSmokeTestResult | null;
+type RuntimeSmokeViewResult =
+  | LocalCatalogRuntimeSnapshotBridgeSmokeTestResult
+  | {
+      ok: false;
+      errorCode: string;
+    };
+
+type JsonValue =
+  | LocalCatalogSmokeTestResult
+  | LocalPlaylistImportSmokeTestResult
+  | RuntimeSmokeViewResult
+  | LocalCatalogSearchSmokeTestResult
+  | null;
 
 function parseStoredResult(value: string | null): LocalCatalogSmokeTestResult | null {
   if (!value) {
@@ -88,10 +108,16 @@ export default function LocalCatalogSmokeTestPage() {
 
   const [isRunningCatalogSmoke, setIsRunningCatalogSmoke] = useState(false);
   const [isRunningImportSmoke, setIsRunningImportSmoke] = useState(false);
+  const [isRunningRuntimeSmoke, setIsRunningRuntimeSmoke] = useState(false);
+  const [isRunningSearchSmoke, setIsRunningSearchSmoke] = useState(false);
   const [catalogResult, setCatalogResult] =
     useState<LocalCatalogSmokeTestResult | null>(null);
   const [importResult, setImportResult] =
     useState<LocalPlaylistImportSmokeTestResult | null>(null);
+  const [runtimeResult, setRuntimeResult] =
+    useState<RuntimeSmokeViewResult | null>(null);
+  const [searchResult, setSearchResult] =
+    useState<LocalCatalogSearchSmokeTestResult | null>(null);
   const [persistedResultRaw, setPersistedResultRaw] = useState<string | null>(null);
 
   function refreshPersistedResult() {
@@ -144,6 +170,32 @@ export default function LocalCatalogSmokeTestPage() {
     } finally {
       setIsRunningCatalogSmoke(false);
       refreshPersistedResult();
+    }
+  }
+
+  async function handleRunRuntimeSmokeTest() {
+    if (isRunningRuntimeSmoke) {
+      return;
+    }
+
+    setIsRunningRuntimeSmoke(true);
+    setRuntimeResult(null);
+
+    try {
+      setRuntimeResult(
+        await runLocalCatalogRuntimeSnapshotBridgeSmokeTest(),
+      );
+    } catch (error) {
+      setRuntimeResult({
+        ok: false,
+        errorCode:
+          error instanceof Error &&
+          /^LOCAL_CATALOG_[A-Z0-9_]+$/.test(error.message)
+            ? error.message
+            : 'LOCAL_CATALOG_RUNTIME_SNAPSHOT_BRIDGE_SMOKE_FAILED',
+      });
+    } finally {
+      setIsRunningRuntimeSmoke(false);
     }
   }
 
@@ -200,6 +252,20 @@ export default function LocalCatalogSmokeTestPage() {
     }
   }
 
+  async function handleRunSearchSmokeTest() {
+    if (isRunningSearchSmoke) {
+      return;
+    }
+
+    setIsRunningSearchSmoke(true);
+    setSearchResult(null);
+    try {
+      setSearchResult(await runLocalCatalogSearchSmokeTest());
+    } finally {
+      setIsRunningSearchSmoke(false);
+    }
+  }
+
   return (
     <AppShell onSignOut={() => void signOut()} hideHeaderOnTv>
       <section
@@ -230,8 +296,8 @@ export default function LocalCatalogSmokeTestPage() {
 
         <p className="mt-4 max-w-3xl text-base leading-relaxed text-xf-muted">
           Página protegida para validação de integridade do banco de dados local,
-          smoke test básico do IndexedDB e smoke test isolado do importador local
-          progressivo. Nenhuma ação desta tela grava conteúdo no Supabase.
+          smoke test básico do IndexedDB, importador progressivo e ciclo de snapshots
+          do runtime. Nenhuma ação desta tela grava conteúdo no Supabase.
         </p>
 
         <FocusableSection
@@ -270,6 +336,30 @@ export default function LocalCatalogSmokeTestPage() {
             </FocusableButton>
 
             <FocusableButton
+              focusKey="btn-run-runtime-smoke-test"
+              className="rounded-xl bg-emerald-600 px-6 py-4 text-base font-black text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isRunningRuntimeSmoke}
+              onClick={handleRunRuntimeSmokeTest}
+              onEnterPress={handleRunRuntimeSmokeTest}
+            >
+              {isRunningRuntimeSmoke
+                ? 'Validando snapshots...'
+                : 'Executar smoke test runtime v3'}
+            </FocusableButton>
+
+            <FocusableButton
+              focusKey="btn-run-search-smoke-test"
+              className="rounded-xl bg-violet-600 px-6 py-4 text-base font-black text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isRunningSearchSmoke}
+              onClick={() => void handleRunSearchSmokeTest()}
+              onEnterPress={() => void handleRunSearchSmokeTest()}
+            >
+              {isRunningSearchSmoke
+                ? 'Validando busca local...'
+                : 'Executar smoke test da busca'}
+            </FocusableButton>
+
+            <FocusableButton
               focusKey="btn-reload-saved-result"
               className="rounded-xl bg-white/10 px-6 py-4 text-base font-black text-white transition hover:bg-white/20"
               onClick={refreshPersistedResult}
@@ -293,6 +383,20 @@ export default function LocalCatalogSmokeTestPage() {
             description="Resultado direto do importador M3U local progressivo isolado."
             result={importResult}
             emptyMessage="Aguardando execução do teste do importador."
+          />
+
+          <JsonResultPanel
+            title="Smoke Test Runtime Snapshot v3"
+            description="Valida sidecar, promoção, cancelamento persistente, purge e isolamento."
+            result={runtimeResult}
+            emptyMessage="Aguardando execução do smoke test do runtime v3."
+          />
+
+          <JsonResultPanel
+            title="Smoke Test Busca Universal"
+            description="Valida cobertura integral local, relevância, paginação, isolamento e ausência de rede."
+            result={searchResult}
+            emptyMessage="Aguardando execução do smoke test da busca."
           />
 
           <JsonResultPanel

@@ -5,14 +5,37 @@ import type {
   LocalCatalogImportMetadata,
   LocalCatalogItem,
   LocalCatalogStats,
+  LocalCatalogImportCheckpoint,
+  LocalCatalogMetadata,
+  LocalCatalogScope,
+  LocalCatalogScopeAccessStatus,
+  LocalCatalogSnapshot,
+  LocalTmdbMetadata,
 } from '../types/localCatalog.types';
 
 const LOCAL_CATALOG_DB_NAME = 'xandeflix-local-catalog';
-export const LOCAL_CATALOG_DB_VERSION = 2;
+export const LOCAL_CATALOG_DB_VERSION = 4;
 
 const PLAYLIST_ITEMS_STORE = 'playlistItems';
 const CATALOG_METADATA_STORE = 'catalogMetadata';
 const TMDB_METADATA_STORE = 'tmdbMetadata';
+export const LOCAL_CATALOG_V2_STORES = [
+  PLAYLIST_ITEMS_STORE,
+  CATALOG_METADATA_STORE,
+  TMDB_METADATA_STORE,
+] as const;
+export const LOCAL_CATALOG_V3_STORES = {
+  scopes: 'catalogScopes',
+  snapshots: 'importSnapshots',
+  checkpoints: 'importCheckpoints',
+  items: 'catalogSnapshotItems',
+  categories: 'catalogSnapshotCategories',
+  searchDocuments: 'searchDocuments',
+  searchTokens: 'searchTokens',
+  metrics: 'catalogSnapshotMetrics',
+  seriesLookup: 'catalogSeriesLookup',
+  seriesLookupState: 'catalogSeriesLookupState',
+} as const;
 
 const SOURCE_ID_INDEX = 'sourceId';
 const SOURCE_ID_CONTENT_KIND_INDEX = 'sourceIdContentKind';
@@ -102,7 +125,76 @@ function createTmdbMetadataStore(db: IDBDatabase) {
   store.createIndex('sourceItemId', 'sourceItemId', { unique: false });
 }
 
-function ensureObjectStores(
+function createIndexedStore(
+  db: IDBDatabase,
+  name: string,
+  keyPath: string | string[],
+  indexes: Array<[string, string | string[]]>,
+) {
+  const store = db.createObjectStore(name, { keyPath });
+  for (const [indexName, indexKeyPath] of indexes) {
+    store.createIndex(indexName, indexKeyPath, { unique: false });
+  }
+}
+
+function ensureV3ObjectStores(db: IDBDatabase) {
+  const definitions: Array<[
+    string,
+    string | string[],
+    Array<[string, string | string[]]>,
+  ]> = [
+    [LOCAL_CATALOG_V3_STORES.scopes, 'scopeKey', [
+      ['tenantScopeId', 'tenantScopeId'], ['sourceId', 'sourceId'],
+      ['tenantScopeIdSourceId', ['tenantScopeId', 'sourceId']],
+      ['accessStatus', 'accessStatus'],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.snapshots, 'snapshotId', [
+      ['scopeKey', 'scopeKey'], ['scopeKeyStatus', ['scopeKey', 'status']],
+      ['scopeKeyCreatedAt', ['scopeKey', 'createdAt']],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.checkpoints, 'snapshotId', [
+      ['scopeKey', 'scopeKey'], ['scopeKeyUpdatedAt', ['scopeKey', 'updatedAt']],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.items, ['snapshotId', 'itemId'], [
+      ['snapshotId', 'snapshotId'],
+      ['snapshotIdContentKind', ['snapshotId', 'contentKind']],
+      ['snapshotIdContentKindNormalizedGroup', ['snapshotId', 'contentKind', 'normalizedGroup']],
+      ['snapshotIdNormalizedName', ['snapshotId', 'normalizedName']],
+      ['snapshotIdSourceOrder', ['snapshotId', 'sourceOrder']],
+      ['scopeKeySnapshotId', ['scopeKey', 'snapshotId']],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.categories, ['snapshotId', 'categoryId'], [
+      ['snapshotId', 'snapshotId'],
+      ['snapshotIdContentKind', ['snapshotId', 'contentKind']],
+      ['snapshotIdSortOrder', ['snapshotId', 'sortOrder']],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.searchDocuments, ['snapshotId', 'documentId'], [
+      ['snapshotId', 'snapshotId'],
+      ['snapshotIdIndexStatus', ['snapshotId', 'indexStatus']],
+      ['snapshotIdContentKind', ['snapshotId', 'contentKind']],
+      ['snapshotIdNormalizedTitle', ['snapshotId', 'normalizedTitle']],
+      ['snapshotIdNormalizedCategory', ['snapshotId', 'normalizedCategory']],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.searchTokens, ['snapshotId', 'token', 'documentId'], [
+      ['snapshotIdToken', ['snapshotId', 'token']],
+      ['snapshotIdDocumentId', ['snapshotId', 'documentId']],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.metrics, 'snapshotId', []],
+    [LOCAL_CATALOG_V3_STORES.seriesLookup, ['snapshotId', 'seriesKey', 'itemId'], [
+      ['snapshotIdSeriesKey', ['snapshotId', 'seriesKey']],
+      ['snapshotId', 'snapshotId'],
+    ]],
+    [LOCAL_CATALOG_V3_STORES.seriesLookupState, 'snapshotId', []],
+  ];
+
+  for (const [name, keyPath, indexes] of definitions) {
+    if (!db.objectStoreNames.contains(name)) {
+      createIndexedStore(db, name, keyPath, indexes);
+    }
+  }
+}
+
+export function ensureLocalCatalogObjectStores(
   db: IDBDatabase,
   upgradeTransaction: IDBTransaction | null,
 ) {
@@ -121,6 +213,8 @@ function ensureObjectStores(
   if (!db.objectStoreNames.contains(TMDB_METADATA_STORE)) {
     createTmdbMetadataStore(db);
   }
+
+  ensureV3ObjectStores(db);
 }
 
 function requestToPromise<T>(request: IDBRequest<T>) {
@@ -129,6 +223,120 @@ function requestToPromise<T>(request: IDBRequest<T>) {
     request.onerror = () =>
       reject(request.error ?? new Error('LOCAL_CATALOG_DB_REQUEST_FAILED'));
   });
+}
+
+async function putV3Record<T>(storeName: string, value: T) {
+  const db = await openLocalCatalogDb();
+  try {
+    const transaction = db.transaction(storeName, 'readwrite');
+    const done = waitForTransaction(transaction);
+    transaction.objectStore(storeName).put(value);
+    await done;
+  } finally { db.close(); }
+}
+
+async function getV3Record<T>(storeName: string, key: IDBValidKey) {
+  const db = await openLocalCatalogDb();
+  try {
+    const transaction = db.transaction(storeName, 'readonly');
+    const done = waitForTransaction(transaction);
+    const value = await requestToPromise(transaction.objectStore(storeName).get(key));
+    await done;
+    return (value as T | undefined) ?? null;
+  } finally { db.close(); }
+}
+
+export const putLocalCatalogScope = (value: LocalCatalogScope) =>
+  putV3Record(LOCAL_CATALOG_V3_STORES.scopes, value);
+export const getLocalCatalogScope = (scopeKey: string) =>
+  getV3Record<LocalCatalogScope>(LOCAL_CATALOG_V3_STORES.scopes, scopeKey);
+export async function getActiveLocalCatalogScopeBySourceId(sourceId: string) {
+  const normalizedSourceId = sourceId.trim();
+
+  if (!normalizedSourceId) {
+    return null;
+  }
+
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(
+      LOCAL_CATALOG_V3_STORES.scopes,
+      'readonly',
+    );
+    const done = waitForTransaction(transaction);
+    const values = await requestToPromise(
+      transaction
+        .objectStore(LOCAL_CATALOG_V3_STORES.scopes)
+        .index('sourceId')
+        .getAll(IDBKeyRange.only(normalizedSourceId)),
+    );
+    await done;
+
+    return (
+      (values as LocalCatalogScope[])
+        .filter((scope) => scope.accessStatus === 'active')
+        .sort((left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt),
+        )[0] ?? null
+    );
+  } finally {
+    db.close();
+  }
+}
+export async function markLocalCatalogScopeAccess(
+  scopeKey: string,
+  accessStatus: LocalCatalogScopeAccessStatus,
+) {
+  const scope = await getLocalCatalogScope(scopeKey);
+  if (!scope) throw new Error('LOCAL_CATALOG_SCOPE_NOT_FOUND');
+  const next = { ...scope, accessStatus, runtimeEpoch: scope.runtimeEpoch + 1, updatedAt: new Date().toISOString() };
+  await putLocalCatalogScope(next);
+  return next;
+}
+export async function prepareLocalCatalogScopePointers(
+  scopeKey: string,
+  pointers: Pick<LocalCatalogScope, 'activeSnapshotId' | 'stagingSnapshotId'>,
+) {
+  const scope = await getLocalCatalogScope(scopeKey);
+  if (!scope) throw new Error('LOCAL_CATALOG_SCOPE_NOT_FOUND');
+  const next = { ...scope, ...pointers, updatedAt: new Date().toISOString() };
+  await putLocalCatalogScope(next);
+  return next;
+}
+export const putLocalCatalogSnapshot = (value: LocalCatalogSnapshot) =>
+  putV3Record(LOCAL_CATALOG_V3_STORES.snapshots, value);
+export const getLocalCatalogSnapshot = (snapshotId: string) =>
+  getV3Record<LocalCatalogSnapshot>(LOCAL_CATALOG_V3_STORES.snapshots, snapshotId);
+export const putLocalCatalogImportCheckpoint = (value: LocalCatalogImportCheckpoint) =>
+  putV3Record(LOCAL_CATALOG_V3_STORES.checkpoints, value);
+export const getLocalCatalogImportCheckpoint = (snapshotId: string) =>
+  getV3Record<LocalCatalogImportCheckpoint>(LOCAL_CATALOG_V3_STORES.checkpoints, snapshotId);
+
+export async function listLocalCatalogSnapshots(scopeKey: string) {
+  const db = await openLocalCatalogDb();
+  try {
+    const transaction = db.transaction(LOCAL_CATALOG_V3_STORES.snapshots, 'readonly');
+    const done = waitForTransaction(transaction);
+    const values = await requestToPromise(
+      transaction.objectStore(LOCAL_CATALOG_V3_STORES.snapshots)
+        .index('scopeKey').getAll(IDBKeyRange.only(scopeKey)),
+    );
+    await done;
+    return values as LocalCatalogSnapshot[];
+  } finally { db.close(); }
+}
+
+export async function inspectLocalCatalogSchema() {
+  const db = await openLocalCatalogDb();
+  try {
+    const stores: Record<string, string[]> = {};
+    for (const storeName of Array.from(db.objectStoreNames)) {
+      const transaction = db.transaction(storeName, 'readonly');
+      stores[storeName] = Array.from(transaction.objectStore(storeName).indexNames);
+    }
+    return { version: db.version, stores };
+  } finally { db.close(); }
 }
 
 function waitForTransaction(transaction: IDBTransaction) {
@@ -333,10 +541,14 @@ export function openLocalCatalogDb() {
     }
 
     request.onupgradeneeded = () => {
-      ensureObjectStores(request.result, request.transaction);
+      ensureLocalCatalogObjectStores(request.result, request.transaction);
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onerror = () =>
       reject(request.error ?? new Error('LOCAL_CATALOG_DB_OPEN_FAILED'));
     request.onblocked = () => reject(new Error('LOCAL_CATALOG_DB_OPEN_BLOCKED'));
@@ -390,6 +602,52 @@ export async function getLocalCatalogStats(): Promise<LocalCatalogStats> {
         number
       >,
     };
+  } finally {
+    db.close();
+  }
+}
+
+export async function getLocalTmdbMetadataBySourceItemIds(
+  sourceItemIds: string[],
+) {
+  const uniqueSourceItemIds = Array.from(
+    new Set(sourceItemIds.map((itemId) => itemId.trim()).filter(Boolean)),
+  );
+
+  if (uniqueSourceItemIds.length === 0) {
+    return new Map<string, LocalTmdbMetadata>();
+  }
+
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(TMDB_METADATA_STORE, 'readonly');
+    const transactionDone = waitForTransaction(transaction);
+    const sourceItemIndex = transaction
+      .objectStore(TMDB_METADATA_STORE)
+      .index('sourceItemId');
+    const entries = await Promise.all(
+      uniqueSourceItemIds.map(async (sourceItemId) => {
+        const matches = (await requestToPromise(
+          sourceItemIndex.getAll(IDBKeyRange.only(sourceItemId)),
+        )) as LocalTmdbMetadata[];
+        return [
+          sourceItemId,
+          matches.find(
+            (metadata) => metadata.sourceItemId === sourceItemId,
+          ) ?? null,
+        ] as const;
+      }),
+    );
+
+    await transactionDone;
+
+    return new Map(
+      entries.filter(
+        (entry): entry is readonly [string, LocalTmdbMetadata] =>
+          entry[1] !== null,
+      ),
+    );
   } finally {
     db.close();
   }
@@ -545,6 +803,48 @@ export async function removeObsoleteLocalCatalogItems(
 
 function importMetadataKey(sourceId: string) {
   return `import:${sourceId}`;
+}
+
+export async function getLocalCatalogMetadata(key: string) {
+  const normalizedKey = key.trim();
+
+  if (!normalizedKey) {
+    return null;
+  }
+
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(CATALOG_METADATA_STORE, 'readonly');
+    const transactionDone = waitForTransaction(transaction);
+    const record = await requestToPromise(
+      transaction.objectStore(CATALOG_METADATA_STORE).get(normalizedKey),
+    );
+    await transactionDone;
+
+    return (record as LocalCatalogMetadata | undefined) ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+export async function putLocalCatalogMetadata(
+  metadata: LocalCatalogMetadata,
+) {
+  if (!metadata.key.trim()) {
+    throw new Error('LOCAL_CATALOG_METADATA_KEY_REQUIRED');
+  }
+
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(CATALOG_METADATA_STORE, 'readwrite');
+    const transactionDone = waitForTransaction(transaction);
+    transaction.objectStore(CATALOG_METADATA_STORE).put(metadata);
+    await transactionDone;
+  } finally {
+    db.close();
+  }
 }
 
 function isLocalCatalogImportMetadata(
@@ -786,6 +1086,32 @@ export async function listLocalCatalogItems(
 
     await transactionDone;
 
+    return items;
+  } finally {
+    db.close();
+  }
+}
+
+export async function listLocalCatalogItemsAfterId(input: {
+  sourceId: string;
+  afterItemId: string | null;
+  limit: number;
+}) {
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(PLAYLIST_ITEMS_STORE, 'readonly');
+    const transactionDone = waitForTransaction(transaction);
+    const store = transaction.objectStore(PLAYLIST_ITEMS_STORE);
+    const range = input.afterItemId
+      ? IDBKeyRange.lowerBound(input.afterItemId, true)
+      : undefined;
+    const items = await collectCursorResults(store, range, {
+      sourceId: input.sourceId,
+      limit: input.limit,
+    });
+
+    await transactionDone;
     return items;
   } finally {
     db.close();

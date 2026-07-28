@@ -11,6 +11,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { LOCAL_CATALOG_SEARCH_ROUTE } from '@/features/localCatalog/lib/localCatalogSearchUiContract';
 import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
 import {
   focusCatalogEntryPoint,
@@ -31,6 +32,7 @@ const menuItems = [
     label: 'Pesquisar',
     icon: Search,
     navId: 'sidebar-search',
+    path: LOCAL_CATALOG_SEARCH_ROUTE,
   },
   {
     label: 'Canais',

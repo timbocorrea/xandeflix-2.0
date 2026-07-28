@@ -49,6 +49,8 @@ export function createLocalCatalogRepository(
     kind: 'local-indexeddb',
     getStats: () => storage.getStats(),
     listItems: (input) => storage.listItems(toStorageListInput(input)),
+    getTmdbMetadataBySourceItemIds: (sourceItemIds) =>
+      storage.getTmdbMetadataBySourceItemIds(sourceItemIds),
     getImportMetadata: (sourceId) => storage.getImportMetadata(sourceId),
     listCategories: (input) => storage.listCategories(input),
   };

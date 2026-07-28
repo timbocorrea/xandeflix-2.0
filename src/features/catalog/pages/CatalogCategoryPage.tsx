@@ -14,6 +14,7 @@ import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIden
 import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
 
 import {
+  dedupeCatalogCategoryDefinitionGroups,
   getCatalogCategoryDefinition,
   type CatalogCategoryDefinition,
 } from '../services/catalogCategoryGroups.service';
@@ -26,11 +27,30 @@ import {
   type HomeVodItem,
 } from '../services/homeVod.service';
 import { loadLocalMovieCategoryReadModel } from '../../localCatalog/readModels/localCatalogCategoryReadModel.service';
+import {
+  loadLocalCatalogSeriesDetailReadModel,
+  type SeriesDetailEpisode,
+} from '../../localCatalog/readModels/localCatalogSeriesDetailReadModel.service';
+import {
+  getSeriesCollectionKey,
+  normalizeSeriesCollectionTitle,
+} from '../../localCatalog/services/localCatalogSeriesIdentity.service';
+import {
+  readPresentationRouteCache,
+  writePresentationRouteCache,
+} from '../services/presentationRouteCache.service';
+import { sortEpisodesNaturally } from '../services/episodeNaturalOrder.service';
 
 import {
+  enrichSeriesCardPosters,
   enrichSeriesHeroHighlights,
   hydrateSeriesHeroHighlightsFromCache,
+  isSeriesCardPosterEnrichmentNeeded,
 } from '../services/seriesHeroTmdb.service';
+import {
+  getHorizontalHeroArtworkCandidates,
+  resolveMovieDetailHeroArtworkUrl,
+} from '../services/heroArtworkPolicy.service';
 import {
   readCachedSeriesEpisodes,
   storeCachedSeriesEpisodes,
@@ -73,7 +93,7 @@ type SeriesNavigationState = {
   selectedSeriesItem?: HomeVodItem;
 };
 
-const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v1:';
+const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v2:';
 const SERIES_LANDING_ITEMS_TTL_MS = 12 * 60 * 60 * 1000;
 
 type StoredSeriesLandingItemsEntry = {
@@ -196,6 +216,8 @@ function readInitialCategoryItems(
   seriesTmdbTitle: string | null,
   seriesKey: string | null,
   seriesTitle: string | null,
+  sourceId: string | null,
+  isSeriesDetailPage: boolean,
 ) {
   if (!category) {
     return [];
@@ -245,6 +267,8 @@ function readInitialCategoryItems(
   const specificCachedEpisodes = readCachedSeriesEpisodes({
     licenseCode,
     deviceIdentifier,
+    sourceId,
+    seriesKey,
     groupTitles: category.groupTitles,
     tmdbId: seriesTmdbId,
     tmdbTitle: seriesTmdbTitle,
@@ -255,6 +279,10 @@ function readInitialCategoryItems(
 
   if (filteredSpecificCachedEpisodes.length > 0) {
     return filteredSpecificCachedEpisodes;
+  }
+
+  if (isSeriesDetailPage) {
+    return [];
   }
 
   const cachedItems = getCachedHomeVodCategoryItems({
@@ -293,35 +321,8 @@ function resolveVisibleCount(totalItems: number) {
   return Math.min(totalItems, INITIAL_VISIBLE_ITEMS);
 }
 
-function normalizeSeriesCollectionTitle(value?: string | null) {
-  return (value ?? '')
-    .replace(/\s*S\d{1,3}\s*E\d{1,4}.*$/i, '')
-    .replace(/\s*S\d{1,3}\s*-\s*E\d{1,4}.*$/i, '')
-    .replace(/\s*T\d{1,3}\s*E\d{1,4}.*$/i, '')
-    .replace(/\s*T\d{1,3}\s*-\s*E\d{1,4}.*$/i, '')
-    .replace(/\s*\d{1,3}x\d{1,4}.*$/i, '')
-    .replace(/\s*-\s*Epis[oó]dio\s*\d+.*$/i, '')
-    .replace(/\s*Ep\.?\s*\d+.*$/i, '')
-    .replace(/\s*Epis[oó]dio\s*\d+.*$/i, '')
-    .trim();
-}
-
-function getSeriesCollectionKey(item: HomeVodItem) {
-  const titleIdentity =
-    normalizeSeriesCollectionTitle(item.episodeTitle) ||
-    normalizeSeriesCollectionTitle(item.title);
-
-  if (titleIdentity) {
-    return titleIdentity.trim().toLowerCase();
-  }
-
-  const explicitIdentity = item.seriesKey || item.tmdbId || item.tmdbTitle;
-
-  if (explicitIdentity) {
-    return String(explicitIdentity).trim().toLowerCase();
-  }
-
-  return (item.groupTitle || item.title).trim().toLowerCase();
+function getSeriesDetailSeasonNumber(item?: HomeVodItem | null) {
+  return (item as SeriesDetailEpisode | null | undefined)?.seasonNumber ?? null;
 }
 
 function normalizeSeriesIdentity(value?: string | null) {
@@ -394,6 +395,7 @@ function createSeriesNavigationItem(item: HomeVodItem): HomeVodItem {
     overview: item.overview,
     posterUrl: item.posterUrl,
     backdropUrl: item.backdropUrl,
+    artworkCandidates: item.artworkCandidates,
     groupTitle: item.groupTitle,
     tmdbId: item.tmdbId,
     tmdbTitle: item.tmdbTitle,
@@ -416,6 +418,7 @@ function createMovieNavigationItem(item: HomeVodItem): HomeVodItem {
     overview: item.overview,
     posterUrl: item.posterUrl,
     backdropUrl: item.backdropUrl,
+    artworkCandidates: item.artworkCandidates,
     groupTitle: item.groupTitle,
     tmdbId: item.tmdbId,
     tmdbTitle: item.tmdbTitle,
@@ -440,6 +443,9 @@ function mergeSeriesHeroMetadata(
     overview: selectedSeriesItem.overview ?? representative.overview,
     posterUrl: selectedSeriesItem.posterUrl ?? representative.posterUrl,
     backdropUrl: selectedSeriesItem.backdropUrl ?? representative.backdropUrl,
+    artworkCandidates:
+      selectedSeriesItem.artworkCandidates ??
+      representative.artworkCandidates,
     tmdbId: selectedSeriesItem.tmdbId ?? representative.tmdbId,
     tmdbTitle: selectedSeriesItem.tmdbTitle ?? representative.tmdbTitle,
     tmdbGenres: selectedSeriesItem.tmdbGenres ?? representative.tmdbGenres,
@@ -914,7 +920,18 @@ function MovieCategoryHero({
     buttonPosition: 'play' | 'info',
   ) => boolean;
 }) {
-  const backgroundUrl = item?.backdropUrl || item?.posterUrl || null;
+  const backgroundCandidates = useMemo(
+    () => getHorizontalHeroArtworkCandidates(item),
+    [item],
+  );
+  const backgroundCandidatesKey = backgroundCandidates.join('|');
+  const [backgroundIndex, setBackgroundIndex] = useState(0);
+
+  useEffect(() => {
+    setBackgroundIndex(0);
+  }, [backgroundCandidatesKey, item?.id]);
+
+  const backgroundUrl = backgroundCandidates[backgroundIndex] ?? null;
   const metadata = item ? buildMovieHeroMetadata(item) : null;
   const overview =
     (item && getMovieHeroOverview(item)) ||
@@ -945,6 +962,9 @@ function MovieCategoryHero({
           className="absolute inset-0 h-full w-full object-cover opacity-100"
           loading="eager"
           decoding="async"
+          onError={() => {
+            setBackgroundIndex((currentIndex) => currentIndex + 1);
+          }}
         />
       ) : null}
 
@@ -1473,6 +1493,7 @@ export function CatalogCategoryPage({
   const {
     source: playlistSource,
     status: playlistStatus,
+    localCatalogScopeKey,
   } = usePlaylistRuntime();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1535,7 +1556,7 @@ export function CatalogCategoryPage({
     );
 
     if (definition) {
-      return definition;
+      return dedupeCatalogCategoryDefinitionGroups(definition);
     }
 
     if (isMovieDetailPage) {
@@ -1570,17 +1591,45 @@ export function CatalogCategoryPage({
     movieTmdbTitle,
     movieGroupTitle,
   ]);
-  const initialItems = useMemo(
-    () =>
-      readInitialCategoryItems(
-        category,
-        seriesTmdbId,
-        seriesTmdbTitle,
-        seriesKey,
-        seriesTitle,
-      ),
-    [category, seriesTmdbId, seriesTmdbTitle, seriesKey, seriesTitle],
-  );
+  const initialItems = useMemo(() => {
+    const storedActivation = getStoredLicenseActivation();
+    const licenseCode = storedActivation?.licenseCode?.trim();
+    const deviceIdentifier =
+      storedActivation?.deviceIdentifier || getOrCreateDeviceIdentifier();
+
+    if (licenseCode && deviceIdentifier && !isSeriesDetailPage) {
+      const cachedItems = readPresentationRouteCache<HomeVodItem[]>({
+        licenseCode,
+        deviceIdentifier,
+        sourceId: playlistSource?.sourceId,
+        route: `${location.pathname}${location.search}`,
+      });
+
+      if (cachedItems?.length) {
+        return cachedItems;
+      }
+    }
+
+    return readInitialCategoryItems(
+      category,
+      seriesTmdbId,
+      seriesTmdbTitle,
+      seriesKey,
+      seriesTitle,
+      playlistSource?.sourceId ?? null,
+      isSeriesDetailPage,
+    );
+  }, [
+    category,
+    location.pathname,
+    location.search,
+    isSeriesDetailPage,
+    playlistSource?.sourceId,
+    seriesTmdbId,
+    seriesTmdbTitle,
+    seriesKey,
+    seriesTitle,
+  ]);
 
   const [items, setItems] = useState<HomeVodItem[]>(initialItems);
   const [visibleItemCount, setVisibleItemCount] = useState(
@@ -1590,8 +1639,16 @@ export function CatalogCategoryPage({
   const [seriesHeroIndex, setSeriesHeroIndex] = useState(0);
   const [locallyEnrichedSeriesHeroHighlights, setLocallyEnrichedSeriesHeroHighlights] =
     useState<HomeVodItem[]>([]);
+  const [locallyEnrichedMovieHeroHighlights, setLocallyEnrichedMovieHeroHighlights] =
+    useState<HomeVodItem[]>([]);
+  const [locallyEnrichedMovieDetailItem, setLocallyEnrichedMovieDetailItem] =
+    useState<HomeVodItem | null>(null);
+  const [seriesCardEnrichmentAttemptedIds, setSeriesCardEnrichmentAttemptedIds] =
+    useState<string[]>([]);
   const [similarItems, setSimilarItems] = useState<HomeVodItem[]>([]);
   const [isLoading, setIsLoading] = useState(initialItems.length === 0);
+  const [isSeriesDetailPreparing, setIsSeriesDetailPreparing] = useState(false);
+  const [seriesDetailPollTick, setSeriesDetailPollTick] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const categoryRenderKey = useMemo(
@@ -1620,11 +1677,15 @@ export function CatalogCategoryPage({
     setItems(initialItems);
     setVisibleItemCount(resolveVisibleCount(initialItems.length));
     setIsLoading(initialItems.length === 0);
+    setIsSeriesDetailPreparing(false);
     setErrorMessage(null);
     setSeriesHeroIndex(0);
     setEpisodeFocusIndex(0);
     setSimilarItems([]);
     setLocallyEnrichedSeriesHeroHighlights([]);
+    setLocallyEnrichedMovieHeroHighlights([]);
+    setLocallyEnrichedMovieDetailItem(null);
+    setSeriesCardEnrichmentAttemptedIds([]);
   }, [categoryRenderKey, initialItems]);
 
   function scrollSeriesHeroIntoSafeView() {
@@ -1708,13 +1769,18 @@ export function CatalogCategoryPage({
       return nextItems;
     }
 
-    return nextItems.filter((item) =>
-      isItemOfSelectedSeries(item, {
-        seriesKey,
-        seriesTmdbId,
-        seriesTmdbTitle,
-        seriesTitle,
-      }),
+    return sortEpisodesNaturally(
+      nextItems.filter(
+        (item) =>
+          item.isSeriesCollection !== true &&
+          Boolean(item.streamUrl?.trim()) &&
+          isItemOfSelectedSeries(item, {
+            seriesKey,
+            seriesTmdbId,
+            seriesTmdbTitle,
+            seriesTitle,
+          }),
+      ),
     );
   }
 
@@ -1790,109 +1856,6 @@ export function CatalogCategoryPage({
     }
   }
 
-  async function loadMoviesAggregateCategoryItemsByGroup({
-    licenseCode,
-    deviceIdentifier,
-    groupTitles,
-  }: {
-    licenseCode: string;
-    deviceIdentifier: string;
-    groupTitles: string[];
-  }) {
-    const uniqueGroupTitles = Array.from(
-      new Set(
-        groupTitles
-          .map((groupTitle) => groupTitle.trim())
-          .filter(Boolean),
-      ),
-    );
-
-    if (uniqueGroupTitles.length === 0) {
-      return [];
-    }
-
-    const perGroupLimit = Math.max(
-      MOVIES_CATEGORY_ROW_VISIBLE_LIMIT,
-      Math.ceil(CATEGORY_ITEM_LIMIT / uniqueGroupTitles.length),
-    );
-
-    const groupedResults = await Promise.all(
-      uniqueGroupTitles.map(async (groupTitle, groupIndex) => {
-        try {
-          return await loadHomeVodCategoryItems({
-            licenseCode,
-            deviceIdentifier,
-            groupTitles: [groupTitle],
-            limit: perGroupLimit,
-            slug: 'filmes',
-          });
-        } catch (error) {
-          const errorName = error instanceof Error ? error.name : 'UnknownError';
-          console.warn('[XANDEFLIX_MOVIES_GROUP_LOAD_ERROR]', {
-            groupIndex,
-            errorName,
-          });
-          return [];
-        }
-      }),
-    );
-
-    const getMovieDedupKey = (item: HomeVodItem) =>
-      String(
-        item.tmdbId ||
-          item.tmdbTitle ||
-          item.title ||
-          item.id ||
-          `${item.groupTitle ?? 'movie'}-${byMovie.size}`,
-      );
-
-    const getMovieQualityScore = (item: HomeVodItem) =>
-      Number(Boolean(item.posterUrl || item.backdropUrl)) * 100 +
-      Number(Boolean(item.tmdbId || item.tmdbTitle)) * 10 +
-      Number(Boolean(item.overview)) +
-      Number(Boolean(item.subtitle));
-
-    const byMovie = new Map<string, HomeVodItem>();
-
-    for (const item of groupedResults.flat()) {
-      if (item.kind && item.kind !== 'movie') {
-        continue;
-      }
-
-      const key = getMovieDedupKey(item);
-
-      if (!key) {
-        continue;
-      }
-
-      const currentItem = byMovie.get(key);
-
-      if (!currentItem || getMovieQualityScore(item) > getMovieQualityScore(currentItem)) {
-        byMovie.set(key, item);
-      }
-    }
-
-    return Array.from(byMovie.values()).sort((firstItem, secondItem) => {
-      const firstHasArtwork = Boolean(firstItem.posterUrl || firstItem.backdropUrl);
-      const secondHasArtwork = Boolean(secondItem.posterUrl || secondItem.backdropUrl);
-
-      if (firstHasArtwork !== secondHasArtwork) {
-        return firstHasArtwork ? -1 : 1;
-      }
-
-      const firstHasTmdb = Boolean(firstItem.tmdbId || firstItem.tmdbTitle);
-      const secondHasTmdb = Boolean(secondItem.tmdbId || secondItem.tmdbTitle);
-
-      if (firstHasTmdb !== secondHasTmdb) {
-        return firstHasTmdb ? -1 : 1;
-      }
-
-      return firstItem.title.localeCompare(secondItem.title, 'pt-BR', {
-        sensitivity: 'base',
-      });
-    });
-  }
-
   useEffect(() => {
     let isMounted = true;
 
@@ -1922,6 +1885,7 @@ export function CatalogCategoryPage({
         const cachedItems = getCachedHomeVodCategoryItems({
           licenseCode,
           deviceIdentifier,
+          sourceId: playlistSource?.sourceId,
           groupTitles: category.groupTitles,
           limit: BOOTSTRAP_CATEGORY_ITEM_LIMIT,
           slug: category.slug,
@@ -1936,6 +1900,7 @@ export function CatalogCategoryPage({
               ).size
             : 0;
         const shouldUseCachedItems =
+          !isSeriesDetailPage &&
           Boolean(cachedItems?.length) &&
           (category.slug !== 'filmes' || cachedGroupTitleCount > 1);
 
@@ -1954,8 +1919,24 @@ export function CatalogCategoryPage({
           setVisibleItemCount(0);
         }
 
+        const localSeriesDetail =
+          isSeriesDetailPage && playlistSource?.sourceId && seriesKey
+              ? await loadLocalCatalogSeriesDetailReadModel({
+                  sourceId: playlistSource.sourceId,
+                  scopeKey: localCatalogScopeKey,
+                  seriesKey,
+                })
+            : null;
+        const seriesDetailPreparing =
+          localSeriesDetail?.status === 'index_building';
+        setIsSeriesDetailPreparing(seriesDetailPreparing);
         const nextItems =
-          category.slug === 'filmes'
+          (localSeriesDetail?.status === 'ready'
+            ? localSeriesDetail.episodes
+            : seriesDetailPreparing
+              ? []
+              : undefined) ??
+          (category.slug === 'filmes'
             ? await (async () => {
                 const localReadStartedAtMs = getMoviesLocalFirstMetricNowMs();
                 const localItems = await loadLocalFirstMovieCategoryItemsByGroup({
@@ -1979,32 +1960,25 @@ export function CatalogCategoryPage({
                   return localItems;
                 }
 
-                const fallbackItems = await loadMoviesAggregateCategoryItemsByGroup({
-                  licenseCode,
-                  deviceIdentifier,
-                  groupTitles: category.groupTitles,
-                });
-
                 logMoviesLocalFirstObservability({
-                  source: 'fallback',
-                  fallbackUsed: true,
+                  source: 'local-first',
+                  fallbackUsed: false,
                   localCount: 0,
                   localGroupCount: 0,
                   configuredGroupCount: category.groupTitles.length,
                   readTimeMs: localReadTimeMs,
-                  fallbackCount: fallbackItems.length,
-                  fallbackGroupCount: countSanitizedMovieGroups(fallbackItems),
                 });
 
-                return fallbackItems;
+                return [];
               })()
             : await loadHomeVodCategoryItems({
                 licenseCode,
                 deviceIdentifier,
+                sourceId: playlistSource?.sourceId,
                 groupTitles: category.groupTitles,
                 limit: CATEGORY_ITEM_LIMIT,
                 slug: category.slug,
-              });
+              }));
 
         if (!isMounted) {
           return;
@@ -2016,11 +1990,13 @@ export function CatalogCategoryPage({
             ? dedupeSeriesCollections(filteredNextItems)
             : filteredNextItems;
 
-        if (isSeriesDetailPage) {
+        if (isSeriesDetailPage && !seriesDetailPreparing) {
           storeCachedSeriesEpisodes(
             {
               licenseCode,
               deviceIdentifier,
+              sourceId: playlistSource?.sourceId,
+              seriesKey,
               groupTitles: category.groupTitles,
               tmdbId: seriesTmdbId,
               tmdbTitle: seriesTmdbTitle,
@@ -2031,6 +2007,18 @@ export function CatalogCategoryPage({
 
         setItems(nextCategoryItems);
         setVisibleItemCount(resolveVisibleCount(nextCategoryItems.length));
+
+        if (!isSeriesDetailPage) {
+          writePresentationRouteCache(
+            {
+              licenseCode,
+              deviceIdentifier,
+              sourceId: playlistSource?.sourceId,
+              route: `${location.pathname}${location.search}`,
+            },
+            nextCategoryItems,
+          );
+        }
       } catch (error) {
         console.warn('[XANDEFLIX_CATEGORY_LOAD_ERROR]', error);
 
@@ -2070,8 +2058,19 @@ export function CatalogCategoryPage({
     seriesTitle,
     playlistSource?.sourceId,
     playlistSource?.sourceType,
+    localCatalogScopeKey,
     playlistStatus,
+    seriesDetailPollTick,
   ]);
+
+  useEffect(() => {
+    if (!isSeriesDetailPage || !isSeriesDetailPreparing) return;
+    const timer = window.setInterval(
+      () => setSeriesDetailPollTick((value) => value + 1),
+      1_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [isSeriesDetailPage, isSeriesDetailPreparing]);
 
   const seriesDetailItems = useMemo(() => {
     if (!isSeriesDetailPage) {
@@ -2295,6 +2294,18 @@ export function CatalogCategoryPage({
     () => buildMovieHeroHighlights(moviesCategorySections),
     [moviesCategorySections],
   );
+  const effectiveMovieHeroHighlights = useMemo(() => {
+    if (
+      locallyEnrichedMovieHeroHighlights.length !== movieHeroHighlights.length ||
+      locallyEnrichedMovieHeroHighlights.some(
+        (item, index) => item.id !== movieHeroHighlights[index]?.id,
+      )
+    ) {
+      return movieHeroHighlights;
+    }
+
+    return locallyEnrichedMovieHeroHighlights;
+  }, [locallyEnrichedMovieHeroHighlights, movieHeroHighlights]);
 
   const movieHeroItem = useMemo(() => {
     if (!isMoviesCategoryPage) {
@@ -2306,7 +2317,71 @@ export function CatalogCategoryPage({
     );
   }, [isMoviesCategoryPage, moviesCategorySections]);
 
-  const activeMovieHeroItem = movieHeroHighlights[0] ?? movieHeroItem;
+  const activeMovieHeroItem = effectiveMovieHeroHighlights[0] ?? movieHeroItem;
+
+  useEffect(() => {
+    if (!isMoviesCategoryPage || movieHeroHighlights.length === 0) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    void import('../services/movieHeroMetadata.service').then(
+      ({ enrichMovieHeroItems }) =>
+        enrichMovieHeroItems(movieHeroHighlights, {
+          sourceId: playlistSource?.sourceId,
+          limit: 5,
+        }).then((enrichedItems) => {
+          if (!isCancelled) {
+            setLocallyEnrichedMovieHeroHighlights(enrichedItems);
+          }
+        }),
+    );
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    isMoviesCategoryPage,
+    movieHeroHighlights,
+    playlistSource?.sourceId,
+  ]);
+
+  const effectiveMovieDetailItem =
+    locallyEnrichedMovieDetailItem?.id === movieDetailItem?.id
+      ? locallyEnrichedMovieDetailItem
+      : movieDetailItem;
+  const movieDetailBackdropUrl = resolveMovieDetailHeroArtworkUrl(
+    effectiveMovieDetailItem,
+  );
+
+  useEffect(() => {
+    if (!isMovieDetailPage || !movieDetailItem) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    void import('../services/movieHeroMetadata.service').then(
+      ({ enrichMovieHeroItems }) =>
+        enrichMovieHeroItems([movieDetailItem], {
+          sourceId: playlistSource?.sourceId,
+          limit: 1,
+        }).then(([enrichedItem]) => {
+          if (!isCancelled) {
+            setLocallyEnrichedMovieDetailItem(enrichedItem ?? null);
+          }
+        }),
+    );
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    isMovieDetailPage,
+    movieDetailItem,
+    playlistSource?.sourceId,
+  ]);
 
   useEffect(() => {
     if (
@@ -2382,7 +2457,9 @@ export function CatalogCategoryPage({
 
     let isCancelled = false;
 
-    void enrichSeriesHeroHighlights(seriesHeroHighlights).then(
+    void enrichSeriesHeroHighlights(seriesHeroHighlights, {
+      sourceId: playlistSource?.sourceId,
+    }).then(
       (enrichedHighlights) => {
         if (!isCancelled) {
           setLocallyEnrichedSeriesHeroHighlights(enrichedHighlights);
@@ -2393,7 +2470,84 @@ export function CatalogCategoryPage({
     return () => {
       isCancelled = true;
     };
-  }, [isSeriesCategoryPage, seriesHeroHighlights]);
+  }, [
+    isSeriesCategoryPage,
+    playlistSource?.sourceId,
+    seriesHeroHighlights,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isSeriesCategoryPage ||
+      seriesCardEnrichmentAttemptedIds.length >= 18
+    ) {
+      return;
+    }
+
+    const attemptedIds = new Set(seriesCardEnrichmentAttemptedIds);
+    const candidates = seriesCategorySections
+      .flatMap((section) => section.items)
+      .filter(
+        (item) =>
+          !attemptedIds.has(item.id) &&
+          isSeriesCardPosterEnrichmentNeeded(item),
+      )
+      .slice(0, 18 - attemptedIds.size);
+
+    if (candidates.length === 0) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    void enrichSeriesCardPosters(candidates, {
+      sourceId: playlistSource?.sourceId,
+      limit: candidates.length,
+    }).then((enrichedItems) => {
+      if (isCancelled) {
+        return;
+      }
+
+      setSeriesCardEnrichmentAttemptedIds((currentIds) => [
+        ...currentIds,
+        ...candidates.map((item) => item.id),
+      ]);
+      const enrichedById = new Map(
+        enrichedItems.map((item) => [item.id, item]),
+      );
+      setItems((currentItems) => {
+        let didChange = false;
+        const nextItems = currentItems.map((item) => {
+          const enrichedItem = enrichedById.get(item.id);
+
+          if (!enrichedItem || enrichedItem === item) {
+            return item;
+          }
+
+          didChange = true;
+          return enrichedItem;
+        });
+
+        return didChange ? nextItems : currentItems;
+      });
+    }).catch(() => {
+      if (!isCancelled) {
+        setSeriesCardEnrichmentAttemptedIds((currentIds) => [
+          ...currentIds,
+          ...candidates.map((item) => item.id),
+        ]);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    isSeriesCategoryPage,
+    playlistSource?.sourceId,
+    seriesCardEnrichmentAttemptedIds,
+    seriesCategorySections,
+  ]);
 
   useEffect(() => {
     setSeriesHeroIndex(0);
@@ -2610,6 +2764,7 @@ export function CatalogCategoryPage({
       const input = {
         licenseCode: activation.licenseCode,
         deviceIdentifier,
+        sourceId: playlistSource?.sourceId,
       };
 
       const cachedSections = getCachedHomeVodSections(input) ?? [];
@@ -3474,9 +3629,9 @@ export function CatalogCategoryPage({
           >
             <div className="relative -mx-4 -mt-4 overflow-hidden bg-black md:absolute md:inset-0 md:m-0 md:rounded-[0.9rem]">
               <div className="relative aspect-video w-full bg-zinc-950 md:absolute md:inset-0 md:h-full md:aspect-auto">
-                {movieDetailItem.backdropUrl || movieDetailItem.posterUrl ? (
+                {movieDetailBackdropUrl ? (
                   <img
-                    src={movieDetailItem.backdropUrl ?? movieDetailItem.posterUrl ?? undefined}
+                    src={movieDetailBackdropUrl}
                     alt={movieDetailItem.tmdbTitle ?? movieDetailItem.title}
                     className="h-full w-full object-cover opacity-95 md:opacity-80"
                     loading="eager"
@@ -3690,6 +3845,8 @@ export function CatalogCategoryPage({
                     title={item.title}
                     subtitle={item.subtitle}
                     posterUrl={item.posterUrl}
+                    artworkCandidates={item.artworkCandidates}
+                    kind={item.kind}
                     eagerLoad={index < 10}
                     index={index}
                     focusKey={getMovieSimilarItemFocusKey(movieDetailFocusSlug, index)}
@@ -3717,6 +3874,12 @@ export function CatalogCategoryPage({
                 </p>
               </section>
             )}
+          </section>
+        ) : isSeriesDetailPreparing ? (
+          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
+            <p className="text-sm font-semibold text-zinc-300">
+              Preparando episódios...
+            </p>
           </section>
         ) : isLoading && visibleItems.length === 0 ? (
           <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
@@ -3760,32 +3923,47 @@ export function CatalogCategoryPage({
                   <div className="space-y-2">
                     {episodeWindowItems.map((item, windowIndex) => {
                       const absoluteIndex = episodeWindowStart + windowIndex;
+                      const seasonNumber = getSeriesDetailSeasonNumber(item);
+                      const previousSeasonNumber = getSeriesDetailSeasonNumber(
+                        seriesDetailItems[absoluteIndex - 1],
+                      );
+                      const showSeasonHeading =
+                        windowIndex === 0 ||
+                        seasonNumber !== previousSeasonNumber;
 
                       return (
-                        <EpisodeListRow
-                          key={item.id}
-                          index={absoluteIndex}
-                          title={resolveEpisodeTitle(item, absoluteIndex)}
-                          playbackStatus={resolveEpisodePlaybackStatus(
-                            item,
-                            absoluteIndex,
-                          )}
-                          progressPercent={resolveEpisodePlaybackProgressPercent(
-                            item,
-                            absoluteIndex,
-                          )}
-                          focusKey={getCategoryItemFocusKey(
-                            category?.slug ?? 'category',
-                            absoluteIndex,
-                          )}
-                          onEnterPress={() => openCategoryItem(item, absoluteIndex)}
-                          onArrowPress={(direction: string) =>
-                            handleCategoryCardArrowPress(
-                              direction,
+                        <div key={item.id}>
+                          {showSeasonHeading ? (
+                            <p className="mb-2 mt-3 px-2 text-xs font-black uppercase tracking-[0.16em] text-zinc-400 first:mt-0">
+                              {seasonNumber === null
+                                ? 'Outros episódios'
+                                : `Temporada ${seasonNumber}`}
+                            </p>
+                          ) : null}
+                          <EpisodeListRow
+                            index={absoluteIndex}
+                            title={resolveEpisodeTitle(item, absoluteIndex)}
+                            playbackStatus={resolveEpisodePlaybackStatus(
+                              item,
                               absoluteIndex,
-                            )
-                          }
-                        />
+                            )}
+                            progressPercent={resolveEpisodePlaybackProgressPercent(
+                              item,
+                              absoluteIndex,
+                            )}
+                            focusKey={getCategoryItemFocusKey(
+                              category?.slug ?? 'category',
+                              absoluteIndex,
+                            )}
+                            onEnterPress={() => openCategoryItem(item, absoluteIndex)}
+                            onArrowPress={(direction: string) =>
+                              handleCategoryCardArrowPress(
+                                direction,
+                                absoluteIndex,
+                              )
+                            }
+                          />
+                        </div>
                       );
                     })}
                   </div>
@@ -3859,6 +4037,8 @@ export function CatalogCategoryPage({
                             : item.subtitle
                         }
                         posterUrl={item.posterUrl}
+                        artworkCandidates={item.artworkCandidates}
+                        kind={item.kind}
                         eagerLoad={sectionIndex === 0 && itemIndex < 8}
                         index={itemIndex}
                         focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
@@ -3902,6 +4082,8 @@ export function CatalogCategoryPage({
                         title={item.title}
                         subtitle={item.subtitle}
                         posterUrl={item.posterUrl}
+                        artworkCandidates={item.artworkCandidates}
+                        kind={item.kind}
                         eagerLoad={sectionIndex === 0 && itemIndex < 8}
                         index={itemIndex}
                         focusKey={getCategoryItemFocusKey(section.id, itemIndex)}
@@ -3935,6 +4117,8 @@ export function CatalogCategoryPage({
                   title={item.title}
                   subtitle={item.subtitle}
                   posterUrl={item.posterUrl}
+                  artworkCandidates={item.artworkCandidates}
+                  kind={item.kind}
                   eagerLoad={index < 12}
                   index={index}
                   focusKey={getCategoryItemFocusKey(

@@ -3,16 +3,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { AdminLayout } from '../components/AdminLayout';
 
 import {
-  importAdminLicenseIptvSourceChannels,
   listAdminIptvSources,
   listAdminLicenseIptvSources,
   listAdminLicenses,
-  testAdminLicenseIptvSource,
   updateAdminIptvSource,
   updateAdminLicenseIptvSource,
 } from '../services';
-
-import type { LicenseIptvSourceDiagnostic } from '../services/adminLicenses.service';
 
 import type {
   IptvSource,
@@ -172,18 +168,6 @@ function getSourceActionErrorMessage(error: unknown) {
   return 'Nao foi possivel concluir a acao da fonte IPTV.';
 }
 
-function formatDiagnosticHttpStatus(diagnostic: LicenseIptvSourceDiagnostic) {
-  if (!diagnostic.responded) {
-    return 'sem resposta HTTP';
-  }
-
-  if (!diagnostic.httpStatus) {
-    return 'HTTP nao informado';
-  }
-
-  return 'HTTP ' + diagnostic.httpStatus;
-}
-
 function createLegacySourceRow(source: IptvSource): AdminIptvSourceRow {
   return {
     id: source.id,
@@ -281,11 +265,6 @@ export function AdminIptvSourcesPage() {
     isActive: true,
   });
   const [isUpdatingSource, setIsUpdatingSource] = useState(false);
-  const [testingSourceId, setTestingSourceId] = useState<string | null>(null);
-  const [importingSourceId, setImportingSourceId] = useState<string | null>(null);
-  const [sourceDiagnostics, setSourceDiagnostics] = useState<
-    Record<string, LicenseIptvSourceDiagnostic>
-  >({});
 
   const rows = useMemo(() => {
     const legacyRows = legacySources.map(createLegacySourceRow);
@@ -384,7 +363,7 @@ export function AdminIptvSourcesPage() {
           (row.licenseCode ?? getShortId(row.licenseId)) +
           '. Origem: ' +
           sourceOriginLabels[row.origin] +
-          '. Teste/importação operacional deve ser feita nos detalhes da licença nesta etapa.',
+          '. O conteúdo é buscado e processado somente no dispositivo autorizado.',
       );
       return;
     }
@@ -454,7 +433,7 @@ export function AdminIptvSourcesPage() {
 
       setEditingSource(null);
       setSuccessMessage(
-        'Fonte IPTV atualizada. Se a URL mudou, teste a fonte e importe os canais novamente para renovar o cache.',
+        'Configuração da fonte IPTV atualizada com sucesso.',
       );
 
       await loadSources();
@@ -462,75 +441,6 @@ export function AdminIptvSourcesPage() {
       setErrorMessage(getSourceActionErrorMessage(error));
     } finally {
       setIsUpdatingSource(false);
-    }
-  }
-
-  async function handleTestSource(row: AdminIptvSourceRow) {
-    if (row.ownerKind !== 'license') {
-      setErrorMessage('Teste operacional esta disponivel apenas para fontes por licenca.');
-      return;
-    }
-
-    try {
-      setTestingSourceId(row.id);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-
-      const diagnostic = await testAdminLicenseIptvSource(row.id);
-
-      setSourceDiagnostics((currentDiagnostics) => ({
-        ...currentDiagnostics,
-        [row.id]: diagnostic,
-      }));
-
-      setSuccessMessage(
-        'Teste da fonte "' +
-          row.name +
-          '" concluido: ' +
-          formatDiagnosticHttpStatus(diagnostic) +
-          ', ' +
-          diagnostic.entryCount +
-          ' entrada(s).',
-      );
-    } catch (error) {
-      setErrorMessage(getSourceActionErrorMessage(error));
-    } finally {
-      setTestingSourceId(null);
-    }
-  }
-
-  async function handleImportSourceChannels(row: AdminIptvSourceRow) {
-    if (row.ownerKind !== 'license') {
-      setErrorMessage('Importacao operacional esta disponivel apenas para fontes por licenca.');
-      return;
-    }
-
-    try {
-      setImportingSourceId(row.id);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-
-      const result = await importAdminLicenseIptvSourceChannels(row.id);
-
-      if (result.skipped) {
-        setSuccessMessage(result.message);
-      } else {
-        setSuccessMessage(
-          'Importacao concluida para "' +
-            row.name +
-            '". Canais recebidos: ' +
-            result.totalParsed +
-            ', importados: ' +
-            result.totalImported +
-            ', atualizados: ' +
-            result.totalUpdated +
-            '.',
-        );
-      }
-    } catch (error) {
-      setErrorMessage(getSourceActionErrorMessage(error));
-    } finally {
-      setImportingSourceId(null);
     }
   }
 
@@ -548,8 +458,8 @@ export function AdminIptvSourcesPage() {
 
           <p className="mt-3 max-w-4xl text-base text-xf-muted">
             Acompanhe fontes legadas por cliente e fontes vinculadas a licenças.
-            O modelo por licença é o caminho principal para canais autorizados,
-            origem da lista e futuro self-service.
+            O modelo por licença mantém somente a autorização e a configuração
+            mínima entregue ao dispositivo.
           </p>
         </div>
 
@@ -559,8 +469,8 @@ export function AdminIptvSourcesPage() {
               Modelo atual
             </p>
             <p className="mt-3 text-sm text-xf-muted">
-              Fontes por licença concentram a operação atual: origem da lista,
-              autorização e importação de canais por licença.
+              Fontes por licença concentram somente autorização, vínculo e
+              configuração mínima da fonte.
             </p>
           </div>
 
@@ -646,9 +556,6 @@ export function AdminIptvSourcesPage() {
                 <tbody>
                   {rows.map((row) => {
                     const operationalStatus = getOperationalStatus(row);
-                    const diagnostic = sourceDiagnostics[row.id];
-                    const isTestingSource = testingSourceId === row.id;
-                    const isImportingSource = importingSourceId === row.id;
 
                     return (
                       <tr
@@ -729,43 +636,12 @@ export function AdminIptvSourcesPage() {
 
                             <button
                               type="button"
-                              onClick={() => void handleTestSource(row)}
-                              disabled={row.ownerKind !== 'license' || isTestingSource}
-                              className="rounded-lg bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {isTestingSource ? 'Testando...' : 'Testar'}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => void handleImportSourceChannels(row)}
-                              disabled={row.ownerKind !== 'license' || isImportingSource}
-                              className="rounded-lg bg-white px-3 py-2 text-[11px] font-bold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {isImportingSource ? 'Importando...' : 'Importar'}
-                            </button>
-
-                            <button
-                              type="button"
                               onClick={() => handleValidateSource(row)}
                               className="rounded-lg bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/20"
                             >
                               Regra
                             </button>
                           </div>
-
-                          {diagnostic ? (
-                            <p
-                              className={
-                                diagnostic.success
-                                  ? 'mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-2 text-[11px] font-semibold text-emerald-100'
-                                  : 'mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[11px] font-semibold text-amber-100'
-                              }
-                            >
-                              {formatDiagnosticHttpStatus(diagnostic)} ·{' '}
-                              {diagnostic.entryCount} entrada(s)
-                            </p>
-                          ) : null}
                         </td>
                       </tr>
                     );

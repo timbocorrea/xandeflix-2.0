@@ -225,10 +225,8 @@ Deno.serve(async (request) => {
       entity_id: source.id,
       metadata: {
         licenseId: license.id,
-        licenseCode: license.license_code,
         sourceId: source.id,
-        name: source.name,
-        type: source.type,
+        sourceType: source.type,
         isActive: source.is_active,
         createdBy: source.created_by,
       },

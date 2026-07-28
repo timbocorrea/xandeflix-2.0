@@ -83,16 +83,6 @@ function getChangedFields(
   return editableFields.filter((field) => previousValues[field] !== nextValues[field]);
 }
 
-function pickChangedValues(
-  values: LicenseIptvSourceValues,
-  changedFields: LicenseIptvSourceField[],
-) {
-  return changedFields.reduce<Record<string, unknown>>((selectedValues, field) => {
-    selectedValues[field] = values[field];
-    return selectedValues;
-  }, {});
-}
-
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -220,7 +210,7 @@ Deno.serve(async (request) => {
 
     const { data: license, error: licenseError } = await supabaseAdmin
       .from('licenses')
-      .select('id, license_code, admin_owner_id')
+      .select('id, admin_owner_id')
       .eq('id', existingSource.license_id)
       .maybeSingle();
 
@@ -301,11 +291,13 @@ Deno.serve(async (request) => {
       entity_id: updatedSource.id,
       metadata: {
         licenseId: license.id,
-        licenseCode: license.license_code,
         sourceId: updatedSource.id,
-        changedFields,
-        previousValues: pickChangedValues(previousValues, changedFields),
-        nextValues: pickChangedValues(nextValues, changedFields),
+        sourceType: updatedSource.type,
+        isActive: updatedSource.is_active,
+        nameChanged: changedFields.includes('name'),
+        sourceUrlChanged: changedFields.includes('source_url'),
+        sourceTypeChanged: changedFields.includes('type'),
+        statusChanged: changedFields.includes('is_active'),
       },
     });
 
