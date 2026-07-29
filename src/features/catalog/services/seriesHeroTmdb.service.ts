@@ -182,6 +182,108 @@ export function hydrateSeriesHeroHighlightsFromCache(items: HomeVodItem[]) {
   });
 }
 
+function firstNonEmpty(
+  primary: string | null | undefined,
+  fallback: string | null | undefined,
+) {
+  return primary?.trim() ? primary : fallback?.trim() ? fallback : undefined;
+}
+
+function mergeArtworkCandidatesLocalFirst(
+  localCandidates: HomeVodItem['artworkCandidates'],
+  supplementalCandidates: HomeVodItem['artworkCandidates'],
+) {
+  const candidates = [
+    ...(localCandidates ?? []),
+    ...(supplementalCandidates ?? []),
+  ];
+  const seenUrls = new Set<string>();
+
+  return candidates.filter((candidate) => {
+    if (!candidate.url || seenUrls.has(candidate.url)) {
+      return false;
+    }
+
+    seenUrls.add(candidate.url);
+    return true;
+  });
+}
+
+export function mergeSeriesDetailMetadataLocalFirst(
+  localItem: HomeVodItem,
+  supplementalItem: HomeVodItem,
+): HomeVodItem {
+  const artworkCandidates = mergeArtworkCandidatesLocalFirst(
+    localItem.artworkCandidates,
+    supplementalItem.artworkCandidates,
+  );
+
+  return {
+    ...localItem,
+    overview: firstNonEmpty(localItem.overview, supplementalItem.overview),
+    posterUrl: firstNonEmpty(localItem.posterUrl, supplementalItem.posterUrl),
+    backdropUrl: firstNonEmpty(
+      localItem.backdropUrl,
+      supplementalItem.backdropUrl,
+    ),
+    artworkCandidates:
+      artworkCandidates.length > 0 ? artworkCandidates : undefined,
+    tmdbId: firstNonEmpty(localItem.tmdbId, supplementalItem.tmdbId),
+    tmdbTitle: firstNonEmpty(localItem.tmdbTitle, supplementalItem.tmdbTitle),
+    tmdbGenres: firstNonEmpty(
+      localItem.tmdbGenres,
+      supplementalItem.tmdbGenres,
+    ),
+    tmdbRating: firstNonEmpty(
+      localItem.tmdbRating,
+      supplementalItem.tmdbRating,
+    ),
+    tmdbReleaseYear: firstNonEmpty(
+      localItem.tmdbReleaseYear,
+      supplementalItem.tmdbReleaseYear,
+    ),
+    metadataProvider:
+      supplementalItem.metadataProvider ?? localItem.metadataProvider,
+    metadataProviderId:
+      supplementalItem.metadataProviderId ?? localItem.metadataProviderId,
+    metadataProvenance: {
+      ...supplementalItem.metadataProvenance,
+      ...localItem.metadataProvenance,
+    },
+    metadataSourceUrls: {
+      ...supplementalItem.metadataSourceUrls,
+      ...localItem.metadataSourceUrls,
+    },
+  };
+}
+
+export function hydrateSeriesDetailHeroFromCache(
+  item: HomeVodItem,
+  hydrateFromCache: typeof hydrateSeriesHeroHighlightsFromCache =
+    hydrateSeriesHeroHighlightsFromCache,
+) {
+  const cachedItem = hydrateFromCache([item])[0] ?? item;
+
+  return mergeSeriesDetailMetadataLocalFirst(item, cachedItem);
+}
+
+export function shouldRequestSeriesDetailMetadata({
+  isSeriesDetailPage,
+  item,
+  sourceId,
+}: {
+  isSeriesDetailPage: boolean;
+  item: HomeVodItem | null;
+  sourceId?: string | null;
+}) {
+  return Boolean(
+    isSeriesDetailPage &&
+      item &&
+      sourceId?.trim() &&
+      createSeriesMetadataQuery(item),
+  );
+}
+
 function createImageUrl(path: string | null | undefined, size: 'w500' | 'w780') {
   return path ? `${TMDB_IMAGE_BASE_URL}/${size}${path}` : undefined;
 }
@@ -580,12 +682,57 @@ export async function enrichSeriesHeroHighlights(
   return enrichSeriesMetadataItems(items, options);
 }
 
-type SeriesMetadataEnrichmentDependencies = {
+export type SeriesMetadataEnrichmentDependencies = {
   primaryProvider?: SeriesMetadataProvider;
   fallbackProvider?: SeriesMetadataProvider;
   cache?: SeriesMetadataCache;
   scopeKey?: string;
 };
+
+const seriesDetailMetadataRequests = new Map<string, Promise<HomeVodItem>>();
+
+export async function enrichSeriesDetailHeroItem(
+  item: HomeVodItem,
+  options: { sourceId?: string } = {},
+  dependencies: SeriesMetadataEnrichmentDependencies = {},
+) {
+  const query = createSeriesMetadataQuery(item);
+
+  if (!query) {
+    return item;
+  }
+
+  const useSharedRequest = Object.keys(dependencies).length === 0;
+  const requestKey = [
+    options.sourceId?.trim() || 'without-source',
+    query.seriesKey,
+  ].join('::');
+  let request = useSharedRequest
+    ? seriesDetailMetadataRequests.get(requestKey)
+    : undefined;
+
+  if (!request) {
+    request = enrichSeriesMetadataItems(
+      [item],
+      options,
+      dependencies,
+    ).then((items) => items[0] ?? item);
+
+    if (useSharedRequest) {
+      seriesDetailMetadataRequests.set(requestKey, request);
+      const clearSharedRequest = () => {
+        if (seriesDetailMetadataRequests.get(requestKey) === request) {
+          seriesDetailMetadataRequests.delete(requestKey);
+        }
+      };
+      void request.then(clearSharedRequest, clearSharedRequest);
+    }
+  }
+
+  const supplementalItem = await request;
+
+  return mergeSeriesDetailMetadataLocalFirst(item, supplementalItem);
+}
 
 async function enrichSeriesMetadataItems(
   items: HomeVodItem[],

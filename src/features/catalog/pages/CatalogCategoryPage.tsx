@@ -43,9 +43,12 @@ import { sortEpisodesNaturally } from '../services/episodeNaturalOrder.service';
 
 import {
   enrichSeriesCardPosters,
+  enrichSeriesDetailHeroItem,
   enrichSeriesHeroHighlights,
+  hydrateSeriesDetailHeroFromCache,
   hydrateSeriesHeroHighlightsFromCache,
   isSeriesCardPosterEnrichmentNeeded,
+  shouldRequestSeriesDetailMetadata,
 } from '../services/seriesHeroTmdb.service';
 import {
   getHorizontalHeroArtworkCandidates,
@@ -1643,6 +1646,8 @@ export function CatalogCategoryPage({
     useState<HomeVodItem[]>([]);
   const [locallyEnrichedMovieDetailItem, setLocallyEnrichedMovieDetailItem] =
     useState<HomeVodItem | null>(null);
+  const [locallyEnrichedSeriesDetailHero, setLocallyEnrichedSeriesDetailHero] =
+    useState<{ item: HomeVodItem; sourceId: string } | null>(null);
   const [seriesCardEnrichmentAttemptedIds, setSeriesCardEnrichmentAttemptedIds] =
     useState<string[]>([]);
   const [similarItems, setSimilarItems] = useState<HomeVodItem[]>([]);
@@ -2124,6 +2129,21 @@ export function CatalogCategoryPage({
     seriesTmdbTitle,
     seriesTitle,
   ]);
+  const cachedSeriesDetailHero = useMemo(
+    () =>
+      heroItem
+        ? hydrateSeriesDetailHeroFromCache(heroItem)
+        : null,
+    [heroItem],
+  );
+  const effectiveSeriesDetailHero =
+    locallyEnrichedSeriesDetailHero &&
+    cachedSeriesDetailHero &&
+    locallyEnrichedSeriesDetailHero.sourceId === playlistSource?.sourceId &&
+    getSeriesCollectionKey(locallyEnrichedSeriesDetailHero.item) ===
+      getSeriesCollectionKey(cachedSeriesDetailHero)
+      ? locallyEnrichedSeriesDetailHero.item
+      : cachedSeriesDetailHero;
   const movieDetailCandidates = useMemo(() => {
     if (!isMovieDetailPage) {
       return [];
@@ -2574,6 +2594,44 @@ export function CatalogCategoryPage({
 
     void loadSimilarCollections(heroItem);
   }, [heroItem, isSeriesDetailPage]);
+
+  useEffect(() => {
+    if (
+      !shouldRequestSeriesDetailMetadata({
+        isSeriesDetailPage,
+        item: cachedSeriesDetailHero,
+        sourceId: playlistSource?.sourceId,
+      }) ||
+      !cachedSeriesDetailHero ||
+      !playlistSource?.sourceId
+    ) {
+      return;
+    }
+
+    let isCancelled = false;
+    const sourceId = playlistSource.sourceId;
+
+    void enrichSeriesDetailHeroItem(cachedSeriesDetailHero, {
+      sourceId,
+    })
+      .then((enrichedItem) => {
+        if (!isCancelled) {
+          setLocallyEnrichedSeriesDetailHero({
+            item: enrichedItem,
+            sourceId,
+          });
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    cachedSeriesDetailHero,
+    isSeriesDetailPage,
+    playlistSource?.sourceId,
+  ]);
 
   const episodeWindowStart = isSeriesDetailPage
     ? getEpisodeWindowStart(episodeFocusIndex, seriesDetailItems.length)
@@ -3714,7 +3772,7 @@ export function CatalogCategoryPage({
 
             </div>
           </SeriesDetailHeroFrame>
-        ) : isSeriesDetailPage && heroItem ? (
+        ) : isSeriesDetailPage && effectiveSeriesDetailHero ? (
           <SeriesDetailHeroFrame
             disabled={seriesDetailItems.length === 0}
             onEnterPress={() => {
@@ -3727,17 +3785,19 @@ export function CatalogCategoryPage({
             <div
               className="absolute inset-0 bg-cover bg-center opacity-35 blur-[1px]"
               style={{
-                backgroundImage: heroItem.backdropUrl || heroItem.posterUrl
-                  ? `linear-gradient(90deg, rgba(0,0,0,0.92), rgba(0,0,0,0.62), rgba(0,0,0,0.88)), url(${heroItem.backdropUrl ?? heroItem.posterUrl})`
+                backgroundImage:
+                  effectiveSeriesDetailHero.backdropUrl ||
+                  effectiveSeriesDetailHero.posterUrl
+                  ? `linear-gradient(90deg, rgba(0,0,0,0.92), rgba(0,0,0,0.62), rgba(0,0,0,0.88)), url(${effectiveSeriesDetailHero.backdropUrl ?? effectiveSeriesDetailHero.posterUrl})`
                   : undefined,
               }}
             />
             <div className="relative grid gap-4 md:grid-cols-[9.5rem_1fr] md:items-center">
               <div className="overflow-hidden rounded-[0.65rem] border border-white/10 bg-white/5 shadow-xl">
-                {heroItem.posterUrl ? (
+                {effectiveSeriesDetailHero.posterUrl ? (
                   <img
-                    src={heroItem.posterUrl}
-                    alt={category?.title ?? heroItem.title}
+                    src={effectiveSeriesDetailHero.posterUrl}
+                    alt={category?.title ?? effectiveSeriesDetailHero.title}
                     className="aspect-[2/3] h-full w-full object-cover"
                     loading="eager"
                   />
@@ -3751,31 +3811,31 @@ export function CatalogCategoryPage({
                   Serie / Novela
                 </p>
                 <h1 className="mt-1 text-[1.25rem] font-black tracking-[-0.04em] text-white md:text-[1.65rem]">
-                  {category?.title ?? heroItem.title}
+                  {category?.title ?? effectiveSeriesDetailHero.title}
                 </h1>
 
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.58rem] font-bold text-zinc-200">
-                  {heroItem.tmdbReleaseYear ? (
+                  {effectiveSeriesDetailHero.tmdbReleaseYear ? (
                     <span className="rounded-full border border-white/10 bg-white/10 px-2 py-1">
-                      {heroItem.tmdbReleaseYear}
+                      {effectiveSeriesDetailHero.tmdbReleaseYear}
                     </span>
                   ) : null}
 
-                  {heroItem.tmdbRating ? (
+                  {effectiveSeriesDetailHero.tmdbRating ? (
                     <span className="rounded-full border border-white/10 bg-white/10 px-2 py-1">
-                      Nota {formatHeroRating(heroItem.tmdbRating)}
+                      Nota {formatHeroRating(effectiveSeriesDetailHero.tmdbRating)}
                     </span>
                   ) : null}
 
-                  {heroItem.tmdbGenres ? (
+                  {effectiveSeriesDetailHero.tmdbGenres ? (
                     <span className="rounded-full border border-white/10 bg-white/10 px-2 py-1">
-                      {heroItem.tmdbGenres}
+                      {effectiveSeriesDetailHero.tmdbGenres}
                     </span>
                   ) : null}
                 </div>
 
                 <p className="mt-3 max-w-3xl line-clamp-3 text-[0.78rem] font-semibold leading-relaxed text-zinc-200 md:text-sm">
-                  {heroItem.overview ??
+                  {effectiveSeriesDetailHero.overview ??
                     category?.description ??
                     'Episodios disponiveis para esta serie/novela.'}
                 </p>
