@@ -96,6 +96,11 @@ type SeriesNavigationState = {
   selectedSeriesItem?: HomeVodItem;
 };
 
+type EnrichedMovieDetailState = {
+  item: HomeVodItem;
+  requestIdentity: string;
+};
+
 const SERIES_LANDING_ITEMS_STORAGE_PREFIX = 'xandeflix:series-landing-items:v2:';
 const SERIES_LANDING_ITEMS_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -431,6 +436,16 @@ function createMovieNavigationItem(item: HomeVodItem): HomeVodItem {
     streamUrl: item.streamUrl,
     kind: 'movie',
   };
+}
+
+function createMovieDetailRequestIdentity(
+  item: HomeVodItem,
+  sourceId?: string | null,
+) {
+  return [
+    sourceId?.trim() || 'without-source',
+    item.id?.trim() || item.tmdbId?.trim() || item.tmdbTitle?.trim() || item.title,
+  ].join('::');
 }
 
 function mergeSeriesHeroMetadata(
@@ -1645,7 +1660,7 @@ export function CatalogCategoryPage({
   const [locallyEnrichedMovieHeroHighlights, setLocallyEnrichedMovieHeroHighlights] =
     useState<HomeVodItem[]>([]);
   const [locallyEnrichedMovieDetailItem, setLocallyEnrichedMovieDetailItem] =
-    useState<HomeVodItem | null>(null);
+    useState<EnrichedMovieDetailState | null>(null);
   const [locallyEnrichedSeriesDetailHero, setLocallyEnrichedSeriesDetailHero] =
     useState<{ item: HomeVodItem; sourceId: string } | null>(null);
   const [seriesCardEnrichmentAttemptedIds, setSeriesCardEnrichmentAttemptedIds] =
@@ -2231,6 +2246,17 @@ export function CatalogCategoryPage({
     movieTmdbId,
     movieTmdbTitle,
   ]);
+  const movieDetailRequestIdentity = movieDetailItem
+    ? createMovieDetailRequestIdentity(
+        movieDetailItem,
+        playlistSource?.sourceId,
+      )
+    : null;
+  const effectiveMovieDetailItem =
+    locallyEnrichedMovieDetailItem &&
+    locallyEnrichedMovieDetailItem.requestIdentity === movieDetailRequestIdentity
+      ? locallyEnrichedMovieDetailItem.item
+      : movieDetailItem;
 
   const movieDetailFocusSlug = movieDetailItem
     ? `movie-detail-${
@@ -2251,8 +2277,8 @@ export function CatalogCategoryPage({
 
   const isSeriesCategoryPage = !isSeriesDetailPage && category?.slug === 'series';
   const isMoviesCategoryPage = !isSeriesDetailPage && category?.slug === 'filmes';
-  const movieDetailMetadataItems = movieDetailItem
-    ? buildMovieDetailMetadataItems(movieDetailItem)
+  const movieDetailMetadataItems = effectiveMovieDetailItem
+    ? buildMovieDetailMetadataItems(effectiveMovieDetailItem)
     : [];
   const movieSimilarItems = useMemo(() => {
     if (!isMovieDetailPage || !movieDetailItem) {
@@ -2367,13 +2393,10 @@ export function CatalogCategoryPage({
     playlistSource?.sourceId,
   ]);
 
-  const effectiveMovieDetailItem =
-    locallyEnrichedMovieDetailItem?.id === movieDetailItem?.id
-      ? locallyEnrichedMovieDetailItem
-      : movieDetailItem;
   const movieDetailBackdropUrl = resolveMovieDetailHeroArtworkUrl(
     effectiveMovieDetailItem,
   );
+  const movieDetailPosterUrl = effectiveMovieDetailItem?.posterUrl;
 
   useEffect(() => {
     if (!isMovieDetailPage || !movieDetailItem) {
@@ -2382,17 +2405,24 @@ export function CatalogCategoryPage({
 
     let isCancelled = false;
 
+    const requestIdentity = createMovieDetailRequestIdentity(
+      movieDetailItem,
+      playlistSource?.sourceId,
+    );
+
     void import('../services/movieHeroMetadata.service').then(
-      ({ enrichMovieHeroItems }) =>
-        enrichMovieHeroItems([movieDetailItem], {
+      ({ enrichMovieDetailItem }) =>
+        enrichMovieDetailItem(movieDetailItem, {
           sourceId: playlistSource?.sourceId,
-          limit: 1,
-        }).then(([enrichedItem]) => {
+        }).then((enrichedItem) => {
           if (!isCancelled) {
-            setLocallyEnrichedMovieDetailItem(enrichedItem ?? null);
+            setLocallyEnrichedMovieDetailItem({
+              item: enrichedItem,
+              requestIdentity,
+            });
           }
         }),
-    );
+    ).catch(() => undefined);
 
     return () => {
       isCancelled = true;
@@ -3679,9 +3709,9 @@ export function CatalogCategoryPage({
       mainClassName="xf-tv-safe-main px-3 pb-24 md:px-7 md:pb-9 lg:px-8 xl:px-10"
     >
       <main className="mx-auto w-full max-w-[1920px]">
-        {isMovieDetailPage && movieDetailItem ? (
+        {isMovieDetailPage && effectiveMovieDetailItem ? (
           <SeriesDetailHeroFrame
-            disabled={!movieDetailItem.streamUrl}
+            disabled={!effectiveMovieDetailItem.streamUrl}
             onEnterPress={playMovieDetailItem}
             onArrowPress={handleMovieDetailHeroArrowPress}
           >
@@ -3690,8 +3720,21 @@ export function CatalogCategoryPage({
                 {movieDetailBackdropUrl ? (
                   <img
                     src={movieDetailBackdropUrl}
-                    alt={movieDetailItem.tmdbTitle ?? movieDetailItem.title}
+                    alt={
+                      effectiveMovieDetailItem.tmdbTitle ??
+                      effectiveMovieDetailItem.title
+                    }
                     className="h-full w-full object-cover opacity-95 md:opacity-80"
+                    loading="eager"
+                  />
+                ) : movieDetailPosterUrl ? (
+                  <img
+                    src={movieDetailPosterUrl}
+                    alt={
+                      effectiveMovieDetailItem.tmdbTitle ??
+                      effectiveMovieDetailItem.title
+                    }
+                    className="h-full w-full object-contain opacity-95 md:opacity-85"
                     loading="eager"
                   />
                 ) : (
@@ -3715,7 +3758,8 @@ export function CatalogCategoryPage({
 
             <div className="relative z-10 px-1 pb-1 pt-4 text-left md:flex md:min-h-[25.5rem] md:max-w-[52rem] md:flex-col md:justify-end md:px-2 md:pb-3 md:pt-20 xl:min-h-[28.5rem]">
               <h1 className="text-[1.58rem] font-black leading-[1.02] tracking-[-0.04em] text-white md:max-w-[46rem] md:text-[clamp(1.9rem,3.2vw,3.25rem)] md:leading-[0.96]">
-                {movieDetailItem.tmdbTitle ?? movieDetailItem.title}
+                {effectiveMovieDetailItem.tmdbTitle ??
+                  effectiveMovieDetailItem.title}
               </h1>
 
               {movieDetailMetadataItems.length > 0 ? (
@@ -3737,15 +3781,15 @@ export function CatalogCategoryPage({
 
 
               <p className="mt-4 text-[0.86rem] font-normal leading-snug text-zinc-200 md:mt-3 md:max-w-3xl md:text-[clamp(0.66rem,0.86vw,0.78rem)] md:leading-relaxed">
-                {getMovieHeroOverview(movieDetailItem) ??
-                  movieDetailItem.overview ??
+                {getMovieHeroOverview(effectiveMovieDetailItem) ??
+                  effectiveMovieDetailItem.overview ??
                   'Detalhes indisponiveis para este filme.'}
               </p>
 
               <div className="mt-3 grid gap-2 md:flex md:w-fit md:gap-2">
                 <FocusableButton
                   focusKey={'movie-detail-play'}
-                  disabled={!movieDetailItem.streamUrl}
+                  disabled={!effectiveMovieDetailItem.streamUrl}
                   className="flex min-h-[2.65rem] w-full items-center justify-center gap-2 rounded-[0.28rem] border border-white bg-white px-3.5 py-2.5 text-[0.86rem] font-black text-black transition data-[focused=true]:scale-[1.02] md:min-h-[calc(var(--xf-action-height)*0.5)] md:w-auto md:px-[calc(var(--xf-action-inline-padding)*0.42)] md:text-[clamp(0.52rem,0.68vw,0.64rem)]"
                   onClick={playMovieDetailItem}
                   onEnterPress={playMovieDetailItem}
