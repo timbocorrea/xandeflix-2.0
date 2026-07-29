@@ -16,6 +16,27 @@ const MOVIE_HERO_ERROR_TTL_MS = 5 * 60 * 1000;
 const MOVIE_HERO_ENRICHMENT_LIMIT = 5;
 const MOVIE_HERO_ENRICHMENT_CONCURRENCY = 3;
 const TMDB_REQUEST_TIMEOUT_MS = 8000;
+const MOVIE_GENRES_BY_ID = new Map<number, string>([
+  [12, 'Aventura'],
+  [14, 'Fantasia'],
+  [16, 'Animação'],
+  [18, 'Drama'],
+  [27, 'Terror'],
+  [28, 'Ação'],
+  [35, 'Comédia'],
+  [36, 'História'],
+  [37, 'Faroeste'],
+  [53, 'Suspense'],
+  [80, 'Crime'],
+  [99, 'Documentário'],
+  [878, 'Ficção científica'],
+  [9648, 'Mistério'],
+  [10402, 'Música'],
+  [10749, 'Romance'],
+  [10751, 'Família'],
+  [10752, 'Guerra'],
+  [10770, 'Cinema TV'],
+]);
 
 type TmdbMovieResult = {
   id?: number;
@@ -29,20 +50,36 @@ type TmdbMovieResult = {
   genre_ids?: number[];
 };
 
-type MovieHeroMetadata = {
+export type MovieHeroMetadata = {
   tmdbId?: string;
   tmdbTitle?: string;
   overview?: string;
   posterUrl?: string;
   backdropUrl?: string;
+  tmdbGenres?: string;
   tmdbRating?: string;
   tmdbReleaseYear?: string;
 };
 
-type MovieHeroCacheEntry = {
+export type MovieHeroCacheEntry = {
   status: 'matched' | 'no_match' | 'error';
   metadata?: MovieHeroMetadata;
   expiresAt: number;
+};
+
+export type MovieMetadataCache = {
+  get: (key: string) => Promise<unknown>;
+  set: (key: string, entry: MovieHeroCacheEntry) => Promise<void>;
+};
+
+export type MovieMetadataEnrichmentOptions = {
+  sourceId?: string;
+  limit?: number;
+  fetchImpl?: typeof fetch;
+  apiKey?: string;
+  detailMode?: boolean;
+  scopeKey?: string;
+  cache?: MovieMetadataCache;
 };
 
 export type MovieSearchIdentity = {
@@ -122,6 +159,41 @@ function createMovieIdentity(item: HomeVodItem): string {
   return parseMovieSearchIdentity(item.tmdbTitle || item.title).normalizedTitle;
 }
 
+export function createMovieDetailRequestIdentity(
+  item: HomeVodItem,
+  sourceId?: string | null,
+) {
+  return [
+    sourceId?.trim() || 'without-source',
+    item.id?.trim() || createMovieIdentity(item),
+  ].join('::');
+}
+
+export function shouldRequestMovieDetailMetadata({
+  isMovieDetailPage,
+  item,
+  sourceId,
+}: {
+  isMovieDetailPage: boolean;
+  item: HomeVodItem | null;
+  sourceId?: string | null;
+}) {
+  return Boolean(
+    isMovieDetailPage &&
+      item?.kind === 'movie' &&
+      sourceId?.trim() &&
+      createMovieIdentity(item) &&
+      !(
+        item.overview?.trim() &&
+        item.posterUrl?.trim() &&
+        item.backdropUrl?.trim() &&
+        item.tmdbGenres?.trim() &&
+        item.tmdbRating?.trim() &&
+        item.tmdbReleaseYear?.trim()
+      ),
+  );
+}
+
 function createCacheKey(scopeKey: string, movieIdentity: string) {
   return `${MOVIE_HERO_CACHE_PREFIX}::${scopeKey}::${movieIdentity}`;
 }
@@ -162,12 +234,17 @@ function isConfidentMovieMatch(
 }
 
 function toMetadata(result: TmdbMovieResult): MovieHeroMetadata {
+  const genres = (result.genre_ids ?? [])
+    .map((genreId) => MOVIE_GENRES_BY_ID.get(genreId))
+    .filter((genre): genre is string => Boolean(genre));
+
   return {
     tmdbId: typeof result.id === 'number' ? String(result.id) : undefined,
     tmdbTitle: result.title || result.original_title,
     overview: result.overview?.trim() || undefined,
     posterUrl: createImageUrl(result.poster_path, 'w500'),
     backdropUrl: createImageUrl(result.backdrop_path, 'w780'),
+    tmdbGenres: genres.length > 0 ? genres.join(', ') : undefined,
     tmdbRating:
       typeof result.vote_average === 'number' && result.vote_average > 0
         ? String(Number(result.vote_average.toFixed(2)))
@@ -176,12 +253,15 @@ function toMetadata(result: TmdbMovieResult): MovieHeroMetadata {
   };
 }
 
-function applyMetadata(item: HomeVodItem, metadata?: MovieHeroMetadata) {
+export function applyMovieMetadataLocalFirst(
+  item: HomeVodItem,
+  metadata?: MovieHeroMetadata,
+) {
   if (!metadata) {
     return item;
   }
 
-  const backdropUrl = metadata.backdropUrl || item.backdropUrl;
+  const backdropUrl = item.backdropUrl || metadata.backdropUrl;
   const existingCandidates = item.artworkCandidates ?? [];
   const hasBackdropCandidate =
     Boolean(backdropUrl) &&
@@ -211,14 +291,15 @@ function applyMetadata(item: HomeVodItem, metadata?: MovieHeroMetadata) {
 
   return {
     ...item,
-    tmdbId: metadata.tmdbId || item.tmdbId,
-    tmdbTitle: metadata.tmdbTitle || item.tmdbTitle,
-    overview: metadata.overview || item.overview,
+    tmdbId: item.tmdbId || metadata.tmdbId,
+    tmdbTitle: item.tmdbTitle || metadata.tmdbTitle,
+    overview: item.overview || metadata.overview,
     posterUrl: item.posterUrl || metadata.posterUrl,
     backdropUrl,
     artworkCandidates,
-    tmdbRating: metadata.tmdbRating || item.tmdbRating,
-    tmdbReleaseYear: metadata.tmdbReleaseYear || item.tmdbReleaseYear,
+    tmdbGenres: item.tmdbGenres || metadata.tmdbGenres,
+    tmdbRating: item.tmdbRating || metadata.tmdbRating,
+    tmdbReleaseYear: item.tmdbReleaseYear || metadata.tmdbReleaseYear,
   } satisfies HomeVodItem;
 }
 
@@ -283,6 +364,21 @@ async function fetchMovieMetadata(
   }
 }
 
+function createLocalMovieMetadataCache(): MovieMetadataCache {
+  return {
+    async get(key) {
+      return (await getLocalCatalogMetadata(key))?.value ?? null;
+    },
+    async set(key, entry) {
+      await putLocalCatalogMetadata({
+        key,
+        value: entry,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+  };
+}
+
 export async function enrichMovieHeroItems(
   items: HomeVodItem[],
   {
@@ -290,24 +386,34 @@ export async function enrichMovieHeroItems(
     limit = MOVIE_HERO_ENRICHMENT_LIMIT,
     fetchImpl = globalThis.fetch,
     apiKey = env.tmdbApiKey,
-  }: {
-    sourceId?: string;
-    limit?: number;
-    fetchImpl?: typeof fetch;
-    apiKey?: string;
-  } = {},
+    detailMode = false,
+    scopeKey: providedScopeKey,
+    cache = createLocalMovieMetadataCache(),
+  }: MovieMetadataEnrichmentOptions = {},
 ) {
   const boundedItems = items
-    .filter((item) => item.kind === 'movie' && !item.backdropUrl)
+    .filter(
+      (item) =>
+        item.kind === 'movie' &&
+        (detailMode
+          ? shouldRequestMovieDetailMetadata({
+              isMovieDetailPage: true,
+              item,
+              sourceId,
+            })
+          : !item.backdropUrl),
+    )
     .slice(0, Math.max(0, limit));
 
   if (boundedItems.length === 0) {
     return items;
   }
 
-  const scopeKey = sourceId?.trim()
-    ? await resolveSeriesMetadataCacheScopeKey(sourceId).catch(() => null)
-    : null;
+  const scopeKey =
+    providedScopeKey ??
+    (sourceId?.trim()
+      ? await resolveSeriesMetadataCacheScopeKey(sourceId).catch(() => null)
+      : null);
 
   if (!scopeKey) {
     return items;
@@ -332,15 +438,16 @@ export async function enrichMovieHeroItems(
       }
 
       const cacheKey = createCacheKey(effectiveScopeKey, movieIdentity);
-      const cachedRecord = await getLocalCatalogMetadata(cacheKey).catch(
-        () => null,
-      );
-      const cachedEntry = isMovieHeroCacheEntry(cachedRecord?.value)
-        ? cachedRecord.value
+      const cachedValue = await cache.get(cacheKey).catch(() => null);
+      const cachedEntry = isMovieHeroCacheEntry(cachedValue)
+        ? cachedValue
         : null;
 
       if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
-        enrichedById.set(item.id, applyMetadata(item, cachedEntry.metadata));
+        enrichedById.set(
+          item.id,
+          applyMovieMetadataLocalFirst(item, cachedEntry.metadata),
+        );
         continue;
       }
 
@@ -357,12 +464,11 @@ export async function enrichMovieHeroItems(
         expiresAt: Date.now() + ttl,
       };
 
-      await putLocalCatalogMetadata({
-        key: cacheKey,
-        value: entry,
-        updatedAt: new Date().toISOString(),
-      }).catch(() => undefined);
-      enrichedById.set(item.id, applyMetadata(item, entry.metadata));
+      await cache.set(cacheKey, entry).catch(() => undefined);
+      enrichedById.set(
+        item.id,
+        applyMovieMetadataLocalFirst(item, entry.metadata),
+      );
     }
   }
 
@@ -379,4 +485,17 @@ export async function enrichMovieHeroItems(
   );
 
   return items.map((item) => enrichedById.get(item.id) ?? item);
+}
+
+export async function enrichMovieDetailItem(
+  item: HomeVodItem,
+  options: Omit<MovieMetadataEnrichmentOptions, 'limit' | 'detailMode'> = {},
+) {
+  const [enrichedItem] = await enrichMovieHeroItems([item], {
+    ...options,
+    limit: 1,
+    detailMode: true,
+  });
+
+  return enrichedItem ?? item;
 }
