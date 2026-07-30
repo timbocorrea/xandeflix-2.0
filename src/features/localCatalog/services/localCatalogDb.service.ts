@@ -828,6 +828,40 @@ export async function getLocalCatalogMetadata(key: string) {
   }
 }
 
+export async function getLocalCatalogMetadataBatch(keys: string[]) {
+  const normalizedKeys = Array.from(
+    new Set(keys.map((key) => key.trim()).filter(Boolean)),
+  );
+
+  if (normalizedKeys.length === 0) {
+    return new Map<string, LocalCatalogMetadata>();
+  }
+
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(CATALOG_METADATA_STORE, 'readonly');
+    const transactionDone = waitForTransaction(transaction);
+    const store = transaction.objectStore(CATALOG_METADATA_STORE);
+    const records = await Promise.all(
+      normalizedKeys.map(async (key) => {
+        const record = await requestToPromise(store.get(key));
+        return [key, record as LocalCatalogMetadata | undefined] as const;
+      }),
+    );
+    await transactionDone;
+
+    return new Map(
+      records.filter(
+        (entry): entry is readonly [string, LocalCatalogMetadata] =>
+          Boolean(entry[1]),
+      ),
+    );
+  } finally {
+    db.close();
+  }
+}
+
 export async function putLocalCatalogMetadata(
   metadata: LocalCatalogMetadata,
 ) {

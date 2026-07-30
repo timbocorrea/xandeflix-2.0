@@ -13,7 +13,10 @@ const RESOLVED_SERIES_METADATA_PREFIX = 'resolved-series-metadata';
 const SOURCE_SCOPE_DOMAIN =
   'xandeflix:resolved-series-metadata-source-scope:v1:';
 
-function createCacheKey(scopeKey: string, seriesKey: string) {
+export function createSeriesMetadataCacheKey(
+  scopeKey: string,
+  seriesKey: string,
+) {
   return [
     RESOLVED_SERIES_METADATA_PREFIX,
     scopeKey.trim(),
@@ -97,7 +100,7 @@ export function createLocalSeriesMetadataCache(): SeriesMetadataCache {
   return {
     async get(scopeKey, seriesKey) {
       const record = await getLocalCatalogMetadata(
-        createCacheKey(scopeKey, seriesKey),
+        createSeriesMetadataCacheKey(scopeKey, seriesKey),
       );
 
       return isSeriesMetadataResolution(record?.value)
@@ -106,7 +109,7 @@ export function createLocalSeriesMetadataCache(): SeriesMetadataCache {
     },
     async set(scopeKey, seriesKey, resolution) {
       await putLocalCatalogMetadata({
-        key: createCacheKey(scopeKey, seriesKey),
+        key: createSeriesMetadataCacheKey(scopeKey, seriesKey),
         value: resolution,
         updatedAt: resolution.updatedAt,
       });
