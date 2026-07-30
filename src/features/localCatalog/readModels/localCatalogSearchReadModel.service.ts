@@ -15,6 +15,10 @@ import {
   type LocalCatalogSearchCandidate,
   type LocalCatalogSearchRepository,
 } from '../repositories/localCatalogSearchRepository.service';
+import {
+  resolveLocalCatalogSearchArtwork,
+  type LocalCatalogSearchArtworkReader,
+} from '../services/localCatalogSearchArtwork.service';
 import type {
   LocalCatalogContentKind,
   LocalCatalogPageCursor,
@@ -235,6 +239,7 @@ export async function searchLocalCatalog(
     limit?: number;
   },
   repository: LocalCatalogSearchRepository = localCatalogSearchRepository,
+  readArtworkMetadata?: LocalCatalogSearchArtworkReader,
 ): Promise<LocalCatalogSearchPage> {
   const normalizedQuery = normalizeLocalCatalogSearchText(input.query).slice(
     0,
@@ -288,7 +293,14 @@ export async function searchLocalCatalog(
     normalizedQuery,
     queryTokens,
   );
-  const pageItems = sorted.slice(offset, offset + limit).map(mapCandidate);
+  const projectedPageItems = sorted
+    .slice(offset, offset + limit)
+    .map(mapCandidate);
+  const pageItems = await resolveLocalCatalogSearchArtwork(
+    projectedPageItems,
+    input.scopeKey,
+    readArtworkMetadata,
+  );
   const nextOffset = offset + pageItems.length;
 
   return {

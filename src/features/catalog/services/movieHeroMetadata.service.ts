@@ -5,11 +5,23 @@ import {
 } from '@/features/localCatalog/services/localCatalogDb.service';
 
 import type { HomeVodItem } from './homeVod.service';
+import {
+  createMovieMetadataCacheKey,
+  normalizeMovieTitle,
+  parseMovieSearchIdentity,
+  type MovieSearchIdentity,
+} from './movieMetadataCacheIdentity.service';
 import { resolveSeriesMetadataCacheScopeKey } from './seriesMetadataCache.service';
 
 const TMDB_API_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p';
-export const MOVIE_HERO_CACHE_PREFIX = 'movie-hero-metadata:v2';
+export {
+  MOVIE_HERO_CACHE_PREFIX,
+  createMovieMetadataCacheKey,
+  normalizeMovieTitle,
+  parseMovieSearchIdentity,
+  type MovieSearchIdentity,
+} from './movieMetadataCacheIdentity.service';
 const MOVIE_HERO_MATCHED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MOVIE_HERO_NO_MATCH_TTL_MS = 24 * 60 * 60 * 1000;
 const MOVIE_HERO_ERROR_TTL_MS = 5 * 60 * 1000;
@@ -82,79 +94,6 @@ export type MovieMetadataEnrichmentOptions = {
   cache?: MovieMetadataCache;
 };
 
-export type MovieSearchIdentity = {
-  rawTitle: string;
-  cleanTitle: string;
-  year?: string;
-  normalizedTitle: string;
-};
-
-export function normalizeMovieTitle(value?: string | null): string {
-  if (!value) {
-    return '';
-  }
-
-  const trimmed = value.trim();
-
-  if (/^(?:19|20)\d{2}$/.test(trimmed)) {
-    return trimmed
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
-  }
-
-  return trimmed
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s*[([]?(?:19|20)\d{2}[\])]?\s*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-export function parseMovieSearchIdentity(
-  value?: string | null,
-): MovieSearchIdentity {
-  const rawTitle = value?.trim() ?? '';
-
-  if (!rawTitle) {
-    return {
-      rawTitle: '',
-      cleanTitle: '',
-      normalizedTitle: '',
-    };
-  }
-
-  if (/^(?:19|20)\d{2}$/.test(rawTitle)) {
-    const norm = normalizeMovieTitle(rawTitle);
-    return {
-      rawTitle,
-      cleanTitle: rawTitle,
-      normalizedTitle: norm,
-    };
-  }
-
-  const yearMatch = rawTitle.match(/^(.*?)\s*[([]?((?:19|20)\d{2})[\])]?$/i);
-  if (yearMatch && yearMatch[1].trim()) {
-    const cleanTitle = yearMatch[1].trim();
-    const year = yearMatch[2];
-    const normalizedTitle = normalizeMovieTitle(cleanTitle);
-    return {
-      rawTitle,
-      cleanTitle,
-      year,
-      normalizedTitle,
-    };
-  }
-
-  const normalizedTitle = normalizeMovieTitle(rawTitle);
-  return {
-    rawTitle,
-    cleanTitle: rawTitle,
-    normalizedTitle,
-  };
-}
-
 function createMovieIdentity(item: HomeVodItem): string {
   return parseMovieSearchIdentity(item.tmdbTitle || item.title).normalizedTitle;
 }
@@ -192,10 +131,6 @@ export function shouldRequestMovieDetailMetadata({
         item.tmdbReleaseYear?.trim()
       ),
   );
-}
-
-function createCacheKey(scopeKey: string, movieIdentity: string) {
-  return `${MOVIE_HERO_CACHE_PREFIX}::${scopeKey}::${movieIdentity}`;
 }
 
 function isMovieHeroCacheEntry(value: unknown): value is MovieHeroCacheEntry {
@@ -437,7 +372,10 @@ export async function enrichMovieHeroItems(
         continue;
       }
 
-      const cacheKey = createCacheKey(effectiveScopeKey, movieIdentity);
+      const cacheKey = createMovieMetadataCacheKey(
+        effectiveScopeKey,
+        movieIdentity,
+      );
       const cachedValue = await cache.get(cacheKey).catch(() => null);
       const cachedEntry = isMovieHeroCacheEntry(cachedValue)
         ? cachedValue
