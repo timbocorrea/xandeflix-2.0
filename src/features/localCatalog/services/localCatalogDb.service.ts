@@ -447,7 +447,10 @@ function matchesListInput(
   item: LocalCatalogItem,
   input: ListLocalCatalogItemsInput,
 ) {
-  if (input.sourceId && item.sourceId !== input.sourceId.trim()) {
+  if (
+    input.sourceId &&
+    item.sourceId !== input.sourceId.trim()
+  ) {
     return false;
   }
 
@@ -908,6 +911,8 @@ function isLocalCatalogImportMetadata(
   );
 }
 
+
+
 export async function getLocalCatalogImportMetadata(sourceId: string) {
   const normalizedSourceId = sourceId.trim();
 
@@ -918,23 +923,82 @@ export async function getLocalCatalogImportMetadata(sourceId: string) {
   const db = await openLocalCatalogDb();
 
   try {
-    const transaction = db.transaction(CATALOG_METADATA_STORE, 'readonly');
-    const transactionDone = waitForTransaction(transaction);
+    const metaTx = db.transaction(CATALOG_METADATA_STORE, 'readonly');
+    const metaDone = waitForTransaction(metaTx);
     const record = await requestToPromise(
-      transaction
+      metaTx
         .objectStore(CATALOG_METADATA_STORE)
         .get(importMetadataKey(normalizedSourceId)),
-    );
-    await transactionDone;
+    ).catch(() => null);
 
-    if (!record || typeof record !== 'object' || !('value' in record)) {
-      return null;
+    const aliasRecord = await requestToPromise(
+      metaTx
+        .objectStore(CATALOG_METADATA_STORE)
+        .get(`xandeflix:source-alias:${normalizedSourceId}`),
+    ).catch(() => null);
+
+    const bindingRecord = await requestToPromise(
+      metaTx
+        .objectStore(CATALOG_METADATA_STORE)
+        .get('xandeflix:source-binding-migration:v1'),
+    ).catch(() => null);
+
+    const repairRecord = await requestToPromise(
+      metaTx
+        .objectStore(CATALOG_METADATA_STORE)
+        .get('xandeflix:repair-migration:v1'),
+    ).catch(() => null);
+    await metaDone;
+
+    if (record && typeof record === 'object' && 'value' in record) {
+      const value = (record as { value: unknown }).value;
+      if (isLocalCatalogImportMetadata(value, normalizedSourceId)) {
+        return value;
+      }
     }
 
-    const value = (record as { value: unknown }).value;
-    return isLocalCatalogImportMetadata(value, normalizedSourceId)
-      ? value
-      : null;
+    const isBindingValid =
+      Boolean(aliasRecord?.value) ||
+      (bindingRecord?.value &&
+        typeof bindingRecord.value === 'object' &&
+        (bindingRecord.value as { status?: string }).status === 'COMPLETED' &&
+        (bindingRecord.value as { boundSourceId?: string }).boundSourceId === normalizedSourceId);
+
+    if (
+      isBindingValid &&
+      repairRecord?.value &&
+      typeof repairRecord.value === 'object' &&
+      (repairRecord.value as { status?: string }).status === 'COMPLETED'
+    ) {
+      const keptCount =
+        (repairRecord.value as { keptCount?: number }).keptCount ?? 0;
+      if (keptCount > 0) {
+        return {
+          sourceId: normalizedSourceId,
+          sourceType: 'm3u',
+          status: 'ready',
+          startedAt: new Date().toISOString(),
+          completedAt:
+            (repairRecord.value as { completedAt?: string }).completedAt ??
+            new Date().toISOString(),
+          lastSuccessfulImportAt:
+            (repairRecord.value as { completedAt?: string }).completedAt ??
+            new Date().toISOString(),
+          parsedCount: keptCount,
+          importedCount: keptCount,
+          updatedCount: 0,
+          removedCount:
+            (repairRecord.value as { removedCount?: number }).removedCount ??
+            0,
+          unknownCount: 0,
+          withoutGroupCount: 0,
+          classificationVersion: 1,
+          errorCode: null,
+        } satisfies LocalCatalogImportMetadata;
+      }
+    }
+
+    return null;
   } finally {
     db.close();
   }
@@ -1121,6 +1185,31 @@ export async function listLocalCatalogItems(
     await transactionDone;
 
     return items;
+  } finally {
+    db.close();
+  }
+}
+
+export async function countLocalCatalogItemsForSource(sourceId: string) {
+  const normalizedSourceId = sourceId.trim();
+
+  if (!normalizedSourceId) {
+    return 0;
+  }
+
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction(PLAYLIST_ITEMS_STORE, 'readonly');
+    const transactionDone = waitForTransaction(transaction);
+    const count = await requestToPromise(
+      transaction
+        .objectStore(PLAYLIST_ITEMS_STORE)
+        .index(SOURCE_ID_INDEX)
+        .count(IDBKeyRange.only(normalizedSourceId)),
+    );
+    await transactionDone;
+    return count;
   } finally {
     db.close();
   }

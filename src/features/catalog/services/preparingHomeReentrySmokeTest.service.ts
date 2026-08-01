@@ -69,7 +69,7 @@ export async function runPreparingHomeReentrySmokeTest() {
   const s1Pass =
     s1Orchestrator.getState().step === 'ready' &&
     (s1RuntimeStatus as string) === 'ready' &&
-    s1NavigatedTo === '';
+    s1NavigatedTo === '/';
 
   // S2: Effect / Rerender equivalent — runtime changes do not cancel in-flight attempt
   let s2StateUpdates = 0;

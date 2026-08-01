@@ -140,6 +140,7 @@ export function createPreparingHomeOrchestrator({
           step: 'ready',
         });
 
+        navigate('/', { replace: true });
         runSmokeTestInBackground();
       })
       .catch((prepareError) => {

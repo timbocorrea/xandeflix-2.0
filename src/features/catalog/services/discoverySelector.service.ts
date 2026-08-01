@@ -41,6 +41,7 @@ export type SelectDiscoveryItemsInput<T extends DiscoveryCandidateItem> = {
   sectionKey: DiscoverySectionKey;
   slotCount: number;
   isArtworkReady?: (candidate: T) => boolean;
+  excludedIds?: readonly string[];
 };
 
 /**
@@ -199,7 +200,12 @@ export function selectDiscoveryItems<T extends DiscoveryCandidateItem>(
     isArtworkReady: boolean;
     score: number;
     id: string;
+    recentlyExposed: boolean;
   };
+
+  const excludedIds = new Set(
+    (input.excludedIds ?? []).map((id) => id.trim()).filter(Boolean),
+  );
 
   const scoredCandidates: ScoredCandidate[] = pool.map((candidate) => {
     const isReady = input.isArtworkReady ? Boolean(input.isArtworkReady(candidate)) : false;
@@ -209,10 +215,14 @@ export function selectDiscoveryItems<T extends DiscoveryCandidateItem>(
       isArtworkReady: isReady,
       score: itemHash,
       id: candidate.id,
+      recentlyExposed: excludedIds.has(candidate.id),
     };
   });
 
   scoredCandidates.sort((left, right) => {
+    if (left.recentlyExposed !== right.recentlyExposed) {
+      return left.recentlyExposed ? 1 : -1;
+    }
     // 1. Preferência por artwork-ready
     if (left.isArtworkReady !== right.isArtworkReady) {
       return left.isArtworkReady ? -1 : 1;

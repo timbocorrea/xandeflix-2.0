@@ -15,6 +15,7 @@ interface MediaCardProps {
   focusScrollOptions?: ScrollIntoViewOptions;
   hideTextOverlay?: boolean;
   sizeScale?: 'default' | 'large';
+  performanceSurface?: 'home' | 'movies' | 'series';
 }
 
 export function MediaCard({
@@ -31,6 +32,7 @@ export function MediaCard({
   focusScrollOptions,
   hideTextOverlay = false,
   sizeScale = 'default',
+  performanceSurface,
 }: MediaCardProps) {
   return (
     <FocusableMediaCard
@@ -46,6 +48,7 @@ export function MediaCard({
       focusScrollOptions={focusScrollOptions}
       hideTextOverlay={hideTextOverlay}
       sizeScale={sizeScale}
+      performanceSurface={performanceSurface}
     />
   );
 }

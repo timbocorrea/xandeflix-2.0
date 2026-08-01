@@ -64,21 +64,24 @@ function LicenseRoute({ children }: { children: ReactNode }) {
   const storedActivation = getStoredLicenseActivation();
   const licenseCode = storedActivation?.licenseCode?.trim() ?? '';
   const deviceIdentifier = storedActivation?.deviceIdentifier?.trim() ?? '';
-  const [validationStatus, setValidationStatus] = useState<
-    'checking' | 'valid' | 'invalid'
-  >('checking');
+  const [validationResult, setValidationResult] = useState<{
+    valid: boolean;
+    transientFailure?: boolean;
+  } | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
 
     if (!licenseCode || !deviceIdentifier) {
-      setValidationStatus('invalid');
+      setIsChecking(false);
+      setValidationResult({ valid: false, transientFailure: false });
       return () => {
         isMounted = false;
       };
     }
 
-    setValidationStatus('checking');
+    setIsChecking(true);
 
     void validateStoredLicenseSession({
       licenseCode,
@@ -88,13 +91,12 @@ function LicenseRoute({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (result.valid) {
-        setValidationStatus('valid');
-        return;
-      }
+      setValidationResult(result);
+      setIsChecking(false);
 
-      clearClientRuntimeAccessState();
-      setValidationStatus('invalid');
+      if (!result.valid && !result.transientFailure) {
+        clearClientRuntimeAccessState();
+      }
     });
 
     return () => {
@@ -102,15 +104,29 @@ function LicenseRoute({ children }: { children: ReactNode }) {
     };
   }, [licenseCode, deviceIdentifier]);
 
-  if (!licenseCode || !deviceIdentifier || validationStatus === 'invalid') {
+  if (
+    !licenseCode ||
+    !deviceIdentifier ||
+    (validationResult && !validationResult.valid)
+  ) {
     return <Navigate to="/login" replace />;
   }
 
-  if (validationStatus !== 'valid') {
+  if (isChecking) {
     return (
       <main className="xf-app flex min-h-screen items-center justify-center">
         <p className="text-xl font-semibold text-xf-muted">
           Validando licença...
+        </p>
+      </main>
+    );
+  }
+
+  if (validationResult && !validationResult.valid && validationResult.transientFailure) {
+    return (
+      <main className="xf-app flex min-h-screen items-center justify-center">
+        <p className="text-xl font-semibold text-xf-muted">
+          Não foi possível validar a licença. Verifique a conexão e abra o aplicativo novamente.
         </p>
       </main>
     );

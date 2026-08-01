@@ -35,6 +35,7 @@ import {
   LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY,
   resolveLocalCatalogSearchInputArrowTarget,
 } from '../lib/localCatalogSearchUiContract';
+import { ensureLegacyLocalCatalogSearchIndex } from '../services/localCatalogSearchIndex.service';
 
 function getKindLabel(item: LocalCatalogSearchResultItem) {
   const labels = {
@@ -77,6 +78,7 @@ export default function LocalCatalogSearchPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasLocalError, setHasLocalError] = useState(false);
+  const [indexRefreshTick, setIndexRefreshTick] = useState(0);
   const requestIdRef = useRef(0);
   const { ref: inputRef, focused: inputSpatiallyFocused } = useFocusable({
     focusKey: LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY,
@@ -92,6 +94,12 @@ export default function LocalCatalogSearchPage() {
       inputRef.current?.focus();
     }
   }, [inputRef, inputSpatiallyFocused]);
+
+  useEffect(() => {
+    if (localCatalogScopeKey) {
+      void ensureLegacyLocalCatalogSearchIndex(localCatalogScopeKey);
+    }
+  }, [localCatalogScopeKey]);
 
   useEffect(() => {
     const nextParams = new URLSearchParams(searchParams);
@@ -168,7 +176,25 @@ export default function LocalCatalogSearchPage() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [localCatalogScopeKey, query]);
+  }, [indexRefreshTick, localCatalogScopeKey, query]);
+
+  useEffect(() => {
+    if (
+      (page.status !== 'indexing' && !page.indexingInBackground) ||
+      !query.trim()
+    ) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setIndexRefreshTick((current) => current + 1);
+    }, 1_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    indexRefreshTick,
+    page.indexingInBackground,
+    page.status,
+    query,
+  ]);
 
   function openResult(item: LocalCatalogSearchResultItem) {
     const returnTo = buildLocalCatalogSearchReturnTo(
@@ -326,6 +352,38 @@ export default function LocalCatalogSearchPage() {
 
           {isSearching ? (
             <p className="text-sm font-semibold text-xf-muted">Buscando…</p>
+          ) : null}
+
+          {(page.status === 'indexing' || page.indexingInBackground) &&
+          query.trim() ? (
+            <p className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-6 text-sky-100">
+              Preparando a busca local…
+              {typeof page.indexedItems === 'number' &&
+              typeof page.totalItems === 'number'
+                ? ` Indexando ${page.indexedItems.toLocaleString('pt-BR')} de ${page.totalItems.toLocaleString('pt-BR')} itens.`
+                : ''}
+            </p>
+          ) : null}
+
+          {page.status === 'index_failed' && query.trim() ? (
+            <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-6 text-amber-100">
+              <p>A preparação da busca local foi interrompida.</p>
+              <FocusableButton
+                focusKey="local-catalog-search-retry-index"
+                onClick={() => {
+                  if (!localCatalogScopeKey) return;
+                  void ensureLegacyLocalCatalogSearchIndex(
+                    localCatalogScopeKey,
+                    { retryFailed: true },
+                  ).then(() => {
+                    setIndexRefreshTick((current) => current + 1);
+                  });
+                }}
+                className="mt-4 rounded-xl bg-white px-4 py-2 font-black text-black"
+              >
+                Retomar preparação
+              </FocusableButton>
+            </div>
           ) : null}
 
           {page.status === 'unavailable' && query.trim() ? (

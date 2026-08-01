@@ -56,6 +56,7 @@ export type LoadHomeVodInput = {
   licenseCode: string;
   deviceIdentifier: string;
   sourceId?: string;
+  scopeKey?: string;
   sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown';
   limitPerSection?: number;
   launchesLimit?: number;
@@ -66,6 +67,7 @@ export type LoadHomeVodCategoryInput = {
   licenseCode: string;
   deviceIdentifier: string;
   sourceId?: string;
+  scopeKey?: string;
   groupTitles: string[];
   limit?: number;
   slug?: string;
@@ -120,6 +122,7 @@ function createHomeVodCacheKey({
   licenseCode,
   deviceIdentifier,
   sourceId,
+  scopeKey,
   limitPerSection = DEFAULT_LIMIT_PER_SECTION,
   launchesLimit = 20,
 }: LoadHomeVodInput) {
@@ -127,6 +130,7 @@ function createHomeVodCacheKey({
     normalizeCacheLicenseCode(licenseCode),
     normalizeCacheDeviceIdentifier(deviceIdentifier),
     sourceId?.trim() ?? '',
+    scopeKey?.trim() ?? '',
     limitPerSection,
     launchesLimit,
   ].join('::');
@@ -136,6 +140,7 @@ function createHomeVodCategoryCacheKey({
   licenseCode,
   deviceIdentifier,
   sourceId,
+  scopeKey,
   groupTitles,
   limit = DEFAULT_CATEGORY_ITEMS_LIMIT,
   slug,
@@ -144,6 +149,7 @@ function createHomeVodCategoryCacheKey({
     normalizeCacheLicenseCode(licenseCode),
     normalizeCacheDeviceIdentifier(deviceIdentifier),
     sourceId?.trim() ?? '',
+    scopeKey?.trim() ?? '',
     limit,
     slug ?? '',
     ...dedupeLocalCatalogGroupTitles(groupTitles).map(normalizeCatalogText).sort(),
@@ -298,6 +304,7 @@ export async function loadHomeVodSections(
   try {
     const sections = await localSectionsLoader({
       sourceId,
+      scopeKey: input.scopeKey,
       maxSections: Math.max(
         8,
         dedupeLocalCatalogGroupTitles(HOME_MOVIE_GROUP_TITLES).length +
@@ -384,6 +391,7 @@ export async function loadHomeVodCategoryItems(
   try {
     const items = await loadLocalCatalogHomeVodCategoryItems({
       sourceId,
+      scopeKey: input.scopeKey,
       groupTitles: normalizedGroupTitles,
       contentKinds: resolveCategoryContentKinds(normalizedGroupTitles, slug),
       limit,

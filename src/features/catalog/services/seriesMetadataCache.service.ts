@@ -1,6 +1,7 @@
 import {
   getActiveLocalCatalogScopeBySourceId,
   getLocalCatalogMetadata,
+  getLocalCatalogMetadataBatch,
   putLocalCatalogMetadata,
 } from '@/features/localCatalog/services/localCatalogDb.service';
 
@@ -115,4 +116,27 @@ export function createLocalSeriesMetadataCache(): SeriesMetadataCache {
       });
     },
   };
+}
+
+export async function getSeriesMetadataResolutionBatch(
+  scopeKey: string,
+  seriesKeys: string[],
+) {
+  const normalizedSeriesKeys = Array.from(
+    new Set(seriesKeys.map((key) => key.trim()).filter(Boolean)),
+  );
+  const metadataKeys = normalizedSeriesKeys.map((seriesKey) =>
+    createSeriesMetadataCacheKey(scopeKey, seriesKey),
+  );
+  const records = await getLocalCatalogMetadataBatch(metadataKeys);
+  const resolutions = new Map<string, SeriesMetadataResolution>();
+
+  for (const seriesKey of normalizedSeriesKeys) {
+    const record = records.get(createSeriesMetadataCacheKey(scopeKey, seriesKey));
+    if (isSeriesMetadataResolution(record?.value)) {
+      resolutions.set(seriesKey, record.value);
+    }
+  }
+
+  return resolutions;
 }

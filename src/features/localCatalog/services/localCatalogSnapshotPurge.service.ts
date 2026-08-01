@@ -23,6 +23,23 @@ function waitForTransaction(transaction: IDBTransaction) {
   });
 }
 
+function requestResult<T>(
+  request: IDBRequest<T>,
+  transaction: IDBTransaction,
+) {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => {
+      try {
+        transaction.abort();
+      } catch {
+        // The transaction can already be aborting after the request error.
+      }
+      reject(new Error('LOCAL_CATALOG_SNAPSHOT_PURGE_FAILED'));
+    };
+  });
+}
+
 async function deleteDirectRecord(
   db: IDBDatabase,
   storeName: string,
@@ -31,22 +48,15 @@ async function deleteDirectRecord(
   const transaction = db.transaction(storeName, 'readwrite');
   const done = waitForTransaction(transaction);
   const store = transaction.objectStore(storeName);
-  let deleted = false;
+  const range = IDBKeyRange.only(key);
+  const deleted = (await requestResult(
+    store.count(range),
+    transaction,
+  )) > 0;
 
-  const request = store.openCursor(IDBKeyRange.only(key));
-
-  request.onsuccess = () => {
-    const cursor = request.result;
-
-    if (!cursor) {
-      return;
-    }
-
-    cursor.delete();
-    deleted = true;
-  };
-
-  request.onerror = () => transaction.abort();
+  if (deleted) {
+    await requestResult(store.delete(range), transaction);
+  }
 
   await done;
   return deleted;
@@ -60,64 +70,12 @@ async function deleteSnapshotRecords(
   const transaction = db.transaction(storeName, 'readwrite');
   const done = waitForTransaction(transaction);
   const store = transaction.objectStore(storeName);
-  const request = store
-    .index('snapshotId')
-    .openKeyCursor(IDBKeyRange.only(snapshotId));
-  let deleted = 0;
+  const range = IDBKeyRange.bound([snapshotId], [snapshotId, []]);
+  const deleted = await requestResult(store.count(range), transaction);
 
-  request.onsuccess = () => {
-    const cursor = request.result;
-
-    if (!cursor) {
-      return;
-    }
-
-    store.delete(cursor.primaryKey);
-    deleted += 1;
-    cursor.continue();
-  };
-
-  request.onerror = () => transaction.abort();
-
-  await done;
-  return deleted;
-}
-
-async function deleteSnapshotTokenRecords(
-  db: IDBDatabase,
-  snapshotId: string,
-) {
-  const transaction = db.transaction(
-    LOCAL_CATALOG_V3_STORES.searchTokens,
-    'readwrite',
-  );
-  const done = waitForTransaction(transaction);
-  const store = transaction.objectStore(
-    LOCAL_CATALOG_V3_STORES.searchTokens,
-  );
-  const request = store
-    .index('snapshotIdToken')
-    .openKeyCursor(
-      IDBKeyRange.bound(
-        [snapshotId],
-        [snapshotId, []],
-      ),
-    );
-  let deleted = 0;
-
-  request.onsuccess = () => {
-    const cursor = request.result;
-
-    if (!cursor) {
-      return;
-    }
-
-    store.delete(cursor.primaryKey);
-    deleted += 1;
-    cursor.continue();
-  };
-
-  request.onerror = () => transaction.abort();
+  if (deleted > 0) {
+    await requestResult(store.delete(range), transaction);
+  }
 
   await done;
   return deleted;
@@ -160,8 +118,9 @@ export async function purgeLocalCatalogSnapshotPartialData(input: {
       LOCAL_CATALOG_V3_STORES.searchDocuments,
       snapshotId,
     );
-    const deletedSearchTokens = await deleteSnapshotTokenRecords(
+    const deletedSearchTokens = await deleteSnapshotRecords(
       db,
+      LOCAL_CATALOG_V3_STORES.searchTokens,
       snapshotId,
     );
     const deletedSeriesLookupRows = await deleteSnapshotRecords(

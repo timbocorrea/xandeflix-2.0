@@ -95,7 +95,19 @@ async function postAuthorizedIptvSource(input: {
     | null;
 
   if (!response.ok || !isAuthorizedIptvSourceSuccess(data)) {
-    throw new Error('AUTHORIZED_IPTV_SOURCE_UNAVAILABLE');
+    const errorCode =
+      (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+        ? data.error
+        : null) ||
+      (response.status === 404
+        ? 'LICENSE_NOT_FOUND'
+        : response.status === 403
+          ? 'LICENSE_BLOCKED'
+          : 'AUTHORIZED_IPTV_SOURCE_UNAVAILABLE');
+    const err = new Error(errorCode);
+    (err as unknown as { code?: string; status?: number }).code = errorCode;
+    (err as unknown as { code?: string; status?: number }).status = response.status;
+    throw err;
   }
 
   return {

@@ -36,8 +36,9 @@ export function LoginPage() {
       storedActivation.deviceIdentifier === nextDeviceIdentifier
     ) {
       setLicenseCode(storedActivation.licenseCode);
-      setFeedback('Aparelho já ativado. Continuando...');
-      setShouldContinue(true);
+      setFeedback(
+        'Licença encontrada. Conecte-se para revalidar este aparelho.',
+      );
     }
   }, []);
 
