@@ -105,8 +105,7 @@ function runCaseJ() {
   const heroItem = item({ kind: 'movie', posterUrl: POSTER_URL });
 
   return {
-    pass:
-      resolveHomeHeroArtworkUrl(heroItem, 'horizontal') === undefined,
+    pass: resolveHomeHeroArtworkUrl(heroItem, 'horizontal') === undefined,
     selectedUrl: resolveHomeHeroArtworkUrl(heroItem, 'horizontal'),
   };
 }

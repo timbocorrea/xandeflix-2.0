@@ -236,6 +236,26 @@ export function removeDiscoveryRuntimePresentationSnapshot(
   runtimeSnapshotsMap.delete(key);
 }
 
+export function removeDiscoveryRuntimeSurfaceSnapshots(
+  scope: DiscoveryRuntimeAccessScope,
+  surfaceKey: DiscoverySurfaceKey,
+): void {
+  const scopeKey = buildDiscoveryScopeKey(scope);
+  const normalizedSurfaceKey = surfaceKey.trim();
+
+  if (!scopeKey || scopeKey !== currentScopeKey || !normalizedSurfaceKey) {
+    return;
+  }
+
+  for (const [key, snapshot] of runtimeSnapshotsMap.entries()) {
+    if (snapshot.surfaceKey === normalizedSurfaceKey) {
+      runtimeSnapshotsMap.delete(key);
+    }
+  }
+
+  interactedSurfacesSet.delete(normalizedSurfaceKey);
+}
+
 /**
  * Reseta e limpa todo o estado efêmero de runtime da Discovery em memória.
  * Chamado obrigatoriamente no access clear / logout / invalidate session.

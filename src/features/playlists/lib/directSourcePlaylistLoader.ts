@@ -79,6 +79,11 @@ type LoadDirectSourcePlaylistOptions = {
   onProgress?: (progress: PlaylistLoadProgress) => void;
   onChannelsBatch?: (channels: IptvChannel[]) => void | Promise<void>;
   signal?: AbortSignal;
+  collectChannels?: boolean;
+  conditionalHeaders?: Readonly<{
+    ifNoneMatch?: string;
+    ifModifiedSince?: string;
+  }>;
 };
 
 type ParsedPlaylistResult = {
@@ -273,6 +278,7 @@ async function fetchResponseWithTimeout(
   sourceUrl: string,
   method: 'GET' | 'HEAD',
   signal?: AbortSignal,
+  conditionalHeaders?: LoadDirectSourcePlaylistOptions['conditionalHeaders'],
 ) {
   const controller = new AbortController();
   const abortFromCaller = () => controller.abort();
@@ -295,6 +301,7 @@ async function fetchResponseWithTimeout(
       sourceUrl,
       method,
       signal: controller.signal,
+      conditionalHeaders,
     });
   } catch (error) {
     if (isAbortError(error)) {
@@ -351,6 +358,7 @@ async function parsePlaylistFromResponse(
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
     onChannelsBatch: options?.onChannelsBatch,
     signal: options?.signal,
+    collectChannels: options?.collectChannels ?? true,
     onBytesReceived: (bytesReceived) => {
       if (MAX_PLAYLIST_BYTES && bytesReceived > MAX_PLAYLIST_BYTES) {
         throw new Error(
@@ -407,6 +415,7 @@ async function parsePlaylistFromResponse(
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
     onChannelsBatch: options?.onChannelsBatch,
     signal: options?.signal,
+    collectChannels: options?.collectChannels ?? true,
     onProgress: applyParseProgress,
   };
 
@@ -441,14 +450,27 @@ async function loadAndParsePlaylist(
     sourceUrl,
     'GET',
     options?.signal,
+    options?.conditionalHeaders,
   );
 
-  return parsePlaylistFromResponse(
+  if (response.status === 304) {
+    return {
+      notModified: true as const,
+      response,
+      parsed: null,
+    };
+  }
+
+  return {
+    notModified: false as const,
     response,
-    progress,
-    options,
-    reportProgress,
-  );
+    parsed: await parsePlaylistFromResponse(
+      response,
+      progress,
+      options,
+      reportProgress,
+    ),
+  };
 }
 
 function buildDiagnostics(
@@ -489,12 +511,32 @@ export async function loadDirectSourcePlaylist(
   reportProgress(true);
 
   try {
-    const parsed = await loadAndParsePlaylist(
+    const loaded = await loadAndParsePlaylist(
       sourceUrl,
       progress,
       options,
       reportProgress,
     );
+    const responseEtag = loaded.response.headers.get('etag');
+    const responseLastModified = loaded.response.headers.get('last-modified');
+
+    if (loaded.notModified) {
+      return {
+        channels: [],
+        total: 0,
+        diagnostics: buildDiagnostics(0, {
+          totalLines: 0,
+          extinfLines: 0,
+          playableUrlLines: 0,
+          firstNonEmptyLine: '',
+        }),
+        notModified: true,
+        responseEtag,
+        responseLastModified,
+      };
+    }
+
+    const parsed = loaded.parsed;
 
     progress.phase = 'finalizing';
     progress.parsedLines = parsed.stats.parsedLines;
@@ -518,8 +560,11 @@ export async function loadDirectSourcePlaylist(
 
     return {
       channels: parsed.channels,
-      total: parsed.channels.length,
+      total: parsed.stats.channelsParsed,
       diagnostics,
+      notModified: false,
+      responseEtag,
+      responseLastModified,
     };
   } catch (error) {
     if (isAbortError(error)) {

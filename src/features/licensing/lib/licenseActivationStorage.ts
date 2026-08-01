@@ -1,4 +1,5 @@
 import type { StoredLicenseActivation } from '../types/license.types';
+import { clearPersistedLicenseSessionLease } from './licenseSessionLeaseStorage';
 
 const LICENSE_ACTIVATION_STORAGE_KEY = 'xandeflix.licenseActivation';
 const ACCESS_SIGNED_OUT_STORAGE_KEY = 'xandeflix:access:signed-out';
@@ -106,6 +107,7 @@ export function clearStoredLicenseActivation(
   }
 
   removeStoredLicenseActivationKeys();
+  clearPersistedLicenseSessionLease();
 
   if (options.markSignedOut) {
     markClientAccessSignedOut();

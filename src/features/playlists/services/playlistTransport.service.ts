@@ -14,7 +14,29 @@ type FetchPlaylistTransportInput = {
   sourceUrl: string;
   method: PlaylistTransportMethod;
   signal?: AbortSignal;
+  conditionalHeaders?: Readonly<{
+    ifNoneMatch?: string;
+    ifModifiedSince?: string;
+  }>;
 };
+
+function buildConditionalHeaders(
+  conditionalHeaders?: FetchPlaylistTransportInput['conditionalHeaders'],
+) {
+  const headers = new Headers();
+  const ifNoneMatch = conditionalHeaders?.ifNoneMatch?.trim();
+  const ifModifiedSince = conditionalHeaders?.ifModifiedSince?.trim();
+
+  if (ifNoneMatch) {
+    headers.set('If-None-Match', ifNoneMatch);
+  }
+
+  if (ifModifiedSince) {
+    headers.set('If-Modified-Since', ifModifiedSince);
+  }
+
+  return headers;
+}
 
 function normalizeSourceUrl(sourceUrl: string) {
   const normalizedSourceUrl = sourceUrl.trim();
@@ -61,6 +83,11 @@ export async function fetchPlaylistTransport(
       body: JSON.stringify({
         sourceUrl,
         upstreamMethod: input.method,
+        conditionalHeaders: {
+          ifNoneMatch: input.conditionalHeaders?.ifNoneMatch?.trim() || undefined,
+          ifModifiedSince:
+            input.conditionalHeaders?.ifModifiedSince?.trim() || undefined,
+        },
       }),
       signal: input.signal,
     });
@@ -68,6 +95,7 @@ export async function fetchPlaylistTransport(
 
   return fetch(sourceUrl, {
     method: input.method,
+    headers: buildConditionalHeaders(input.conditionalHeaders),
     cache: 'no-store',
     credentials: 'omit',
     redirect: 'follow',

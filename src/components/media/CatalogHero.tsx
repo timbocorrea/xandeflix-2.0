@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Info, Play } from 'lucide-react';
 
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { cn } from '@/utils/cn';
 import type { LocalCatalogArtworkCandidate } from '@/features/localCatalog/services/localCatalogArtwork.service';
+import { markDiscoveryPerformance } from '@/features/catalog/services/discoveryPerformance.service';
+import { createSanitizedDiscoveryFingerprint } from '@/features/catalog/services/localCatalogDiscoverySnapshot.service';
 
 import { FOCUS_KEYS } from '../../lib/spatial/focusKeys';
 import { FocusableButton } from '../tv/FocusableButton';
@@ -18,7 +20,7 @@ interface CatalogHeroProps {
   title?: string;
   description?: string;
   metadata?: string;
-  posterUrl?: string;
+  backgroundUrl?: string;
   artworkCandidates?: LocalCatalogArtworkCandidate[];
   eyebrow?: string;
   stats?: CatalogHeroStat[];
@@ -32,13 +34,14 @@ interface CatalogHeroProps {
   heroTotal?: number;
   onPreviousHeroItem?: () => void;
   onNextHeroItem?: () => void;
+  itemId?: string;
 }
 
 export function CatalogHero({
   title = 'Sua noite comecou',
   description = 'Explore recomendacoes, retome o que voce ja assiste e navegue rapido com controle remoto em uma experiencia pensada para TV.',
   metadata,
-  posterUrl,
+  backgroundUrl,
   artworkCandidates,
   eyebrow,
   stats = [
@@ -56,18 +59,19 @@ export function CatalogHero({
   heroTotal = 0,
   onPreviousHeroItem,
   onNextHeroItem,
+  itemId,
 }: CatalogHeroProps) {
   const imageCandidates = useMemo(
     () =>
       Array.from(
         new Set(
           [
-            posterUrl,
+            backgroundUrl,
             ...(artworkCandidates?.map((candidate) => candidate.url) ?? []),
           ].filter((value): value is string => Boolean(value?.trim())),
         ),
       ),
-    [artworkCandidates, posterUrl],
+    [artworkCandidates, backgroundUrl],
   );
   const imageCandidatesKey = imageCandidates.join('|');
   const [imageIndex, setImageIndex] = useState(0);
@@ -76,7 +80,16 @@ export function CatalogHero({
     setImageIndex(0);
   }, [imageCandidatesKey, title]);
 
-  const activeImageUrl = imageCandidates[imageIndex] ?? posterUrl;
+  const activeImageUrl = imageCandidates[imageIndex] ?? backgroundUrl;
+
+  useLayoutEffect(() => {
+    markDiscoveryPerformance('hero_content_paint');
+    const frameId = window.requestAnimationFrame(() => {
+      markDiscoveryPerformance('hero_image_paint');
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
 
   function handlePlay() {
     spatialDebug('hero', 'Assistir agora:', title);
@@ -111,9 +124,12 @@ export function CatalogHero({
       focusKey={FOCUS_KEYS.CATALOG_HERO_SECTION}
       onArrowPress={onSectionArrowPress}
       data-xf-hero="catalog"
+      data-xf-hero-visual-fallback="gradient"
+      data-xf-hero-fingerprint={createSanitizedDiscoveryFingerprint(itemId)}
+      data-xf-hero-pool-size={heroTotal ?? 0}
       data-compact-tv-hero={isCompactTvHero ? 'true' : undefined}
       style={
-        posterUrl
+        backgroundUrl
           ? {
               aspectRatio: '16 / 7',
               height: 'auto',
@@ -124,7 +140,7 @@ export function CatalogHero({
             : undefined
       }
       className={cn(
-        'relative mb-6 box-border flex min-h-[18.75rem] w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-white/10 bg-black px-5 py-5 ring-0 ring-inset ring-transparent  data-[has-focused-child=true]:border-white/30 data-[has-focused-child=true]:border-white/30 md:min-h-[22rem] md:px-7 md:py-6 lg:min-h-[25.5rem] xl:min-h-[28.5rem]',
+        'relative mb-6 box-border flex min-h-[18.75rem] w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-white/10 bg-[linear-gradient(120deg,#18181b_0%,#09090b_48%,#000_100%)] px-5 py-5 ring-0 ring-inset ring-transparent  data-[has-focused-child=true]:border-white/30 data-[has-focused-child=true]:border-white/30 md:min-h-[22rem] md:px-7 md:py-6 lg:min-h-[25.5rem] xl:min-h-[28.5rem]',
         isCompactTvHero &&
           'min-h-[16.5rem] md:min-h-[17.5rem] md:py-4 lg:min-h-[18.5rem] xl:min-h-[19.5rem]',
       )}
@@ -259,13 +275,19 @@ export function CatalogHero({
 
       {activeImageUrl && (
         <img
-          key={activeImageUrl}
+          key={`horizontal-${activeImageUrl}`}
           src={activeImageUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover opacity-100"
-          style={{ animation: 'xfHeroFadeIn 560ms ease-out both' }}
+          style={
+            heroIndex > 0
+              ? { animation: 'xfHeroFadeIn 180ms ease-out both' }
+              : undefined
+          }
           loading="eager"
           decoding="async"
+          fetchPriority="high"
+          onLoad={() => markDiscoveryPerformance('hero_remote_image_paint')}
           onError={() => {
             if (imageIndex + 1 < imageCandidates.length) {
               setImageIndex((current) => current + 1);

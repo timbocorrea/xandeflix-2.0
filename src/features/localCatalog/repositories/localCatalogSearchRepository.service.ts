@@ -5,8 +5,13 @@ import {
   openLocalCatalogDb,
 } from '../services/localCatalogDb.service';
 import { getReadableLocalCatalogActiveSnapshot } from '../services/localCatalogSnapshotLifecycle.service';
-import { ensureLocalCatalogSearchIndex } from '../services/localCatalogSearchIndex.service';
+import {
+  ensureLegacyLocalCatalogSearchIndex,
+  ensureLocalCatalogSearchIndex,
+  type LegacyLocalCatalogSearchIndexStatus,
+} from '../services/localCatalogSearchIndex.service';
 import type {
+  LocalCatalogItem,
   LocalCatalogSearchDocument,
   LocalCatalogSearchToken,
   LocalCatalogSnapshotItem,
@@ -26,6 +31,14 @@ export type LocalCatalogSearchRepository = {
   }): Promise<{
     snapshotId: string;
     candidates: LocalCatalogSearchCandidate[];
+    status?: 'ready' | 'indexing' | 'index_failed';
+    dataPath?:
+      | 'ACTIVE_SNAPSHOT'
+      | 'LEGACY_TOKEN_INDEX'
+      | 'LEGACY_PREFIX_WHILE_INDEXING';
+    processedCount?: number;
+    totalItems?: number;
+    indexingInBackground?: boolean;
   } | null>;
 };
 
@@ -181,10 +194,125 @@ async function loadCandidates(
   }
 }
 
+function mapLegacyItem(
+  item: LocalCatalogItem,
+  generation: string,
+  scopeKey: string,
+  sourceOrder: number,
+): LocalCatalogSnapshotItem {
+  return {
+    snapshotId: generation,
+    itemId: item.id,
+    scopeKey,
+    logicalIdentity: {
+      version: 1,
+      strategy: 'url_fallback',
+      value: item.id,
+    },
+    sourceItemId: item.id,
+    contentKind: item.contentKind,
+    rawName: (item.rawName ?? item.name).trim(),
+    normalizedName: item.normalizedName.trim(),
+    rawGroupTitle: item.groupTitle?.trim() || null,
+    normalizedGroup: item.normalizedGroup?.trim() || null,
+    streamUrl: item.streamUrl,
+    artworkUrl: item.tvgLogo?.trim() || null,
+    sourceOrder,
+    classificationVersion: item.classificationVersion ?? 1,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+async function loadLegacyTokenCandidates(
+  generation: string,
+  scopeKey: string,
+  sourceId: string,
+  documentIds: string[],
+  tokenMatches: LocalCatalogSearchToken[][],
+) {
+  if (documentIds.length === 0) {
+    return [];
+  }
+
+  const matchedTokensByDocument = new Map<string, Set<string>>();
+  const eligibleDocumentIds = new Set(documentIds);
+  for (const matches of tokenMatches) {
+    for (const match of matches) {
+      if (!eligibleDocumentIds.has(match.documentId)) {
+        continue;
+      }
+      const current =
+        matchedTokensByDocument.get(match.documentId) ?? new Set<string>();
+      current.add(match.token);
+      matchedTokensByDocument.set(match.documentId, current);
+    }
+  }
+
+  const db = await openLocalCatalogDb();
+  try {
+    const transaction = db.transaction(
+      [
+        LOCAL_CATALOG_V3_STORES.searchDocuments,
+        LOCAL_CATALOG_V2_STORES[0],
+      ],
+      'readonly',
+    );
+    const done = transactionDone(transaction);
+    const documentStore = transaction.objectStore(
+      LOCAL_CATALOG_V3_STORES.searchDocuments,
+    );
+    const itemStore = transaction.objectStore(LOCAL_CATALOG_V2_STORES[0]);
+    const candidates = await Promise.all(
+      documentIds.map(async (documentId, sourceOrder) => {
+        const [document, item] = await Promise.all([
+          requestResult(
+            documentStore.get([generation, documentId]),
+          ) as Promise<LocalCatalogSearchDocument | undefined>,
+          requestResult(
+            itemStore.get(documentId),
+          ) as Promise<LocalCatalogItem | undefined>,
+        ]);
+        if (
+          !document ||
+          !item ||
+          document.scopeKey !== scopeKey ||
+          document.indexStatus !== 'ready' ||
+          item.sourceId !== sourceId
+        ) {
+          return null;
+        }
+        return {
+          document,
+          item: mapLegacyItem(
+            item,
+            generation,
+            scopeKey,
+            sourceOrder,
+          ),
+          matchedTokens: Array.from(
+            matchedTokensByDocument.get(documentId) ?? [],
+          ),
+        } satisfies LocalCatalogSearchCandidate;
+      }),
+    );
+    await done;
+    return candidates.filter(
+      (candidate): candidate is LocalCatalogSearchCandidate =>
+        candidate !== null,
+    );
+  } finally {
+    db.close();
+  }
+}
+
 async function findLegacyCandidates(input: {
   scopeKey: string;
   normalizedQuery: string;
   tokens: string[];
+  indexStatus?: LegacyLocalCatalogSearchIndexStatus;
+  processedCount?: number;
+  totalItems?: number;
 }) {
   const scope = await getLocalCatalogScope(input.scopeKey);
   if (!scope || scope.accessStatus !== 'active') {
@@ -237,28 +365,12 @@ async function findLegacyCandidates(input: {
                 indexStatus: 'ready',
                 updatedAt: item.updatedAt,
               },
-              item: {
-                snapshotId: `legacy:${input.scopeKey}`,
-                itemId: item.id,
-                scopeKey: input.scopeKey,
-                logicalIdentity: {
-                  version: 1,
-                  strategy: 'url_fallback',
-                  value: item.id,
-                },
-                sourceItemId: item.id,
-                contentKind: item.contentKind,
-                rawName: (item.rawName ?? item.name).trim(),
-                normalizedName: normalizedTitle,
-                rawGroupTitle: item.groupTitle?.trim() || null,
-                normalizedGroup: item.normalizedGroup?.trim() || null,
-                streamUrl: item.streamUrl,
-                artworkUrl: item.tvgLogo?.trim() || null,
+              item: mapLegacyItem(
+                item,
+                `legacy:${input.scopeKey}`,
+                input.scopeKey,
                 sourceOrder,
-                classificationVersion: item.classificationVersion ?? 1,
-                createdAt: item.createdAt,
-                updatedAt: item.updatedAt,
-              },
+              ),
               matchedTokens: input.tokens,
             });
             sourceOrder += 1;
@@ -276,6 +388,17 @@ async function findLegacyCandidates(input: {
     return {
       snapshotId: `legacy:${input.scopeKey}`,
       candidates,
+      status: (
+        input.indexStatus === 'failed'
+          ? 'index_failed'
+          : candidates.length > 0
+            ? 'ready'
+            : 'indexing'
+      ) as 'index_failed' | 'indexing' | 'ready',
+      dataPath: 'LEGACY_PREFIX_WHILE_INDEXING' as const,
+      processedCount: input.processedCount,
+      totalItems: input.totalItems,
+      indexingInBackground: input.indexStatus !== 'failed',
     };
   } finally {
     db.close();
@@ -288,7 +411,42 @@ export const localCatalogSearchRepository: LocalCatalogSearchRepository = {
 
     if (!snapshot) {
       console.info('[XANDEFLIX_SEARCH_SNAPSHOT]', { active: false });
-      return findLegacyCandidates({ scopeKey, normalizedQuery, tokens });
+      const legacyIndex = await ensureLegacyLocalCatalogSearchIndex(scopeKey);
+      if (legacyIndex?.status === 'ready') {
+        const tokenMatches = await listTokenMatches(
+          legacyIndex.generation,
+          tokens,
+        );
+        const documentIds = intersectDocumentIds(tokenMatches);
+        const candidates = await loadLegacyTokenCandidates(
+          legacyIndex.generation,
+          scopeKey,
+          legacyIndex.sourceId,
+          documentIds,
+          tokenMatches,
+        );
+        console.info('[XANDEFLIX_SEARCH_SNAPSHOT]', {
+          active: false,
+          legacyTokenIndex: true,
+          resultCount: candidates.length,
+        });
+        return {
+          snapshotId: legacyIndex.generation,
+          candidates,
+          status: 'ready',
+          dataPath: 'LEGACY_TOKEN_INDEX',
+          processedCount: legacyIndex.processedCount,
+          totalItems: legacyIndex.totalItems,
+        };
+      }
+      return findLegacyCandidates({
+        scopeKey,
+        normalizedQuery,
+        tokens,
+        indexStatus: legacyIndex?.status,
+        processedCount: legacyIndex?.processedCount,
+        totalItems: legacyIndex?.totalItems,
+      });
     }
 
     console.info('[XANDEFLIX_SEARCH_SNAPSHOT]', { active: true });
@@ -308,6 +466,8 @@ export const localCatalogSearchRepository: LocalCatalogSearchRepository = {
     return {
       snapshotId: snapshot.snapshotId,
       candidates,
+      status: 'ready',
+      dataPath: 'ACTIVE_SNAPSHOT',
     };
   },
 };

@@ -182,6 +182,41 @@ export function hydrateSeriesHeroHighlightsFromCache(items: HomeVodItem[]) {
   });
 }
 
+export async function hydrateSeriesHeroHighlightsFromPersistentCache(
+  items: HomeVodItem[],
+  options: { sourceId?: string } = {},
+) {
+  const sourceId = options.sourceId?.trim();
+  if (!sourceId || items.length === 0) {
+    return items;
+  }
+
+  const {
+    getSeriesMetadataResolutionBatch,
+    resolveSeriesMetadataCacheScopeKey,
+  } = await import('./seriesMetadataCache.service');
+  const scopeKey = await resolveSeriesMetadataCacheScopeKey(sourceId).catch(
+    () => null,
+  );
+  if (!scopeKey) {
+    return items;
+  }
+
+  const queries = items.map((item) => createSeriesMetadataQuery(item));
+  const resolutions = await getSeriesMetadataResolutionBatch(
+    scopeKey,
+    queries
+      .map((query) => query?.seriesKey ?? '')
+      .filter(Boolean),
+  );
+
+  return items.map((item, index) => {
+    const seriesKey = queries[index]?.seriesKey;
+    const resolution = seriesKey ? resolutions.get(seriesKey) : null;
+    return resolution ? applyResolvedSeriesMetadata(item, resolution) : item;
+  });
+}
+
 function firstNonEmpty(
   primary: string | null | undefined,
   fallback: string | null | undefined,

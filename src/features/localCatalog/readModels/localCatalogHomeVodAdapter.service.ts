@@ -20,6 +20,11 @@ import {
   getSeriesCollectionKey,
   normalizeSeriesCollectionTitle,
 } from '../services/localCatalogSeriesIdentity.service';
+import {
+  listActiveLocalCatalogSnapshotCategories,
+  listActiveLocalCatalogSnapshotItems,
+} from './localCatalogActiveSnapshotReadModel.service';
+import type { LocalCatalogSnapshotItem } from '../types/localCatalog.types';
 
 function normalizeOptionalText(value?: string | null) {
   const normalizedValue = value?.trim();
@@ -28,6 +33,59 @@ function normalizeOptionalText(value?: string | null) {
 
 function normalizeCatalogGroup(value: string) {
   return normalizeLocalCatalogGroupIdentity(value);
+}
+
+export function mapActiveSnapshotItemToLocalCatalogItem(
+  item: LocalCatalogSnapshotItem,
+  sourceId: string,
+): LocalCatalogItem {
+  return {
+    id: item.itemId,
+    sourceId,
+    sourceType: 'm3u',
+    name: item.rawName,
+    rawName: item.rawName,
+    normalizedName: item.normalizedName,
+    groupTitle: item.rawGroupTitle,
+    normalizedGroup: item.normalizedGroup,
+    contentKind:
+      item.contentKind === 'series_episode' ? 'series' : item.contentKind,
+    streamUrl: item.streamUrl,
+    tvgLogo: item.artworkUrl ?? null,
+    classificationVersion: item.classificationVersion,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+async function listActiveSnapshotGroupItems(input: {
+  scopeKey: string;
+  sourceId: string;
+  contentKind: 'movie' | 'series';
+  normalizedGroup: string;
+  limit: number;
+}) {
+  const primary = await listActiveLocalCatalogSnapshotItems({
+    scopeKey: input.scopeKey,
+    contentKind: input.contentKind,
+    normalizedGroup: input.normalizedGroup,
+    limit: input.limit,
+  });
+  const rawItems = [...(primary?.items ?? [])];
+
+  if (input.contentKind === 'series' && rawItems.length < input.limit) {
+    const episodes = await listActiveLocalCatalogSnapshotItems({
+      scopeKey: input.scopeKey,
+      contentKind: 'series_episode',
+      normalizedGroup: input.normalizedGroup,
+      limit: input.limit - rawItems.length,
+    });
+    rawItems.push(...(episodes?.items ?? []));
+  }
+
+  return rawItems.map((item) =>
+    mapActiveSnapshotItemToLocalCatalogItem(item, input.sourceId),
+  );
 }
 
 export function getSafeLocalCatalogArtworkUrl(value?: string | null) {
@@ -238,25 +296,125 @@ async function loadBoundedTmdbMetadata(
 export async function loadLocalCatalogHomeVodSections(
   {
     sourceId: rawSourceId,
+    scopeKey: rawScopeKey,
     maxSections = 8,
     itemsPerSection = 20,
     movieGroupTitles = [],
     seriesGroupTitles = [],
     skipTmdbMetadata = false,
+    allowLegacyFallback = true,
   }: {
     sourceId: string;
+    scopeKey?: string;
     maxSections?: number;
     itemsPerSection?: number;
     movieGroupTitles?: readonly string[];
     seriesGroupTitles?: readonly string[];
     skipTmdbMetadata?: boolean;
+    allowLegacyFallback?: boolean;
   },
   repository: CatalogRepository = localCatalogRepository,
 ): Promise<HomeVodSection[]> {
   const sourceId = rawSourceId.trim();
+  const scopeKey = rawScopeKey?.trim();
 
   if (!sourceId) {
     return [];
+  }
+
+  if (scopeKey) {
+    const preferredGroups = [
+      ...dedupeLocalCatalogGroupTitles(movieGroupTitles).map((title) => ({
+        title,
+        contentKind: 'movie' as const,
+      })),
+      ...dedupeLocalCatalogGroupTitles(seriesGroupTitles).map((title) => ({
+        title,
+        contentKind: 'series' as const,
+      })),
+    ].slice(0, Math.max(1, maxSections));
+    const activeCategories = await listActiveLocalCatalogSnapshotCategories({
+      scopeKey,
+      contentKinds: ['movie', 'series', 'series_episode'],
+    }).catch(() => null);
+
+    if (activeCategories) {
+      const categoryByIdentity = new Map(
+        activeCategories.categories.map((category) => [
+          `${category.contentKind === 'series_episode' ? 'series' : category.contentKind}:${normalizeCatalogGroup(category.normalizedTitle)}`,
+          category,
+        ]),
+      );
+      const selectedGroups = preferredGroups.length > 0
+        ? preferredGroups
+        : activeCategories.categories
+            .map((category) => ({
+              title: category.title,
+              contentKind:
+                category.contentKind === 'series' ||
+                category.contentKind === 'series_episode'
+                  ? ('series' as const)
+                  : ('movie' as const),
+            }))
+            .slice(0, Math.max(1, maxSections));
+      const activeSections = await Promise.all(
+        selectedGroups.map(async ({ title, contentKind }, index) => {
+          const normalizedGroup = normalizeCatalogGroup(title);
+          const category = categoryByIdentity.get(
+            `${contentKind}:${normalizedGroup}`,
+          );
+          const requestedLimit =
+            contentKind === 'series'
+              ? Math.max(80, itemsPerSection * 4)
+              : itemsPerSection;
+          const items = await listActiveSnapshotGroupItems({
+            scopeKey,
+            sourceId,
+            contentKind,
+            normalizedGroup,
+            limit: requestedLimit,
+          });
+          const tmdbMetadata = skipTmdbMetadata
+            ? new Map<string, LocalTmdbMetadata>()
+            : await loadBoundedTmdbMetadata(items, repository);
+          const displayTitle = category?.title ?? title;
+
+          return {
+            id: `home-active-${contentKind}-${index}`,
+            title: displayTitle,
+            eyebrow: '',
+            description:
+              contentKind === 'series'
+                ? 'Séries disponíveis no catálogo local autorizado.'
+                : 'Conteúdos disponíveis no catálogo local autorizado.',
+            items:
+              contentKind === 'series'
+                ? mapLocalCatalogSeriesItemsToHomeVodItems(
+                    items,
+                    displayTitle,
+                    tmdbMetadata,
+                    itemsPerSection,
+                  )
+                : mapLocalCatalogItemsToHomeVodItems(
+                    items,
+                    displayTitle,
+                    tmdbMetadata,
+                  ),
+          } satisfies HomeVodSection;
+        }),
+      );
+      const renderableActiveSections = activeSections.filter(
+        (section) => section.items.length > 0,
+      );
+
+      if (renderableActiveSections.length > 0) {
+        return renderableActiveSections;
+      }
+    }
+
+    if (!allowLegacyFallback) {
+      return [];
+    }
   }
 
   const metadata = await repository.getImportMetadata(sourceId);
@@ -454,11 +612,13 @@ export async function loadLocalCatalogHomeVodSections(
 export async function loadLocalCatalogHomeVodCategoryItems(
   {
     sourceId: rawSourceId,
+    scopeKey: rawScopeKey,
     groupTitles,
     contentKinds,
     limit = 800,
   }: {
     sourceId: string;
+    scopeKey?: string;
     groupTitles: readonly string[];
     contentKinds: ReadonlyArray<'movie' | 'series'>;
     limit?: number;
@@ -466,6 +626,7 @@ export async function loadLocalCatalogHomeVodCategoryItems(
   repository: CatalogRepository = localCatalogRepository,
 ): Promise<HomeVodItem[]> {
   const sourceId = rawSourceId.trim();
+  const scopeKey = rawScopeKey?.trim();
   const normalizedGroupTitles = dedupeLocalCatalogGroupTitles(groupTitles);
 
   if (
@@ -475,6 +636,60 @@ export async function loadLocalCatalogHomeVodCategoryItems(
     limit <= 0
   ) {
     return [];
+  }
+
+  if (scopeKey) {
+    const perGroupLimit = Math.max(
+      1,
+      Math.ceil(limit / (normalizedGroupTitles.length * contentKinds.length)),
+    );
+    const activeGroups = await Promise.all(
+      contentKinds.flatMap((contentKind) =>
+        normalizedGroupTitles.map(async (groupTitle) => {
+          const items = await listActiveSnapshotGroupItems({
+            scopeKey,
+            sourceId,
+            contentKind,
+            normalizedGroup: normalizeCatalogGroup(groupTitle),
+            limit:
+              contentKind === 'series'
+                ? Math.max(120, perGroupLimit * 4)
+                : perGroupLimit,
+          });
+          const tmdbMetadata = await loadBoundedTmdbMetadata(items, repository);
+
+          return contentKind === 'series'
+            ? mapLocalCatalogSeriesItemsToHomeVodItems(
+                items,
+                groupTitle,
+                tmdbMetadata,
+                perGroupLimit,
+              )
+            : mapLocalCatalogItemsToHomeVodItems(
+                items,
+                groupTitle,
+                tmdbMetadata,
+              );
+        }),
+      ),
+    );
+    const activeItems = new Map<string, HomeVodItem>();
+
+    for (const item of activeGroups.flat()) {
+      if (!activeItems.has(item.id)) {
+        activeItems.set(item.id, item);
+      }
+    }
+
+    if (activeItems.size > 0) {
+      return Array.from(activeItems.values())
+        .sort((first, second) =>
+          first.title.localeCompare(second.title, 'pt-BR', {
+            sensitivity: 'base',
+          }),
+        )
+        .slice(0, limit);
+    }
   }
 
   const metadata = await repository.getImportMetadata(sourceId);

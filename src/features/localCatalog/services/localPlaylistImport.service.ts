@@ -7,6 +7,7 @@ import type { IptvChannel } from '@/features/playlists/types/playlist';
 import type { UniversalCatalogSourceType } from '@/features/universalCatalog';
 
 import {
+  countLocalCatalogItemsForSource,
   getLocalCatalogImportMetadata,
   getLocalCatalogItemsByIds,
   putLocalCatalogImportMetadata,
@@ -193,6 +194,7 @@ function toMetadata({
   removedCount,
   unknownCount,
   withoutGroupCount,
+  storedItemCount,
 }: {
   progress: LocalPlaylistImportProgress;
   sourceType: UniversalCatalogSourceType;
@@ -202,6 +204,7 @@ function toMetadata({
   removedCount: number;
   unknownCount: number;
   withoutGroupCount: number;
+  storedItemCount?: number;
 }): LocalCatalogImportMetadata {
   const completedAt =
     status === 'ready' || status === 'failed' || status === 'canceled'
@@ -219,7 +222,8 @@ function toMetadata({
         ? completedAt
         : previousMetadata?.lastSuccessfulImportAt ?? null,
     parsedCount: progress.processed,
-    importedCount: progress.inserted + progress.updated,
+    importedCount:
+      storedItemCount ?? progress.inserted + progress.updated,
     updatedCount: progress.updated,
     removedCount,
     unknownCount,
@@ -343,6 +347,10 @@ export async function beginLocalCatalogImport({
     };
 
     try {
+      const storedItemCount =
+        status === 'ready'
+          ? await countLocalCatalogItemsForSource(sourceId)
+          : undefined;
       await putLocalCatalogImportMetadata(
         toMetadata({
           progress: terminalProgress,
@@ -353,6 +361,7 @@ export async function beginLocalCatalogImport({
           removedCount,
           unknownCount,
           withoutGroupCount,
+          storedItemCount,
         }),
       );
       Object.assign(progress, terminalProgress);

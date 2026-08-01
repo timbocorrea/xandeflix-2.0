@@ -44,10 +44,18 @@ export type LocalCatalogSearchResultItem = {
 };
 
 export type LocalCatalogSearchPage = {
-  status: 'empty_query' | 'unavailable' | 'ready';
+  status:
+    | 'empty_query'
+    | 'unavailable'
+    | 'indexing'
+    | 'index_failed'
+    | 'ready';
   normalizedQuery: string;
   items: LocalCatalogSearchResultItem[];
   nextCursor: LocalCatalogPageCursor | null;
+  indexedItems?: number;
+  totalItems?: number;
+  indexingInBackground?: boolean;
 };
 
 function getRelevance(
@@ -304,7 +312,7 @@ export async function searchLocalCatalog(
   const nextOffset = offset + pageItems.length;
 
   return {
-    status: 'ready',
+    status: result.status ?? 'ready',
     normalizedQuery,
     items: pageItems,
     nextCursor:
@@ -315,5 +323,8 @@ export async function searchLocalCatalog(
             lastKey: nextOffset,
           })
         : null,
+    indexedItems: result.processedCount,
+    totalItems: result.totalItems,
+    indexingInBackground: result.indexingInBackground,
   };
 }

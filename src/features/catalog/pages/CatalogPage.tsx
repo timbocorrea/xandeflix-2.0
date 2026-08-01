@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import { Clapperboard, MonitorPlay, Tv } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
@@ -21,23 +22,34 @@ import {
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
 import { getCachedAppBootstrapResult } from '@/features/bootstrap/services/appBootstrap.service';
-import { getSlugByGroupTitle } from '@/features/catalog/services/catalogCategoryGroups.service';
+import { getHomeSectionSeeAllRoute } from '@/features/catalog/services/catalogCategoryGroups.service';
 import {
+  buildHomeDiscoverySectionKey,
   executeHomeDiscoveryPresentation,
   overlayStoredHomeDiscoverySnapshots,
+  resolveHomeSectionContentKind,
 } from '@/features/catalog/services/homeDiscoveryPresentation.service';
 import {
+  getHorizontalHeroArtworkCandidates,
   getHorizontalHeroArtworkCandidateRecords,
   resolveHomeHeroArtworkUrl,
 } from '@/features/catalog/services/heroArtworkPolicy.service';
 import {
   getOrCreateDiscoveryRuntimeContext,
   markDiscoveryRuntimeSurfaceInteracted,
+  removeDiscoveryRuntimeSurfaceSnapshots,
   updateDiscoveryRuntimeSnapshotItemPayloads,
   type DiscoveryRuntimeAccessScope,
 } from '@/features/catalog/services/discoveryRuntimePresentationStore.service';
 import { enrichMovieHeroItems } from '@/features/catalog/services/movieHeroMetadata.service';
 import { enrichSeriesHeroHighlights } from '@/features/catalog/services/seriesHeroTmdb.service';
+import {
+  createBoundedDiscoveryGenerationKey,
+  moveDiscoveryHeroOutOfFirstSlot,
+  resolveLocalCatalogDiscoverySnapshot,
+} from '@/features/catalog/services/localCatalogDiscoverySnapshot.service';
+import { useAutoRotatingHero } from '@/hooks/useAutoRotatingHero';
+import { markDiscoveryPerformance } from '@/features/catalog/services/discoveryPerformance.service';
 
 import { catalogSections } from '../data/catalogSections';
 import {
@@ -77,8 +89,23 @@ type CatalogPageSection = Omit<(typeof catalogSections)[number], 'items'> & {
   items: CatalogPageItem[];
 };
 
-function shouldShowSeeAll(section: { showSeeAll?: boolean }) {
-  return Boolean(section.showSeeAll);
+function resolveHomeSectionSeeAllRoute(section: CatalogPageSection) {
+  const representativeItem = section.items.find(
+    (item) =>
+      (item.kind === 'movie' || item.kind === 'series') &&
+      Boolean(item.groupTitle?.trim() || section.title.trim()),
+  );
+
+  return getHomeSectionSeeAllRoute({
+    sectionId: section.id,
+    title: section.title,
+    kind: representativeItem?.kind,
+    groupTitle: representativeItem?.groupTitle,
+  });
+}
+
+function shouldShowSeeAll(section: CatalogPageSection) {
+  return Boolean(resolveHomeSectionSeeAllRoute(section));
 }
 
 function createHomeMovieNavigationItem(
@@ -113,9 +140,6 @@ function mapHomeVodSectionsToCatalogSections(
     title: section.title,
     eyebrow: section.eyebrow,
     description: section.description,
-    showSeeAll:
-      section.id === 'home-vod-launches' ||
-      section.id.startsWith('home-vod-movie-category-'),
     items: section.items.map((item) => ({
       id: item.id,
       kind: item.kind,
@@ -265,6 +289,7 @@ function createHomeVodLoadInput(
   limitPerSection: number,
   sourceId?: string,
   sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown',
+  scopeKey?: string,
 ): LoadHomeVodInput | null {
   const storedActivation = getStoredLicenseActivation();
 
@@ -278,6 +303,7 @@ function createHomeVodLoadInput(
     licenseCode,
     deviceIdentifier: storedActivation.deviceIdentifier,
     sourceId,
+    scopeKey,
     sourceType,
     limitPerSection,
   };
@@ -287,9 +313,15 @@ function createInitialHomeCatalogState(
   isTv: boolean,
   sourceId?: string,
   sourceType?: 'm3u' | 'xtream' | 'manual' | 'unknown',
+  scopeKey?: string,
 ) {
   const limitPerSection = getHomeVodLimitPerSection(isTv);
-  const loadInput = createHomeVodLoadInput(limitPerSection, sourceId, sourceType);
+  const loadInput = createHomeVodLoadInput(
+    limitPerSection,
+    sourceId,
+    sourceType,
+    scopeKey,
+  );
   const cachedSections = loadInput ? getCachedHomeVodSections(loadInput) : null;
   const cachedBootstrap = loadInput ? getCachedAppBootstrapResult() : null;
   const bootstrapSections =
@@ -342,6 +374,9 @@ export function CatalogPage() {
   const {
     source: playlistSource,
     status: playlistStatus,
+    localCatalogScopeKey,
+    localCatalogGenerationId,
+    refreshFromSourceInBackground,
   } = usePlaylistRuntime();
   const deviceProfile = useDeviceProfile();
   const { isTv: legacyIsTv, isMobile } = useDeviceType();
@@ -353,8 +388,42 @@ export function CatalogPage() {
     !isTabletPortraitTouch &&
     (deviceProfile.formFactor === 'tv' || legacyIsTv);
   const shouldShowTopCategoryChips = isMobile || isTabletPortraitTouch;
+
+  useEffect(() => {
+    if (location.pathname !== '/') {
+      return;
+    }
+
+    let isActive = true;
+    let backButtonListener: { remove: () => Promise<void> } | null = null;
+
+    void CapacitorApp.addListener('backButton', () => {
+      if (isActive && window.location.pathname === '/') {
+        void CapacitorApp.exitApp();
+      }
+    }).then((listener) => {
+      if (!isActive) {
+        void listener.remove();
+        return;
+      }
+      backButtonListener = listener;
+    });
+
+    return () => {
+      isActive = false;
+      if (backButtonListener) {
+        void backButtonListener.remove();
+      }
+    };
+  }, [location.pathname]);
+
   const [initialHomeCatalogState] = useState(() =>
-    createInitialHomeCatalogState(isTv, playlistSource?.sourceId, playlistSource?.sourceType),
+    createInitialHomeCatalogState(
+      isTv,
+      playlistSource?.sourceId,
+      playlistSource?.sourceType,
+      localCatalogScopeKey ?? undefined,
+    ),
   );
   const [realCatalogSections, setRealCatalogSections] = useState<
     CatalogPageSection[] | null
@@ -362,21 +431,29 @@ export function CatalogPage() {
   const [isRealCatalogLoading, setIsRealCatalogLoading] = useState(
     !initialHomeCatalogState.sections?.length,
   );
-  const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const homeVodLimitPerSection = getHomeVodLimitPerSection(isTv);
   const wasInitialCatalogHydratedFromCache =
     initialHomeCatalogState.wasHydratedFromCache &&
     initialHomeCatalogState.limitPerSection === homeVodLimitPerSection;
 
   const loadInput = initialHomeCatalogState.loadInput;
-  const currentHomeDiscoveryScope: DiscoveryRuntimeAccessScope | null =
-    loadInput?.licenseCode && loadInput?.deviceIdentifier && playlistSource?.sourceId?.trim()
-      ? {
-          licenseCode: loadInput.licenseCode,
-          deviceIdentifier: loadInput.deviceIdentifier,
-          sourceId: playlistSource.sourceId.trim(),
-        }
-      : null;
+  const currentHomeDiscoveryScope: DiscoveryRuntimeAccessScope | null = useMemo(
+    () =>
+      loadInput?.licenseCode &&
+      loadInput?.deviceIdentifier &&
+      playlistSource?.sourceId?.trim()
+        ? {
+            licenseCode: loadInput.licenseCode,
+            deviceIdentifier: loadInput.deviceIdentifier,
+            sourceId: playlistSource.sourceId.trim(),
+          }
+        : null,
+    [
+      loadInput?.deviceIdentifier,
+      loadInput?.licenseCode,
+      playlistSource?.sourceId,
+    ],
+  );
 
   useLayoutEffect(() => {
     if (currentHomeDiscoveryScope) {
@@ -384,15 +461,135 @@ export function CatalogPage() {
     }
   }, [currentHomeDiscoveryScope]);
 
-  const resolvedCatalogSections = realCatalogSections?.length
+  const canonicalCatalogSections = realCatalogSections?.length
     ? realCatalogSections
     : catalogSections;
+
+  const discoveryGenerationKey = useMemo(
+    () =>
+      createBoundedDiscoveryGenerationKey({
+        sourceId: playlistSource?.sourceId ?? 'local-source',
+        activeGenerationId: localCatalogGenerationId,
+        candidates: canonicalCatalogSections.flatMap((section) => section.items),
+      }),
+    [
+      canonicalCatalogSections,
+      localCatalogGenerationId,
+      playlistSource?.sourceId,
+    ],
+  );
+  const latestHomeDiscoveryGenerationRef = useRef(discoveryGenerationKey);
+  latestHomeDiscoveryGenerationRef.current = discoveryGenerationKey;
+
+  useEffect(() => {
+    const generationAtEntry = latestHomeDiscoveryGenerationRef.current;
+
+    return () => {
+      if (
+        currentHomeDiscoveryScope &&
+        latestHomeDiscoveryGenerationRef.current !== generationAtEntry
+      ) {
+        removeDiscoveryRuntimeSurfaceSnapshots(
+          currentHomeDiscoveryScope,
+          'home',
+        );
+      }
+    };
+  }, [currentHomeDiscoveryScope]);
+
+  const resolvedCatalogSections = useMemo(() => {
+    if (!currentHomeDiscoveryScope) {
+      return canonicalCatalogSections;
+    }
+
+    return canonicalCatalogSections.map((section) => {
+      const contentKind = resolveHomeSectionContentKind(section.title);
+      const sectionKey = contentKind
+        ? buildHomeDiscoverySectionKey(contentKind, section.title)
+        : `row:${section.id}`;
+      const snapshot = resolveLocalCatalogDiscoverySnapshot({
+        scope: currentHomeDiscoveryScope,
+        surfaceKey: 'home',
+        sectionKey,
+        generationKey: discoveryGenerationKey,
+        candidates: section.items,
+        slotCount: section.items.length,
+        historyKind: 'CATEGORY_DISCOVERY_WINDOW',
+        historyItemCount: Math.min(5, section.items.length),
+        isArtworkReady: (item) =>
+          Boolean(item.backdropUrl?.trim() || item.posterUrl?.trim()),
+      });
+
+      return {
+        ...section,
+        items: snapshot.items,
+      };
+    });
+  }, [
+    canonicalCatalogSections,
+    currentHomeDiscoveryScope,
+    discoveryGenerationKey,
+  ]);
+  const heroItems = useMemo(() => {
+    const uniqueItems = new Map<string, CatalogPageSection['items'][number]>();
+
+    for (const section of resolvedCatalogSections) {
+      for (const item of section.items) {
+        if (item.title && !uniqueItems.has(item.id)) {
+          uniqueItems.set(item.id, item);
+        }
+      }
+    }
+
+    const candidates = Array.from(uniqueItems.values()).filter(
+      (item) => getHorizontalHeroArtworkCandidates(item).length > 0,
+    );
+
+    if (!currentHomeDiscoveryScope) {
+      return candidates.slice(0, 5);
+    }
+
+    return resolveLocalCatalogDiscoverySnapshot({
+      scope: currentHomeDiscoveryScope,
+      surfaceKey: 'home',
+      sectionKey: 'hero',
+      generationKey: discoveryGenerationKey,
+      candidates,
+      slotCount: Math.min(5, candidates.length),
+      historyKind: 'HOME_HERO',
+      isArtworkReady: (item) =>
+        getHorizontalHeroArtworkCandidates(item).length > 0,
+    }).items;
+  }, [
+    currentHomeDiscoveryScope,
+    discoveryGenerationKey,
+    resolvedCatalogSections,
+  ]);
+  const heroRotation = useAutoRotatingHero({
+    poolIds: heroItems.map((item) => item.id),
+    heroSelector: '[data-xf-hero="catalog"]',
+  });
+  const activeHeroIndex = heroRotation.activeIndex;
+  const heroItem = heroItems[activeHeroIndex] ?? null;
+  const displayCatalogSections = useMemo(
+    () =>
+      moveDiscoveryHeroOutOfFirstSlot(
+        resolvedCatalogSections,
+        heroItems.map((item) => item.id),
+      ),
+    [heroItems, resolvedCatalogSections],
+  );
 
   const [visibleSectionCount, setVisibleSectionCount] = useState(
     isTv && !wasInitialCatalogHydratedFromCache
       ? INITIAL_TV_VISIBLE_SECTIONS
-      : resolvedCatalogSections.length,
+      : displayCatalogSections.length,
   );
+
+  useLayoutEffect(() => {
+    markDiscoveryPerformance('discovery_snapshot_ready');
+    markDiscoveryPerformance('home_shell_render');
+  }, []);
 
   // Preload seguro das imagens do catálogo da Home em background
   const preloadUrls = useMemo(() => {
@@ -464,7 +661,12 @@ export function CatalogPage() {
         const homeVodLoadInput =
           initialHomeCatalogState.limitPerSection === homeVodLimitPerSection
             ? initialHomeCatalogState.loadInput
-            : createHomeVodLoadInput(homeVodLimitPerSection);
+            : createHomeVodLoadInput(
+                homeVodLimitPerSection,
+                playlistSource?.sourceId,
+                playlistSource?.sourceType,
+                localCatalogScopeKey ?? undefined,
+              );
 
         if (!homeVodLoadInput) {
           window.clearTimeout(timeoutId);
@@ -476,6 +678,7 @@ export function CatalogPage() {
           ...homeVodLoadInput,
           sourceId: playlistSource?.sourceId,
           sourceType: playlistSource?.sourceType,
+          scopeKey: localCatalogScopeKey ?? undefined,
           limitPerSection: homeVodLimitPerSection,
           preferFresh: true,
         });
@@ -581,118 +784,97 @@ export function CatalogPage() {
     playlistSource?.sourceId,
     playlistSource?.sourceType,
     playlistStatus,
+    localCatalogScopeKey,
+  ]);
+
+  useEffect(() => {
+    if (
+      !playlistSource?.sourceId?.trim() ||
+      !localCatalogScopeKey ||
+      !resolvedCatalogSections.length
+    ) {
+      return;
+    }
+
+    let canceled = false;
+    let timeoutId: number | null = null;
+    const frameId = window.requestAnimationFrame(() => {
+      timeoutId = window.setTimeout(() => {
+        if (!canceled) {
+          void refreshFromSourceInBackground('home_interactive');
+        }
+      }, 0);
+    });
+
+    return () => {
+      canceled = true;
+      window.cancelAnimationFrame(frameId);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    localCatalogScopeKey,
+    playlistSource?.sourceId,
+    refreshFromSourceInBackground,
+    resolvedCatalogSections.length,
   ]);
 
 
 
   useEffect(() => {
     if (!isTv) {
-      setVisibleSectionCount(resolvedCatalogSections.length);
+      setVisibleSectionCount(displayCatalogSections.length);
       return;
     }
 
     if (wasInitialCatalogHydratedFromCache) {
-      setVisibleSectionCount(resolvedCatalogSections.length);
+      setVisibleSectionCount(displayCatalogSections.length);
       return;
     }
 
     setVisibleSectionCount(INITIAL_TV_VISIBLE_SECTIONS);
 
     const timer = window.setTimeout(() => {
-      setVisibleSectionCount(resolvedCatalogSections.length);
+      setVisibleSectionCount(displayCatalogSections.length);
     }, TV_REMAINING_SECTIONS_DELAY_MS);
 
     return () => window.clearTimeout(timer);
   }, [
     isTv,
-    resolvedCatalogSections.length,
+    displayCatalogSections.length,
     wasInitialCatalogHydratedFromCache,
   ]);
 
   const visibleCatalogSections = useMemo(
-    () => resolvedCatalogSections.slice(0, visibleSectionCount),
-    [resolvedCatalogSections, visibleSectionCount],
+    () => displayCatalogSections.slice(0, visibleSectionCount),
+    [displayCatalogSections, visibleSectionCount],
   );
 
   const isProgressiveLoading =
-    isTv && visibleSectionCount < resolvedCatalogSections.length;
+    isTv && visibleSectionCount < displayCatalogSections.length;
 
   const shouldShowInitialCatalogLoading =
     isRealCatalogLoading &&
-    !resolvedCatalogSections.length &&
+    !displayCatalogSections.length &&
     !realCatalogSections?.length;
   const isCompactFireStickHero = useMemo(
     () => isTv && isFireStickUserAgent(),
     [isTv],
   );
 
-  const heroItems = useMemo(() => {
-    const uniqueItems = new Map<string, CatalogPageSection['items'][number]>();
-
-    for (const section of resolvedCatalogSections) {
-      for (const item of section.items) {
-        if (!item.title) {
-          continue;
-        }
-
-        if (!uniqueItems.has(item.id)) {
-          uniqueItems.set(item.id, item);
-        }
-      }
-    }
-
-    return Array.from(uniqueItems.values())
-      .filter((item) => Boolean(resolveHomeHeroArtworkUrl(item, isMobile ? 'mobile' : 'horizontal')))
-      .sort((firstItem, secondItem) => {
-        return Number(Boolean(secondItem.backdropUrl)) - Number(Boolean(firstItem.backdropUrl));
-      })
-      .slice(0, 5);
-  }, [isMobile, resolvedCatalogSections]);
-
-  useEffect(() => {
-    setActiveHeroIndex(0);
-  }, [heroItems.length]);
-
-  useEffect(() => {
-    if (heroItems.length <= 1) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setActiveHeroIndex((currentIndex) => {
-        return (currentIndex + 1) % heroItems.length;
-      });
-    }, 9000);
-
-    return () => window.clearTimeout(timer);
-  }, [activeHeroIndex, heroItems.length]);
-
-  const heroItem = heroItems[activeHeroIndex] ?? null;
-
   function handlePreviousHeroItem() {
-    if (heroItems.length <= 1) {
-      return;
-    }
-
-    setActiveHeroIndex((currentIndex) => {
-      return (currentIndex - 1 + heroItems.length) % heroItems.length;
-    });
+    heroRotation.previous();
   }
 
   function handleNextHeroItem() {
-    if (heroItems.length <= 1) {
-      return;
-    }
-
-    setActiveHeroIndex((currentIndex) => {
-      return (currentIndex + 1) % heroItems.length;
-    });
+    heroRotation.next();
   }
 
   useRouteInitialFocus();
 
   const spatialNavigation = useCatalogGridNavigation({
-    sections: resolvedCatalogSections,
+    sections: displayCatalogSections,
   });
 
   function openHomeMovieDetail(
@@ -745,6 +927,22 @@ export function CatalogPage() {
         returnTo: `${location.pathname}${location.search}`,
         selectedMovieItem: createHomeMovieNavigationItem(item, groupTitle),
         movieSimilarSeedItems,
+      },
+    });
+  }
+
+  function openHomeSectionSeeAll(section: CatalogPageSection) {
+    const route = resolveHomeSectionSeeAllRoute(section);
+
+    if (!route) {
+      return;
+    }
+
+    spatialDebug('catalog-grid', 'Ver tudo:', section.title);
+    navigate(route, {
+      state: {
+        fromCatalogSeeAll: true,
+        returnTo: `${location.pathname}${location.search}`,
       },
     });
   }
@@ -853,6 +1051,7 @@ export function CatalogPage() {
         ) : null}
 
         <CatalogHero
+          itemId={heroItem?.id}
           title={heroItem?.title}
           description={
             heroItem?.overview ??
@@ -860,7 +1059,7 @@ export function CatalogPage() {
             'Conteudos recomendados para sua licenca.'
           }
           metadata={isMobile ? buildMobileHomeHeroMetadata(heroItem) : undefined}
-          posterUrl={resolveHomeHeroArtworkUrl(heroItem, isMobile ? 'mobile' : 'horizontal')}
+          backgroundUrl={resolveHomeHeroArtworkUrl(heroItem, 'horizontal')}
           artworkCandidates={isMobile ? undefined : getHorizontalHeroArtworkCandidateRecords(heroItem)}
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
@@ -869,14 +1068,14 @@ export function CatalogPage() {
             openHomeMoviePlayer(
               heroItem,
               heroItem?.groupTitle,
-              resolvedCatalogSections.flatMap((section) => section.items as CatalogPageItem[]),
+              displayCatalogSections.flatMap((section) => section.items as CatalogPageItem[]),
             )
           }
           onInfoPress={() =>
             openHomeMovieDetail(
               heroItem,
               heroItem?.groupTitle,
-              resolvedCatalogSections.flatMap((section) => section.items as CatalogPageItem[]),
+              displayCatalogSections.flatMap((section) => section.items as CatalogPageItem[]),
             )
           }
           isCompactTvHero={isCompactFireStickHero}
@@ -983,26 +1182,8 @@ export function CatalogPage() {
                       focusKey={getCategorySeeAllFocusKey(section.id)}
                       className="shrink-0 rounded-full border border-white/20 bg-white/[0.06] px-2.5 py-1 font-black uppercase tracking-[0.06em] text-zinc-300 transition duration-100 data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black"
                       style={{ fontSize: isMobile ? '0.62rem' : '0.58rem', lineHeight: 1 }}
-                      onClick={() => {
-                        spatialDebug('catalog-grid', 'Ver tudo:', section.title);
-
-                        if (section.id === 'home-vod-launches') {
-                          navigate('/category/filmes');
-                        } else if (section.id.startsWith('home-vod-movie-category-')) {
-                          const slug = getSlugByGroupTitle(section.title);
-                          navigate(`/category/${slug}`);
-                        }
-                      }}
-                      onEnterPress={() => {
-                        spatialDebug('catalog-grid', 'Ver tudo:', section.title);
-
-                        if (section.id === 'home-vod-launches') {
-                          navigate('/category/filmes');
-                        } else if (section.id.startsWith('home-vod-movie-category-')) {
-                          const slug = getSlugByGroupTitle(section.title);
-                          navigate(`/category/${slug}`);
-                        }
-                      }}
+                      onClick={() => openHomeSectionSeeAll(section)}
+                      onEnterPress={() => openHomeSectionSeeAll(section)}
                       onArrowPress={(direction) =>
                         spatialNavigation.handleCategorySeeAllArrowPress(
                           direction,
@@ -1024,6 +1205,11 @@ export function CatalogPage() {
                         subtitle={item.subtitle}
                         posterUrl={item.posterUrl}
                         eagerLoad={true}
+                        performanceSurface={
+                          categoryIndex === 0 && itemIndex === 0
+                            ? 'home'
+                            : undefined
+                        }
                         hideTextOverlay
                         sizeScale="large"
                         index={itemIndex}

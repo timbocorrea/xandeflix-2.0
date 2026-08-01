@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 
 import { rememberLastCatalogFocusKey } from '@/lib/spatial/focusNavigation';
@@ -6,6 +6,10 @@ import {
   reportLocalCatalogArtworkLoadFailure,
   type LocalCatalogArtworkCandidate,
 } from '@/features/localCatalog/services/localCatalogArtwork.service';
+import {
+  markDiscoveryFirstCardImagePaint,
+  markDiscoveryPerformance,
+} from '@/features/catalog/services/discoveryPerformance.service';
 
 interface FocusableMediaCardProps {
   title: string;
@@ -20,6 +24,7 @@ interface FocusableMediaCardProps {
   focusScrollOptions?: ScrollIntoViewOptions;
   hideTextOverlay?: boolean;
   sizeScale?: 'default' | 'large';
+  performanceSurface?: 'home' | 'movies' | 'series';
 }
 
 type CardPalette = {
@@ -57,6 +62,7 @@ export function FocusableMediaCard({
   focusScrollOptions,
   hideTextOverlay = false,
   sizeScale = 'default',
+  performanceSurface,
 }: FocusableMediaCardProps) {
   const [activeArtworkIndex, setActiveArtworkIndex] = useState(0);
   const [hasPosterError, setHasPosterError] = useState(false);
@@ -72,6 +78,19 @@ export function FocusableMediaCard({
   const shouldRenderTextOverlay = !hideTextOverlay || shouldShowFallbackTextOverlay;
 
   const fallbackPalette = useMemo(() => getFallbackPalette(title), [title]);
+
+  useLayoutEffect(() => {
+    markDiscoveryPerformance('first_card_content');
+    if (!performanceSurface) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      markDiscoveryFirstCardImagePaint(performanceSurface);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [performanceSurface]);
 
   useEffect(() => {
     setActiveArtworkIndex(0);
@@ -120,6 +139,9 @@ export function FocusableMediaCard({
       }
       type="button"
       data-focused={focused ? 'true' : undefined}
+      data-xf-card-visual-fallback={
+        performanceSurface ? 'poster-or-gradient' : undefined
+      }
       data-nav-id={focusKey}
       onClick={onEnterPress}
       aria-label={subtitle ? `${title}. ${subtitle}` : title}
@@ -133,6 +155,7 @@ export function FocusableMediaCard({
           loading={eagerLoad ? 'eager' : 'lazy'}
           decoding="async"
           fetchPriority={eagerLoad ? 'high' : 'auto'}
+          onLoad={() => markDiscoveryFirstCardImagePaint(performanceSurface)}
           onError={() => {
             if (activeArtworkCandidate) {
               reportLocalCatalogArtworkLoadFailure(

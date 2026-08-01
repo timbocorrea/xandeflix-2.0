@@ -288,9 +288,52 @@ export function getExactCategoryRouteByGroupTitle(
     return `/category/series-group?${params.toString()}`;
   }
 
+  if (kind === 'movie') {
+    return `/category/movie-group?${params.toString()}`;
+  }
+
   const slug = slugifyLocalCatalogGroupIdentity(groupTitle);
 
   return slug ? `/category/${slug}` : null;
+}
+
+export function getHomeSectionSeeAllRoute({
+  sectionId,
+  title,
+  kind,
+  groupTitle,
+}: {
+  sectionId: string;
+  title: string;
+  kind?: 'movie' | 'series' | 'unknown';
+  groupTitle?: string;
+}) {
+  const legacyKind =
+    sectionId === 'home-vod-launches' ||
+    sectionId.startsWith('home-vod-movie-category-')
+      ? 'movie'
+      : undefined;
+  const resolvedKind =
+    kind === 'movie' || kind === 'series' ? kind : legacyKind;
+
+  if (!resolvedKind) {
+    return null;
+  }
+
+  const resolvedGroupTitle = groupTitle?.trim() || title.trim();
+
+  if (!resolvedGroupTitle) {
+    return null;
+  }
+
+  if (sectionId === 'home-vod-launches' && !groupTitle?.trim()) {
+    return getCategoryRouteByHomeSectionId(sectionId);
+  }
+
+  return getExactCategoryRouteByGroupTitle(
+    resolvedGroupTitle,
+    resolvedKind,
+  );
 }
 
 export function dedupeCatalogCategoryDefinitionGroups(

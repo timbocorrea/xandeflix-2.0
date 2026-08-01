@@ -29,6 +29,7 @@ export type LocalCatalogRuntimeSnapshotBridge = {
   promote(): Promise<void>;
   cancel(): Promise<void>;
   fail(failureCode?: string): Promise<void>;
+  getSnapshotId(): string;
   getSanitizedMetrics(): LocalCatalogRuntimeSnapshotBridgeMetrics;
 };
 
@@ -175,6 +176,9 @@ export async function prepareLocalCatalogRuntimeSnapshotBridge(
     },
     async fail(nextFailureCode = 'LOCAL_CATALOG_SIDECAR_FAILED') {
       await failSidecar(nextFailureCode);
+    },
+    getSnapshotId() {
+      return snapshotId;
     },
     getSanitizedMetrics() {
       const sessionMetrics = session.getMetrics();

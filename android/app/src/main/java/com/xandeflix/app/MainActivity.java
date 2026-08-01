@@ -9,6 +9,7 @@ import android.view.View;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import com.capacitorjs.plugins.app.AppPlugin;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -17,7 +18,9 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(AppPlugin.class);
         registerPlugin(NativeAndroidPlayerPlugin.class);
+        registerPlugin(OfflineLicenseLeasePlugin.class);
         super.onCreate(savedInstanceState);
 
         // Aguarda o WebView carregar para aplicar configurações de foco

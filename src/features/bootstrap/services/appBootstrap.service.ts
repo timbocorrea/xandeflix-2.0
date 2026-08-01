@@ -23,6 +23,17 @@ import { getCatalogCategoryDefinition } from '@/features/catalog/services/catalo
 import { prepareHomePlaylist } from '@/features/catalog/services/prepareHomePlaylist.service';
 import { clearValidatedLicenseSessionCache } from '@/features/licensing/services/licenseSessionValidation.service';
 import { clearDiscoveryRuntimePresentationState } from '@/features/catalog/services/discoveryRuntimePresentationStore.service';
+import { runLocalCatalogSourceBindingMigration } from '@/features/localCatalog/services/localCatalogSourceBindingMigration.service';
+import {
+  createBoundedDiscoveryGenerationKey,
+  isDiscoveryArtworkReady,
+  resolveLocalCatalogDiscoverySnapshot,
+} from '@/features/catalog/services/localCatalogDiscoverySnapshot.service';
+import { resolveHomeHeroArtworkUrl } from '@/features/catalog/services/heroArtworkPolicy.service';
+import {
+  markDiscoveryPerformance,
+  preloadCriticalHeroArtwork,
+} from '@/features/catalog/services/discoveryPerformance.service';
 
 export type AppBootstrapStepId =
   | 'license'
@@ -279,7 +290,11 @@ function isBootstrapResultForScope({
   );
 }
 
-function readStoredBootstrapResult() {
+function readStoredBootstrapResult({
+  allowExpired = false,
+}: {
+  allowExpired?: boolean;
+} = {}) {
   if (typeof window === 'undefined') {
     return null;
   }
@@ -298,7 +313,10 @@ function readStoredBootstrapResult() {
       return null;
     }
 
-    if (Date.now() - parsedValue.createdAt >= BOOTSTRAP_CACHE_TTL_MS) {
+    if (
+      !allowExpired &&
+      Date.now() - parsedValue.createdAt >= BOOTSTRAP_CACHE_TTL_MS
+    ) {
       window.localStorage.removeItem(APP_BOOTSTRAP_STORAGE_KEY);
       return null;
     }
@@ -362,18 +380,51 @@ export function updateAppBootstrapHomeSections(
   }
 }
 
-export function getCachedAppBootstrapResult() {
+export function invalidateAppBootstrapHomeCatalogCache(sourceId: string) {
+  const normalizedSourceId = sourceId.trim();
+
+  if (!normalizedSourceId) {
+    return;
+  }
+
+  if (appBootstrapCache?.result.sourceId.trim() === normalizedSourceId) {
+    appBootstrapCache = null;
+  }
+
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const storedCache = readStoredBootstrapResult();
+
+    if (storedCache?.result.sourceId.trim() === normalizedSourceId) {
+      window.localStorage.removeItem(APP_BOOTSTRAP_STORAGE_KEY);
+    }
+  } catch {
+    // Invalidação local best-effort; a geração ACTIVE permanece canônica.
+  }
+}
+
+export function getCachedAppBootstrapResult({
+  allowExpired = false,
+}: {
+  allowExpired?: boolean;
+} = {}) {
   const memoryCache = appBootstrapCache;
 
   if (memoryCache) {
-    if (Date.now() - memoryCache.createdAt < BOOTSTRAP_CACHE_TTL_MS) {
+    if (
+      allowExpired ||
+      Date.now() - memoryCache.createdAt < BOOTSTRAP_CACHE_TTL_MS
+    ) {
       return cloneBootstrapResult(memoryCache.result);
     }
 
     appBootstrapCache = null;
   }
 
-  const storedCache = readStoredBootstrapResult();
+  const storedCache = readStoredBootstrapResult({ allowExpired });
 
   if (!storedCache) {
     return null;
@@ -667,7 +718,18 @@ export async function runAppBootstrap({
   );
   const warnings: string[] = [];
   let resolvedSourceId = runtime.currentSourceId;
-  const cachedResultBeforePreparation = getCachedAppBootstrapResult();
+  let resolvedLocalCatalogScopeKey: string | null = null;
+  const cachedResultBeforePreparation = getCachedAppBootstrapResult({
+    allowExpired: criticalOnly,
+  });
+  const knownReadableSourceId =
+    cachedResultBeforePreparation &&
+    normalizeLicenseCode(cachedResultBeforePreparation.licenseCode) ===
+      normalizedLicenseCode &&
+    normalizeDeviceIdentifier(cachedResultBeforePreparation.deviceIdentifier) ===
+      normalizedDeviceIdentifier
+      ? cachedResultBeforePreparation.sourceId
+      : undefined;
 
   if (
     normalizedLicenseCode &&
@@ -699,12 +761,23 @@ export async function runAppBootstrap({
         currentChannelsCount: runtime.currentChannelsCount,
         currentStatus: runtime.currentStatus,
         currentSourceId: runtime.currentSourceId,
+        knownReadableSourceId,
         loadFromSource: runtime.loadFromSource,
         loadFromChannels: runtime.loadFromChannels,
         clearRuntime: runtime.clearRuntime,
       });
 
-      resolvedSourceId = preparedSource.sourceId;
+      resolvedSourceId = preparedSource.source.sourceId;
+      resolvedLocalCatalogScopeKey = preparedSource.localCatalogScopeKey;
+      markDiscoveryPerformance('license_valid');
+
+      if (resolvedSourceId) {
+        void runLocalCatalogSourceBindingMigration({
+          authorizedSourceId: resolvedSourceId,
+          licenseCode: normalizedLicenseCode,
+          deviceIdentifier: normalizedDeviceIdentifier,
+        }).catch(() => undefined);
+      }
     } catch {
       warnings.push(
         'Catálogo local indisponível; a importação direta poderá ser repetida.',
@@ -715,7 +788,9 @@ export async function runAppBootstrap({
     }
   }
 
-  const cachedResult = getCachedAppBootstrapResult();
+  const cachedResult = getCachedAppBootstrapResult({
+    allowExpired: criticalOnly,
+  });
 
   if (
     cachedResult &&
@@ -756,12 +831,43 @@ export async function runAppBootstrap({
 
     const homeSections = await loadLocalCatalogHomeVodSections({
       sourceId: resolvedSourceId.trim(),
+      scopeKey: resolvedLocalCatalogScopeKey ?? undefined,
       maxSections: 4,
       itemsPerSection: 20,
       movieGroupTitles: movieGroupTitles.slice(0, 2),
       seriesGroupTitles: seriesGroupTitles.slice(0, 2),
       skipTmdbMetadata: true,
+      allowLegacyFallback: false,
     });
+    markDiscoveryPerformance('local_catalog_ready');
+    const criticalDiscoveryCandidates = homeSections.flatMap(
+      (section) => section.items,
+    );
+    const criticalGenerationKey = createBoundedDiscoveryGenerationKey({
+      sourceId: resolvedSourceId.trim(),
+      candidates: criticalDiscoveryCandidates,
+    });
+    const criticalHeroSnapshot = resolveLocalCatalogDiscoverySnapshot({
+      scope: {
+        licenseCode: normalizedLicenseCode,
+        deviceIdentifier: normalizedDeviceIdentifier,
+        sourceId: resolvedSourceId.trim(),
+      },
+      surfaceKey: 'home',
+      sectionKey: 'hero',
+      generationKey: criticalGenerationKey,
+      candidates: criticalDiscoveryCandidates,
+      slotCount: Math.min(5, criticalDiscoveryCandidates.length),
+      historyKind: 'HOME_HERO',
+      isArtworkReady: isDiscoveryArtworkReady,
+    });
+    markDiscoveryPerformance('discovery_snapshot_ready');
+    preloadCriticalHeroArtwork(
+      resolveHomeHeroArtworkUrl(
+        criticalHeroSnapshot.items[0],
+        'horizontal',
+      ),
+    );
 
     const criticalResult: AppBootstrapResult = {
       licenseCode: normalizedLicenseCode,

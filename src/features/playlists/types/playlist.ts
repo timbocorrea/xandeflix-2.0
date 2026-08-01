@@ -56,6 +56,9 @@ export type LoadedPlaylist = {
   channels: IptvChannel[];
   total: number;
   diagnostics: PlaylistDiagnostics;
+  notModified?: boolean;
+  responseEtag?: string | null;
+  responseLastModified?: string | null;
 };
 
 export type PlaylistLoadProgressPhase =

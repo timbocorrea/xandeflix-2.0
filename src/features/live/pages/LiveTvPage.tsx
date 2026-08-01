@@ -259,6 +259,7 @@ export default function LiveTvPage() {
               loadFromChannels({
                 source: playlistSource,
                 channels: localLiveChannels,
+                authorizationContext,
               });
 
               return;

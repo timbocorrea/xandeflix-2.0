@@ -16,6 +16,8 @@ export type LocalCatalogReadabilitySmokeTestResult = {
   refreshFailedWithLastSuccess: boolean;
   refreshCanceledWithLastSuccess: boolean;
   bootNoRedownload: boolean;
+  bootScopePropagated: boolean;
+  criticalCacheAvoidsIndexedDb: boolean;
   liveLocalFirst: boolean;
 };
 
@@ -104,7 +106,7 @@ export async function runLocalCatalogReadabilitySmokeTest(): Promise<LocalCatalo
     },
   };
 
-  await prepareHomePlaylist(
+  const preparedPlaylist = await prepareHomePlaylist(
     {
       licenseCode: 'SMOKE',
       deviceIdentifier: 'device-id',
@@ -125,6 +127,42 @@ export async function runLocalCatalogReadabilitySmokeTest(): Promise<LocalCatalo
   );
 
   const bootNoRedownload = sourceLoads === 0 && channelLoads === 1;
+  const bootScopePropagated =
+    preparedPlaylist.source.sourceId === SOURCE_ID &&
+    /^scope_v1_[a-f0-9]{64}$/.test(
+      preparedPlaylist.localCatalogScopeKey ?? '',
+    );
+  let criticalCacheMetadataReads = 0;
+  let criticalCacheChannelLoads = 0;
+  const criticalCachedPlaylist = await prepareHomePlaylist(
+    {
+      licenseCode: 'SMOKE',
+      deviceIdentifier: 'device-id',
+      currentChannelsCount: 0,
+      currentStatus: 'idle',
+      knownReadableSourceId: SOURCE_ID,
+      loadFromSource: async () => {
+        throw new Error('CRITICAL_CACHE_SOURCE_LOAD_FORBIDDEN');
+      },
+      loadFromChannels: () => {
+        criticalCacheChannelLoads += 1;
+      },
+      clearRuntime: () => undefined,
+    },
+    {
+      getAuthorizedSource: async () => authorizedSource,
+      repository: {
+        getImportMetadata: async () => {
+          criticalCacheMetadataReads += 1;
+          return metadata('ready', LAST_SUCCESS);
+        },
+      },
+    },
+  );
+  const criticalCacheAvoidsIndexedDb =
+    criticalCachedPlaylist.source.sourceId === SOURCE_ID &&
+    criticalCacheMetadataReads === 0 &&
+    criticalCacheChannelLoads === 1;
   const liveItem: LocalCatalogItem = {
     id: 'live-item',
     sourceId: SOURCE_ID,
@@ -156,6 +194,8 @@ export async function runLocalCatalogReadabilitySmokeTest(): Promise<LocalCatalo
     refreshFailedWithLastSuccess,
     refreshCanceledWithLastSuccess,
     bootNoRedownload,
+    bootScopePropagated,
+    criticalCacheAvoidsIndexedDb,
     liveLocalFirst,
   };
 

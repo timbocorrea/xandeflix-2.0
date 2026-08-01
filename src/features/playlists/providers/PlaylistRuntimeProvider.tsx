@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 
 import { env } from '@/config/env';
 import { loadDirectSourcePlaylist } from '../lib/directSourcePlaylistLoader';
@@ -18,6 +19,14 @@ import {
 } from '@/features/localCatalog/services/localPlaylistImport.service';
 import type { LocalCatalogRuntimeSnapshotBridge } from '@/features/localCatalog/services/localCatalogRuntimeSnapshotBridge.service';
 import { deriveLocalCatalogScope } from '@/features/localCatalog/services/localCatalogScope.service';
+import { getReadableLocalCatalogActiveSnapshot } from '@/features/localCatalog/services/localCatalogSnapshotLifecycle.service';
+import {
+  refreshLocalCatalogInBackground,
+  type LocalCatalogBackgroundRefreshResult,
+} from '@/features/localCatalog/services/localCatalogBackgroundRefresh.service';
+import { clearHomeVodCache } from '@/features/catalog/services/homeVod.service';
+import { invalidateAppBootstrapHomeCatalogCache } from '@/features/bootstrap/services/appBootstrap.service';
+import { markDiscoveryPerformance } from '@/features/catalog/services/discoveryPerformance.service';
 import type {
   IptvChannel,
   PlaylistDiagnostics,
@@ -36,6 +45,7 @@ type PlaylistRuntimeContextValue = {
   progress: PlaylistLoadProgress | null;
   error: string | null;
   localCatalogScopeKey: string | null;
+  localCatalogGenerationId: string | null;
   loadFromSource: (
     source: PlaylistSource,
     authorizationContext?: PlaylistRuntimeAuthorizationContext | null,
@@ -48,6 +58,9 @@ type PlaylistRuntimeContextValue = {
   }) => void;
   selectChannel: (channel: IptvChannel) => void;
   clearRuntime: () => void;
+  refreshFromSourceInBackground: (
+    reason?: 'home_interactive' | 'resume' | 'manual',
+  ) => Promise<LocalCatalogBackgroundRefreshResult | null>;
 };
 
 const PlaylistRuntimeContext =
@@ -82,10 +95,23 @@ export function PlaylistRuntimeProvider({
   const [error, setError] = useState<string | null>(null);
   const [localCatalogScopeKey, setLocalCatalogScopeKey] =
     useState<string | null>(null);
+  const [localCatalogGenerationId, setLocalCatalogGenerationId] =
+    useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
   const snapshotBridgeRef =
     useRef<LocalCatalogRuntimeSnapshotBridge | null>(null);
+  const authorizationContextRef =
+    useRef<PlaylistRuntimeAuthorizationContext | null>(null);
+  const backgroundRefreshAbortControllerRef = useRef<AbortController | null>(null);
+  const backgroundRefreshPromiseRef =
+    useRef<Promise<LocalCatalogBackgroundRefreshResult | null> | null>(null);
+  const backgroundRefreshEnabledRef = useRef(false);
+  const coldRefreshAttemptedRef = useRef(false);
+  const refreshCallbackRef = useRef<
+    ((reason?: 'home_interactive' | 'resume' | 'manual') => Promise<LocalCatalogBackgroundRefreshResult | null>)
+    | null
+  >(null);
 
   const cancelActiveSnapshotBridge = useCallback(async () => {
     const activeBridge = snapshotBridgeRef.current;
@@ -134,6 +160,8 @@ export function PlaylistRuntimeProvider({
     setDiagnostics(null);
     setProgress(null);
     setLocalCatalogScopeKey(null);
+    setLocalCatalogGenerationId(null);
+    authorizationContextRef.current = authorizationContext ?? null;
 
     if (
       authorizationContext?.internalLicenseId.trim() &&
@@ -145,8 +173,13 @@ export function PlaylistRuntimeProvider({
           sourceId: nextSource.sourceId,
         });
         setLocalCatalogScopeKey(derivedScope.scopeKey);
+        const activeSnapshot = await getReadableLocalCatalogActiveSnapshot(
+          derivedScope.scopeKey,
+        );
+        setLocalCatalogGenerationId(activeSnapshot?.snapshotId ?? null);
       } catch {
         setLocalCatalogScopeKey(null);
+        setLocalCatalogGenerationId(null);
       }
     }
 
@@ -276,6 +309,7 @@ export function PlaylistRuntimeProvider({
             !loadAbortController.signal.aborted
           ) {
             await snapshotBridge.promote();
+            setLocalCatalogGenerationId(snapshotBridge.getSnapshotId());
           }
         } catch (snapshotError) {
           await snapshotBridge
@@ -347,6 +381,8 @@ export function PlaylistRuntimeProvider({
     loadAbortControllerRef.current = null;
     loadRequestIdRef.current += 1;
     void cancelActiveSnapshotBridge();
+    backgroundRefreshAbortControllerRef.current?.abort();
+    backgroundRefreshAbortControllerRef.current = null;
   }, [cancelActiveSnapshotBridge]);
 
   const loadFromChannels = useCallback(
@@ -373,6 +409,8 @@ export function PlaylistRuntimeProvider({
       setStatus(nextChannels.length > 0 ? 'ready' : 'empty');
       setProgress(null);
       setLocalCatalogScopeKey(null);
+      setLocalCatalogGenerationId(null);
+      authorizationContextRef.current = authorizationContext;
       console.info('[XANDEFLIX_SEARCH_SCOPE]', {
         present: false,
         authorizationContextPresent: Boolean(
@@ -391,6 +429,10 @@ export function PlaylistRuntimeProvider({
           .then(async (derivedScope) => {
             console.info('[XANDEFLIX_SEARCH_SCOPE]', { present: true });
             setLocalCatalogScopeKey(derivedScope.scopeKey);
+            const activeSnapshot = await getReadableLocalCatalogActiveSnapshot(
+              derivedScope.scopeKey,
+            );
+            setLocalCatalogGenerationId(activeSnapshot?.snapshotId ?? null);
           })
           .catch(() => {
             console.warn('[XANDEFLIX_SEARCH_SCOPE]', {
@@ -398,11 +440,125 @@ export function PlaylistRuntimeProvider({
               failureCode: 'LOCAL_CATALOG_SCOPE_DERIVATION_FAILED',
             });
             setLocalCatalogScopeKey(null);
+            setLocalCatalogGenerationId(null);
           });
       }
     },
     [cancelActiveSnapshotBridge],
   );
+
+  const refreshFromSourceInBackground = useCallback(
+    (
+      reason: 'home_interactive' | 'resume' | 'manual' = 'home_interactive',
+    ) => {
+      backgroundRefreshEnabledRef.current = true;
+
+      if (reason === 'home_interactive') {
+        if (coldRefreshAttemptedRef.current) {
+          return Promise.resolve(null);
+        }
+        coldRefreshAttemptedRef.current = true;
+      }
+
+      if (backgroundRefreshPromiseRef.current) {
+        return backgroundRefreshPromiseRef.current;
+      }
+
+      const currentAuthorizationContext = authorizationContextRef.current;
+
+      if (
+        !env.localCatalogSnapshotImportEnabled ||
+        !env.localCatalogSnapshotPromotionEnabled ||
+        !source?.sourceId?.trim() ||
+        !source.url.trim() ||
+        !localCatalogScopeKey ||
+        !currentAuthorizationContext?.internalLicenseId.trim()
+      ) {
+        return Promise.resolve(null);
+      }
+
+      const abortController = new AbortController();
+      backgroundRefreshAbortControllerRef.current = abortController;
+      markDiscoveryPerformance('source_refresh_start', { once: false });
+      const refreshPromise = refreshLocalCatalogInBackground({
+        source,
+        authorizationContext: currentAuthorizationContext,
+        scopeKey: localCatalogScopeKey,
+        signal: abortController.signal,
+        force: reason === 'manual',
+      })
+        .then((result) => {
+          console.info('[XANDEFLIX_SOURCE_REFRESH_RESULT]', {
+            reason,
+            status: result.status,
+            requestCount: result.requestCount,
+            promoted: result.promoted,
+            itemCount: result.itemCount,
+            durationMs: result.durationMs,
+            failureCode: result.failureCode,
+          });
+
+          if (result.activeGenerationId) {
+            setLocalCatalogGenerationId(result.activeGenerationId);
+          }
+
+          if (result.promoted && source.sourceId) {
+            clearHomeVodCache();
+            invalidateAppBootstrapHomeCatalogCache(source.sourceId);
+          }
+
+          return result;
+        })
+        .finally(() => {
+          markDiscoveryPerformance('source_refresh_end', { once: false });
+          if (backgroundRefreshAbortControllerRef.current === abortController) {
+            backgroundRefreshAbortControllerRef.current = null;
+          }
+          if (backgroundRefreshPromiseRef.current === refreshPromise) {
+            backgroundRefreshPromiseRef.current = null;
+          }
+        });
+
+      backgroundRefreshPromiseRef.current = refreshPromise;
+      return refreshPromise;
+    },
+    [localCatalogScopeKey, source],
+  );
+
+  refreshCallbackRef.current = refreshFromSourceInBackground;
+
+  useEffect(() => {
+    let isMounted = true;
+    let appStateListener: { remove: () => Promise<void> } | null = null;
+
+    void CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (!isActive) {
+        backgroundRefreshAbortControllerRef.current?.abort();
+        return;
+      }
+
+      if (backgroundRefreshEnabledRef.current) {
+        void refreshCallbackRef.current?.('resume');
+      }
+    }).then((listener) => {
+      if (!isMounted) {
+        void listener.remove();
+        return;
+      }
+      appStateListener = listener;
+    });
+
+    return () => {
+      isMounted = false;
+      if (appStateListener) {
+        void appStateListener.remove();
+      }
+    };
+  }, []);
 
   const selectChannel = useCallback((channel: IptvChannel) => {
     setSelectedChannel(channel);
@@ -420,7 +576,13 @@ export function PlaylistRuntimeProvider({
     setStatus('idle');
     setProgress(null);
     setLocalCatalogScopeKey(null);
+    setLocalCatalogGenerationId(null);
     setError(null);
+    authorizationContextRef.current = null;
+    backgroundRefreshAbortControllerRef.current?.abort();
+    backgroundRefreshAbortControllerRef.current = null;
+    backgroundRefreshEnabledRef.current = false;
+    coldRefreshAttemptedRef.current = false;
   }, [cancelActiveSnapshotBridge]);
 
   const value = useMemo(
@@ -433,10 +595,12 @@ export function PlaylistRuntimeProvider({
       progress,
       error,
       localCatalogScopeKey,
+      localCatalogGenerationId,
       loadFromSource,
       loadFromChannels,
       selectChannel,
       clearRuntime,
+      refreshFromSourceInBackground,
     }),
     [
       source,
@@ -447,10 +611,12 @@ export function PlaylistRuntimeProvider({
       progress,
       error,
       localCatalogScopeKey,
+      localCatalogGenerationId,
       loadFromSource,
       loadFromChannels,
       selectChannel,
       clearRuntime,
+      refreshFromSourceInBackground,
     ],
   );
 

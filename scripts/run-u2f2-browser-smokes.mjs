@@ -50,6 +50,7 @@ import { runLocalCatalogSearchSmokeTest } from '@/features/localCatalog/services
 import { runLocalCatalogSeriesLookupSmokeTest } from '@/features/localCatalog/services/localCatalogSeriesLookupSmokeTest.service';
 import { runLocalCatalogSchemaSmokeTest } from '@/features/localCatalog/services/localCatalogSchemaSmokeTest.service';
 import { runLocalCatalogSmokeTest } from '@/features/localCatalog/services/localCatalogSmokeTest.service';
+import { runLocalCatalogSourceFreshnessSmokeTest } from '@/features/localCatalog/services/localCatalogSourceFreshnessSmokeTest.service';
 import { runLocalCatalogSnapshotImportSmokeTest } from '@/features/localCatalog/services/localCatalogSnapshotImportSmokeTest.service';
 import { runLocalCatalogSnapshotLifecycleSmokeTest } from '@/features/localCatalog/services/localCatalogSnapshotLifecycleSmokeTest.service';
 import { runLocalPlaylistImportSmokeTest } from '@/features/localCatalog/services/localPlaylistImportSmokeTest.service';
@@ -63,6 +64,7 @@ const allSuites = [
   ['schema-v3', runLocalCatalogSchemaSmokeTest],
   ['snapshot-lifecycle', runLocalCatalogSnapshotLifecycleSmokeTest],
   ['snapshot-import', runLocalCatalogSnapshotImportSmokeTest],
+  ['source-freshness-u2f4d6', runLocalCatalogSourceFreshnessSmokeTest],
   ['runtime-snapshot-bridge', runLocalCatalogRuntimeSnapshotBridgeSmokeTest],
   ['search-u2f4', runLocalCatalogSearchSmokeTest],
   ['series-lookup-u2f4d1b1', runLocalCatalogSeriesLookupSmokeTest],
