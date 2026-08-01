@@ -11,6 +11,7 @@ import {
 import { App as CapacitorApp } from '@capacitor/app';
 
 import { env } from '@/config/env';
+import { CLIENT_RUNTIME_ACCESS_REVOKED_EVENT } from '@/features/bootstrap/services/clientRuntimeAccessEvents.service';
 import { loadDirectSourcePlaylist } from '../lib/directSourcePlaylistLoader';
 import {
   beginLocalCatalogImport,
@@ -584,6 +585,25 @@ export function PlaylistRuntimeProvider({
     backgroundRefreshEnabledRef.current = false;
     coldRefreshAttemptedRef.current = false;
   }, [cancelActiveSnapshotBridge]);
+
+  useEffect(() => {
+    function handleClientRuntimeAccessRevoked() {
+      clearRuntime();
+    }
+
+    window.addEventListener(
+      CLIENT_RUNTIME_ACCESS_REVOKED_EVENT,
+      handleClientRuntimeAccessRevoked,
+    );
+
+    return () => {
+      window.removeEventListener(
+        CLIENT_RUNTIME_ACCESS_REVOKED_EVENT,
+        handleClientRuntimeAccessRevoked,
+      );
+      loadAbortControllerRef.current?.abort();
+    };
+  }, [clearRuntime]);
 
   const value = useMemo(
     () => ({

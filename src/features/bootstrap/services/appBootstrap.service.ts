@@ -35,6 +35,8 @@ import {
   preloadCriticalHeroArtwork,
 } from '@/features/catalog/services/discoveryPerformance.service';
 
+import { notifyClientRuntimeAccessRevoked } from './clientRuntimeAccessEvents.service';
+
 export type AppBootstrapStepId =
   | 'license'
   | 'playlist'
@@ -231,6 +233,8 @@ export function clearClientRuntimeAccessState(): void {
   } catch {
     // Runtime cache cleanup is best-effort; missing storage already means blocked.
   }
+
+  notifyClientRuntimeAccessRevoked();
 }
 
 function normalizeLicenseCode(value?: string | null) {
