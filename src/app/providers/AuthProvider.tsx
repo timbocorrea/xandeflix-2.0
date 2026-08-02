@@ -4,14 +4,23 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { spatialError } from '@/lib/spatial/spatialDebug';
 
-import { supabase } from '../../lib/supabase/supabaseClient';
+import {
+  clearSupabaseLocalAuthStorage,
+  supabase,
+} from '../../lib/supabase/supabaseClient';
 import { clearClientRuntimeAccessState } from '../../features/bootstrap/services/appBootstrap.service';
+import {
+  clearClientAccessSignedOut,
+  isClientAccessSignedOut,
+  markClientAccessSignedOut,
+} from '../../features/licensing/lib/licenseActivationStorage';
 
 interface AuthContextValue {
   user: User | null;
@@ -34,11 +43,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const authOperationGenerationRef = useRef(0);
+  const isLocalSignOutRef = useRef(isClientAccessSignedOut());
 
   const refreshSession = useCallback(async () => {
+    const authOperationGeneration = authOperationGenerationRef.current;
+
+    if (isLocalSignOutRef.current || isClientAccessSignedOut()) {
+      clearSupabaseLocalAuthStorage();
+      setSession(null);
+      setUser(null);
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
 
     const { data, error } = await supabase.auth.getSession();
+
+    if (authOperationGenerationRef.current !== authOperationGeneration) {
+      return;
+    }
+
+    if (isLocalSignOutRef.current || isClientAccessSignedOut()) {
+      clearSupabaseLocalAuthStorage();
+      setSession(null);
+      setUser(null);
+      setIsLoading(false);
+      return;
+    }
 
     if (error) {
       spatialError('provider', '[AuthProvider] Erro ao buscar sessão:', error.message);
@@ -59,6 +92,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      if (
+        currentSession &&
+        (isLocalSignOutRef.current || isClientAccessSignedOut())
+      ) {
+        clearSupabaseLocalAuthStorage();
+        setSession(null);
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
       setIsLoading(false);
@@ -70,6 +114,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [refreshSession]);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    authOperationGenerationRef.current += 1;
+    isLocalSignOutRef.current = false;
+    clearClientAccessSignedOut();
     setIsLoading(true);
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -85,6 +132,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
+    authOperationGenerationRef.current += 1;
+    isLocalSignOutRef.current = false;
+    clearClientAccessSignedOut();
     setIsLoading(true);
 
     const { error } = await supabase.auth.signUp({
@@ -99,31 +149,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  const signOut = useCallback(async () => {
-    setIsLoading(true);
-
-    let signOutError: Error | null = null;
+  const signOut = useCallback((): Promise<void> => {
+    authOperationGenerationRef.current += 1;
+    isLocalSignOutRef.current = true;
+    markClientAccessSignedOut();
 
     try {
-      const { error } = await supabase.auth.signOut();
+      void supabase.auth.signOut().catch(() => undefined);
+    } catch {
+      spatialError(
+        'provider',
+        '[AuthProvider] Falha ao iniciar logout remoto.',
+      );
+    }
 
-      if (error) {
-        signOutError = new Error(error.message);
-      }
-    } catch (error) {
-      signOutError =
-        error instanceof Error ? error : new Error('SIGN_OUT_FAILED');
-    } finally {
+    try {
+      clearSupabaseLocalAuthStorage();
+    } catch {
+      spatialError(
+        'provider',
+        '[AuthProvider] Falha ao limpar sessão local.',
+      );
+    }
+
+    try {
       clearClientRuntimeAccessState();
-
-      setSession(null);
-      setUser(null);
-      setIsLoading(false);
+    } catch {
+      spatialError(
+        'provider',
+        '[AuthProvider] Falha ao limpar acesso local.',
+      );
     }
 
-    if (signOutError) {
-      throw signOutError;
-    }
+    setSession(null);
+    setUser(null);
+    setIsLoading(false);
+
+    return Promise.resolve();
   }, []);
   const value = useMemo<AuthContextValue>(
     () => ({

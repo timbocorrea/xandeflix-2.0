@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "governance:check": "node scripts/guardrails/check-data-governance.mjs",
     "governance:test": "node scripts/guardrails/check-data-governance.test.mjs",
+    "test:runtime-access": "node scripts/run-u2-runtime-access-smokes.mjs",
     "postinstall": "node scripts/patch-capacitor-java17.cjs"
   },
   "dependencies": {
@@ -45,6 +46,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
+    "jsdom": "^30.0.1",
     "supabase": "^2.98.2",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
