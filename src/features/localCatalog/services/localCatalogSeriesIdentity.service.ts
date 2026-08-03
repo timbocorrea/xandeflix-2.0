@@ -1,5 +1,6 @@
 export type LocalCatalogSeriesIdentityInput = {
   id: string;
+  seriesIdentityKey?: string | null;
   seriesKey?: string | null;
   seriesName?: string | null;
   episodeTitle?: string | null;
@@ -26,7 +27,8 @@ export function normalizeSeriesCollectionTitle(value?: string | null) {
 export function getSeriesCollectionKey(
   item: LocalCatalogSeriesIdentityInput,
 ): string {
-  const explicitSeriesKey = item.seriesKey?.trim();
+  const explicitSeriesKey =
+    item.seriesIdentityKey?.trim() || item.seriesKey?.trim();
 
   if (explicitSeriesKey) {
     return explicitSeriesKey.toLowerCase();
