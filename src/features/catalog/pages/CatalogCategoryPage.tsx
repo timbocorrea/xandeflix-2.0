@@ -54,6 +54,7 @@ import {
   writePresentationRouteCache,
 } from '../services/presentationRouteCache.service';
 import { sortEpisodesNaturally } from '../services/episodeNaturalOrder.service';
+import { resolveCatalogItemOpenTarget } from '../services/catalogItemOpenPolicy.service';
 
 import {
   enrichSeriesCardPosters,
@@ -3763,28 +3764,28 @@ export function CatalogCategoryPage({
 
 
   function openCategoryItem(item: HomeVodItem, index: number) {
-    if (isSeriesDetailPage) {
+    const openTarget = resolveCatalogItemOpenTarget({
+      categorySlug: category?.slug,
+      isMovieSeeAllPage,
+      isSeriesCollection: Boolean(item.isSeriesCollection),
+      isSeriesDetailPage,
+      seriesKey: item.seriesKey,
+    });
+
+    if (openTarget === 'episode') {
       openEpisode(item, index);
       return;
     }
 
-    const shouldOpenSeriesDetail =
-      category?.slug === 'series' ||
-      category?.slug === 'series-group' ||
-      item.isSeriesCollection ||
-      Boolean(item.seriesKey);
-
-    if (shouldOpenSeriesDetail) {
+    if (openTarget === 'series-detail') {
       openSeriesCollection(item);
       return;
     }
 
-    if (category?.slug === 'filmes' || isMovieSeeAllPage) {
+    if (openTarget === 'movie-detail') {
       openMovieDetail(item);
       return;
     }
-
-    openEpisode(item, index);
   }
 
   function openEpisode(item: HomeVodItem, index: number) {
@@ -4856,7 +4857,7 @@ export function CatalogCategoryPage({
                               category?.slug ?? 'category',
                               absoluteIndex,
                             )}
-                            onEnterPress={() => openCategoryItem(item, absoluteIndex)}
+                            onEnterPress={() => openEpisode(item, absoluteIndex)}
                             onArrowPress={(direction: string) =>
                               handleCategoryCardArrowPress(
                                 direction,
