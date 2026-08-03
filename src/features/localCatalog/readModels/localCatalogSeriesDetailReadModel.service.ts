@@ -31,7 +31,7 @@ type LocalCatalogItemWithSourceOrder = LocalCatalogItem & {
 };
 
 export type SeriesDetailEpisode = HomeVodItem & {
-  seriesKey: string;
+  seriesIdentityKey: string;
   sourceOrder: number | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
@@ -115,7 +115,8 @@ function mapSnapshotItemToSeriesDetailEpisode(
     artworkCandidates: artwork.posterCandidates,
     streamUrl: item.streamUrl,
     groupTitle: item.rawGroupTitle?.trim() || undefined,
-    seriesKey,
+    seriesIdentityKey: seriesKey,
+    seriesKey: undefined,
     sourceOrder: toValidEpisodeNumber(item.sourceOrder),
     seasonNumber:
       toValidEpisodeNumber(item.seasonNumber) ?? parsedOrder.seasonNumber,
@@ -144,7 +145,8 @@ function mapLocalItemToSeriesDetailEpisode(
     artworkCandidates: artwork.posterCandidates,
     streamUrl: item.streamUrl,
     groupTitle: item.groupTitle?.trim() || undefined,
-    seriesKey,
+    seriesIdentityKey: seriesKey,
+    seriesKey: undefined,
     sourceOrder: toValidEpisodeNumber(item.sourceOrder),
     seasonNumber:
       toValidEpisodeNumber(item.seasonNumber) ?? parsedOrder.seasonNumber,
