@@ -8,15 +8,27 @@ const files = {
   preview: 'android/app/src/main/java/com/xandeflix/app/NativeAndroidPlayerPlugin.java',
 };
 
+async function readNormalizedSource(path) {
+  return (await readFile(path, 'utf8')).replace(/\r\n?/g, '\n');
+}
+
 const source = Object.fromEntries(
   await Promise.all(
-    Object.entries(files).map(async ([key, path]) => [key, await readFile(path, 'utf8')]),
+    Object.entries(files).map(async ([key, path]) => [
+      key,
+      await readNormalizedSource(path),
+    ]),
   ),
 );
 
+const episodeTouchButtonPattern =
+  /<button\s+ref=\{ref\}\s+type="button"\s+onClick=\{onEnterPress\}/;
+const oldEpisodeDivPattern =
+  /<div\s+ref=\{ref\}\s+role="button"\s+tabIndex=\{-1\}/;
+
 const checks = [
-  ['episode-touch-native-button', source.category.includes('<button\n      ref={ref}\n      type="button"\n      onClick={onEnterPress}')],
-  ['episode-touch-old-div-removed', !source.category.includes('<div\n      ref={ref}\n      role="button"\n      tabIndex={-1}')],
+  ['episode-touch-native-button', episodeTouchButtonPattern.test(source.category)],
+  ['episode-touch-old-div-removed', !oldEpisodeDivPattern.test(source.category)],
   ['home-hero-poster-candidate', source.catalog.includes('Boolean(item.posterUrl?.trim())')],
   ['home-hero-fallback-prop', source.catalog.includes('fallbackPosterUrl={heroItem?.posterUrl}')],
   ['catalog-hero-fallback-rendering', source.hero.includes('normalizedFallbackPosterUrl') && source.hero.includes('isFallbackPoster')],
