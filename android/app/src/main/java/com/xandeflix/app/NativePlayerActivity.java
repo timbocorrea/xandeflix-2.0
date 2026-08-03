@@ -147,7 +147,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         playerView.setShowRewindButton(true);
         playerView.setShowNextButton(false);
         playerView.setShowPreviousButton(false);
-        playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
+        playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
         playerView.setFocusable(true);
         playerView.setFocusableInTouchMode(true);
 

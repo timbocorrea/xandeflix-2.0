@@ -11,7 +11,8 @@
     "governance:check": "node scripts/guardrails/check-data-governance.mjs",
     "governance:test": "node scripts/guardrails/check-data-governance.test.mjs",
     "test:runtime-access": "node scripts/run-u2-runtime-access-smokes.mjs",
-    "postinstall": "node scripts/patch-capacitor-java17.cjs"
+    "postinstall": "node scripts/patch-capacitor-java17.cjs",
+    "test:tablet-regressions": "node scripts/run-tablet-regression-source-smokes.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",

@@ -21,6 +21,7 @@ interface CatalogHeroProps {
   description?: string;
   metadata?: string;
   backgroundUrl?: string;
+  fallbackPosterUrl?: string;
   artworkCandidates?: LocalCatalogArtworkCandidate[];
   eyebrow?: string;
   stats?: CatalogHeroStat[];
@@ -42,6 +43,7 @@ export function CatalogHero({
   description = 'Explore recomendacoes, retome o que voce ja assiste e navegue rapido com controle remoto em uma experiencia pensada para TV.',
   metadata,
   backgroundUrl,
+  fallbackPosterUrl,
   artworkCandidates,
   eyebrow,
   stats = [
@@ -61,6 +63,7 @@ export function CatalogHero({
   onNextHeroItem,
   itemId,
 }: CatalogHeroProps) {
+  const normalizedFallbackPosterUrl = fallbackPosterUrl?.trim() || null;
   const imageCandidates = useMemo(
     () =>
       Array.from(
@@ -68,10 +71,11 @@ export function CatalogHero({
           [
             backgroundUrl,
             ...(artworkCandidates?.map((candidate) => candidate.url) ?? []),
+            normalizedFallbackPosterUrl,
           ].filter((value): value is string => Boolean(value?.trim())),
         ),
       ),
-    [artworkCandidates, backgroundUrl],
+    [artworkCandidates, backgroundUrl, normalizedFallbackPosterUrl],
   );
   const imageCandidatesKey = imageCandidates.join('|');
   const [imageIndex, setImageIndex] = useState(0);
@@ -81,6 +85,13 @@ export function CatalogHero({
   }, [imageCandidatesKey, title]);
 
   const activeImageUrl = imageCandidates[imageIndex] ?? backgroundUrl;
+  const isFallbackPoster =
+    Boolean(normalizedFallbackPosterUrl) &&
+    activeImageUrl === normalizedFallbackPosterUrl &&
+    activeImageUrl !== backgroundUrl &&
+    !(artworkCandidates ?? []).some(
+      (candidate) => candidate.url === activeImageUrl,
+    );
 
   useLayoutEffect(() => {
     markDiscoveryPerformance('hero_content_paint');
@@ -129,7 +140,7 @@ export function CatalogHero({
       data-xf-hero-pool-size={heroTotal ?? 0}
       data-compact-tv-hero={isCompactTvHero ? 'true' : undefined}
       style={
-        backgroundUrl
+        backgroundUrl || normalizedFallbackPosterUrl
           ? {
               aspectRatio: '16 / 7',
               height: 'auto',
@@ -278,7 +289,10 @@ export function CatalogHero({
           key={`horizontal-${activeImageUrl}`}
           src={activeImageUrl}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-100"
+          className={cn(
+            'absolute inset-0 h-full w-full opacity-100',
+            isFallbackPoster ? 'bg-black/80 object-contain' : 'object-cover',
+          )}
           style={
             heroIndex > 0
               ? { animation: 'xfHeroFadeIn 180ms ease-out both' }

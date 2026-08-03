@@ -163,7 +163,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 inlinePreviewView.setBackgroundColor(Color.BLACK);
                 inlinePreviewView.setShutterBackgroundColor(Color.BLACK);
                 inlinePreviewView.setKeepScreenOn(true);
-                inlinePreviewView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FILL);
+                inlinePreviewView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
                 inlinePreviewView.setFocusable(false);
                 inlinePreviewView.setFocusableInTouchMode(false);
 

@@ -542,7 +542,9 @@ export function CatalogPage() {
     }
 
     const candidates = Array.from(uniqueItems.values()).filter(
-      (item) => getHorizontalHeroArtworkCandidates(item).length > 0,
+      (item) =>
+        getHorizontalHeroArtworkCandidates(item).length > 0 ||
+        Boolean(item.posterUrl?.trim()),
     );
 
     if (!currentHomeDiscoveryScope) {
@@ -558,7 +560,8 @@ export function CatalogPage() {
       slotCount: Math.min(5, candidates.length),
       historyKind: 'HOME_HERO',
       isArtworkReady: (item) =>
-        getHorizontalHeroArtworkCandidates(item).length > 0,
+        getHorizontalHeroArtworkCandidates(item).length > 0 ||
+        Boolean(item.posterUrl?.trim()),
     }).items;
   }, [
     currentHomeDiscoveryScope,
@@ -1060,6 +1063,7 @@ export function CatalogPage() {
           }
           metadata={isMobile ? buildMobileHomeHeroMetadata(heroItem) : undefined}
           backgroundUrl={resolveHomeHeroArtworkUrl(heroItem, 'horizontal')}
+          fallbackPosterUrl={heroItem?.posterUrl}
           artworkCandidates={isMobile ? undefined : getHorizontalHeroArtworkCandidateRecords(heroItem)}
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}

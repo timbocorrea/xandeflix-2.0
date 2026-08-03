@@ -1559,12 +1559,12 @@ function EpisodeListRow({
     : 0;
 
   return (
-    <div
+    <button
       ref={ref}
-      role="button"
-      tabIndex={-1}
+      type="button"
+      onClick={onEnterPress}
       className={
-        'relative overflow-hidden grid grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
+        'relative grid w-full appearance-none grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 overflow-hidden rounded-[0.55rem] border px-3 py-2.5 text-left transition ' +
         (focused
           ? 'border-xf-red bg-xf-red/15 shadow-[0_0_0_0.18rem_rgba(229,9,20,0.28)]'
           : isStarted
@@ -1599,7 +1599,7 @@ function EpisodeListRow({
           />
         </div>
       ) : null}
-    </div>
+    </button>
   );
 }
 
