@@ -29,9 +29,9 @@ const oldEpisodeDivPattern =
 const checks = [
   ['episode-touch-native-button', episodeTouchButtonPattern.test(source.category)],
   ['episode-touch-old-div-removed', !oldEpisodeDivPattern.test(source.category)],
-  ['home-hero-poster-candidate', source.catalog.includes('Boolean(item.posterUrl?.trim())')],
-  ['home-hero-fallback-prop', source.catalog.includes('fallbackPosterUrl={heroItem?.posterUrl}')],
-  ['catalog-hero-fallback-rendering', source.hero.includes('normalizedFallbackPosterUrl') && source.hero.includes('isFallbackPoster')],
+  ['episode-detail-routes-to-player', source.category.includes('if (isSeriesDetailPage) {\n      openEpisode(item, index);\n      return;\n    }')],
+  ['home-hero-horizontal-only', !source.catalog.includes('Boolean(item.posterUrl?.trim())') && !source.catalog.includes('fallbackPosterUrl={heroItem?.posterUrl}')],
+  ['catalog-hero-no-vertical-poster-fallback', !source.hero.includes('fallbackPosterUrl') && !source.hero.includes('isFallbackPoster')],
   ['fullscreen-preserves-aspect-ratio', source.fullscreen.includes('RESIZE_MODE_FIT') && !source.fullscreen.includes('RESIZE_MODE_ZOOM')],
   ['inline-preview-preserves-aspect-ratio', source.preview.includes('RESIZE_MODE_FIT') && !source.preview.includes('RESIZE_MODE_FILL')],
 ];

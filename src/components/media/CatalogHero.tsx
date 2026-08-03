@@ -21,7 +21,6 @@ interface CatalogHeroProps {
   description?: string;
   metadata?: string;
   backgroundUrl?: string;
-  fallbackPosterUrl?: string;
   artworkCandidates?: LocalCatalogArtworkCandidate[];
   eyebrow?: string;
   stats?: CatalogHeroStat[];

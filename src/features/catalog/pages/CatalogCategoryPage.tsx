@@ -3763,6 +3763,11 @@ export function CatalogCategoryPage({
 
 
   function openCategoryItem(item: HomeVodItem, index: number) {
+    if (isSeriesDetailPage) {
+      openEpisode(item, index);
+      return;
+    }
+
     const shouldOpenSeriesDetail =
       category?.slug === 'series' ||
       category?.slug === 'series-group' ||
