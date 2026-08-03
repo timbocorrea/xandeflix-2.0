@@ -802,7 +802,10 @@ export async function runAppBootstrap({
     } catch (prepareError) {
       console.warn('[XANDEFLIX_LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED]', {
         errorCode: 'LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED',
-        error: prepareError instanceof Error ? prepareError.message : String(prepareError),
+        errorName:
+          prepareError instanceof Error
+            ? prepareError.name
+            : 'UnknownError',
       });
       throw prepareError;
     }

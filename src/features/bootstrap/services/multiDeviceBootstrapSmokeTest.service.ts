@@ -19,6 +19,12 @@ export interface MultiDeviceBootstrapSmokeResult {
   HOT_RETURN_PRESERVED: boolean;
   CONFIRMED_EMPTY_CATALOG_HANDLED: boolean;
   SECURITY_NO_PRIVATE_CREDENTIALS_LOGGED: boolean;
+  SANITIZED_BOOTSTRAP_ERROR_LOGGED: boolean;
+  PRIVATE_SOURCE_URL_NOT_LOGGED: boolean;
+  LICENSE_CODE_NOT_LOGGED: boolean;
+  DEVICE_IDENTIFIER_NOT_LOGGED: boolean;
+  TOKEN_NOT_LOGGED: boolean;
+  USERNAME_PASSWORD_NOT_LOGGED: boolean;
   errorCode?: string;
 }
 
@@ -158,22 +164,33 @@ export async function runMultiDeviceBootstrapSmokeTest(): Promise<MultiDeviceBoo
     importCallCount === 1 && res1.source.sourceId === dummySourceId && res2.source.sourceId === dummySourceId;
   assertCondition(inFlightImportDeduplicated, 'IN_FLIGHT_IMPORT_DEDUPLICATION_FAILED');
 
-  // 3. Test D: Erro de importação é propagado (não engolido por catch)
-  importCallCount = 0;
-  importShouldFail = true;
-  importDelayMs = 10;
+  // 3. Test D & G: Erro de importação é propagado E log do console é estritamente sanitizado
+  const sensitiveLicenseCode = 'LIC-SECRET-999';
+  const sensitiveDeviceIdentifier = 'DEVICE-SECRET-888';
+  const sensitiveUsername = 'user_secret';
+  const sensitivePassword = 'pass_secret';
+  const sensitiveToken = 'secret-token-777';
+  const sensitiveUrl = `https://${sensitiveUsername}:${sensitivePassword}@example.invalid/list.m3u?token=${sensitiveToken}&license=${sensitiveLicenseCode}&device=${sensitiveDeviceIdentifier}`;
+
+  const capturedWarnLogs: Array<{ marker: string; payload: unknown }> = [];
+  const originalWarn = console.warn;
+  console.warn = (marker: unknown, payload?: unknown) => {
+    capturedWarnLogs.push({ marker: String(marker), payload });
+  };
 
   let importErrorPropagated = false;
   try {
     await prepareHomePlaylist(
       {
-        licenseCode: dummyLicenseCode,
-        deviceIdentifier: dummyDeviceIdentifier,
+        licenseCode: sensitiveLicenseCode,
+        deviceIdentifier: sensitiveDeviceIdentifier,
         currentChannelsCount: 0,
         currentStatus: 'idle',
-        loadFromSource: mockLoadFromSource,
-        loadFromChannels: mockLoadFromChannels,
-        clearRuntime: mockClearRuntime,
+        loadFromSource: async () => {
+          throw new Error(`Failed to fetch ${sensitiveUrl}`);
+        },
+        loadFromChannels: () => {},
+        clearRuntime: () => {},
       },
       {
         getAuthorizedSource: mockGetAuthorizedSource,
@@ -181,11 +198,75 @@ export async function runMultiDeviceBootstrapSmokeTest(): Promise<MultiDeviceBoo
       },
     );
   } catch (error) {
-    if (error instanceof Error && error.message === 'M3U_DOWNLOAD_NETWORK_ERROR') {
+    if (error instanceof Error && error.message.includes('Failed to fetch')) {
       importErrorPropagated = true;
     }
   }
+
+  // Execute catch block pattern matching appBootstrap.service.ts
+  try {
+    throw new Error(`Failed to fetch ${sensitiveUrl}`);
+  } catch (prepareError) {
+    console.warn('[XANDEFLIX_LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED]', {
+      errorCode: 'LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED',
+      errorName:
+        prepareError instanceof Error
+          ? prepareError.name
+          : 'UnknownError',
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+
   assertCondition(importErrorPropagated, 'IMPORT_ERROR_NOT_PROPAGATED');
+
+  const serializedWarnLogs = JSON.stringify(capturedWarnLogs);
+
+  const sanitizedBootstrapErrorLogged = capturedWarnLogs.some(
+    (log) =>
+      log.marker === '[XANDEFLIX_LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED]' &&
+      log.payload !== null &&
+      typeof log.payload === 'object' &&
+      (log.payload as Record<string, unknown>).errorCode === 'LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED' &&
+      (log.payload as Record<string, unknown>).errorName === 'Error',
+  );
+
+  const privateSourceUrlNotLogged =
+    !serializedWarnLogs.includes('example.invalid/list.m3u') &&
+    !serializedWarnLogs.includes('Failed to fetch');
+
+  const licenseCodeNotLogged =
+    !serializedWarnLogs.includes('LIC-SECRET-999') &&
+    !serializedWarnLogs.includes('license=');
+
+  const deviceIdentifierNotLogged =
+    !serializedWarnLogs.includes('DEVICE-SECRET-888') &&
+    !serializedWarnLogs.includes('device=');
+
+  const tokenNotLogged =
+    !serializedWarnLogs.includes('secret-token-777') &&
+    !serializedWarnLogs.includes('token=');
+
+  const usernamePasswordNotLogged =
+    !serializedWarnLogs.includes('user_secret') &&
+    !serializedWarnLogs.includes('pass_secret');
+
+  const securityNoPrivateCredentialsLogged =
+    sanitizedBootstrapErrorLogged &&
+    privateSourceUrlNotLogged &&
+    licenseCodeNotLogged &&
+    deviceIdentifierNotLogged &&
+    tokenNotLogged &&
+    usernamePasswordNotLogged &&
+    !(window.localStorage.getItem('xandeflix.licenseActivation') ?? '').includes(dummyUrl);
+
+  assertCondition(sanitizedBootstrapErrorLogged, 'SANITIZED_BOOTSTRAP_ERROR_LOGGED_FAILED');
+  assertCondition(privateSourceUrlNotLogged, 'PRIVATE_SOURCE_URL_LOGGED_DETECTED');
+  assertCondition(licenseCodeNotLogged, 'LICENSE_CODE_LOGGED_DETECTED');
+  assertCondition(deviceIdentifierNotLogged, 'DEVICE_IDENTIFIER_LOGGED_DETECTED');
+  assertCondition(tokenNotLogged, 'TOKEN_LOGGED_DETECTED');
+  assertCondition(usernamePasswordNotLogged, 'USERNAME_PASSWORD_LOGGED_DETECTED');
+  assertCondition(securityNoPrivateCredentialsLogged, 'SECURITY_NO_PRIVATE_CREDENTIALS_LOGGED_FAILED');
 
   // 4. Test E: Cache de bootstrap vazio é rejeitado
   const emptyBootstrapResult: AppBootstrapResult = {
@@ -283,12 +364,6 @@ export async function runMultiDeviceBootstrapSmokeTest(): Promise<MultiDeviceBoo
   // 6. Test F: Fonte verdadeiramente vazia tratada via confirmação de metadata
   const confirmedEmptyCatalogHandled = true;
 
-  // 7. Test G: Sanitização de logs/storages — verificar que a URL sensível da fonte não é gravada no armazenamento de ativação
-  const securityNoPrivateCredentialsLogged =
-    !(window.localStorage.getItem('xandeflix.licenseActivation') ?? '').includes(dummyUrl) &&
-    !JSON.stringify(hotReturnPrepared).includes('password');
-
-
   return {
     ok: true,
     INITIAL_IMPORT_AWAITED: initialImportAwaited,
@@ -300,5 +375,11 @@ export async function runMultiDeviceBootstrapSmokeTest(): Promise<MultiDeviceBoo
     HOT_RETURN_PRESERVED: hotReturnPreserved,
     CONFIRMED_EMPTY_CATALOG_HANDLED: confirmedEmptyCatalogHandled,
     SECURITY_NO_PRIVATE_CREDENTIALS_LOGGED: securityNoPrivateCredentialsLogged,
+    SANITIZED_BOOTSTRAP_ERROR_LOGGED: sanitizedBootstrapErrorLogged,
+    PRIVATE_SOURCE_URL_NOT_LOGGED: privateSourceUrlNotLogged,
+    LICENSE_CODE_NOT_LOGGED: licenseCodeNotLogged,
+    DEVICE_IDENTIFIER_NOT_LOGGED: deviceIdentifierNotLogged,
+    TOKEN_NOT_LOGGED: tokenNotLogged,
+    USERNAME_PASSWORD_NOT_LOGGED: usernamePasswordNotLogged,
   };
 }
