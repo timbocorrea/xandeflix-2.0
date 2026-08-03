@@ -50,6 +50,9 @@ const defaultDependencies: PrepareHomePlaylistDependencies = {
   repository: localCatalogRepository,
 };
 
+const inFlightPrepareMap = new Map<string, Promise<PreparedHomePlaylist>>();
+
+
 function createOfflinePreparedHomePlaylist(
   sourceId: string,
   loadFromChannels: PrepareHomePlaylistInput['loadFromChannels'],
@@ -198,9 +201,25 @@ export async function prepareHomePlaylist({
     return preparedPlaylist;
   }
 
-  void loadFromSource(playlistSource, authorizationContext).catch(
-    () => undefined,
-  );
+  if (sourceId && inFlightPrepareMap.has(sourceId)) {
+    return await inFlightPrepareMap.get(sourceId)!;
+  }
 
-  return preparedPlaylist;
+  const preparePromise = (async () => {
+    try {
+      await loadFromSource(playlistSource, authorizationContext);
+      return preparedPlaylist;
+    } finally {
+      if (sourceId) {
+        inFlightPrepareMap.delete(sourceId);
+      }
+    }
+  })();
+
+  if (sourceId) {
+    inFlightPrepareMap.set(sourceId, preparePromise);
+  }
+
+  return await preparePromise;
 }
+

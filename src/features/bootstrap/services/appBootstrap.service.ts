@@ -23,6 +23,9 @@ import { getCatalogCategoryDefinition } from '@/features/catalog/services/catalo
 import { prepareHomePlaylist } from '@/features/catalog/services/prepareHomePlaylist.service';
 import { clearValidatedLicenseSessionCache } from '@/features/licensing/services/licenseSessionValidation.service';
 import { clearDiscoveryRuntimePresentationState } from '@/features/catalog/services/discoveryRuntimePresentationStore.service';
+import { localCatalogRepository } from '@/features/localCatalog/repositories/localCatalogRepository.service';
+import { isLocalCatalogReadable } from '@/features/localCatalog/services/localCatalogReadability.service';
+
 import { runLocalCatalogSourceBindingMigration } from '@/features/localCatalog/services/localCatalogSourceBindingMigration.service';
 import {
   createBoundedDiscoveryGenerationKey,
@@ -293,6 +296,19 @@ function isBootstrapResultForScope({
     result.sourceId?.trim() === sourceId.trim()
   );
 }
+
+export function isPopulatedBootstrapResult(
+  result: AppBootstrapResult | null | undefined,
+): boolean {
+  if (!result) {
+    return false;
+  }
+
+  return result.homeSections.some(
+    (section) => section.items && section.items.length > 0,
+  );
+}
+
 
 function readStoredBootstrapResult({
   allowExpired = false,
@@ -740,6 +756,7 @@ export async function runAppBootstrap({
     normalizedDeviceIdentifier &&
     runtime.currentSourceId?.trim() &&
     cachedResultBeforePreparation &&
+    isPopulatedBootstrapResult(cachedResultBeforePreparation) &&
     isBootstrapResultForScope({
       result: cachedResultBeforePreparation,
       licenseCode: normalizedLicenseCode,
@@ -782,13 +799,12 @@ export async function runAppBootstrap({
           deviceIdentifier: normalizedDeviceIdentifier,
         }).catch(() => undefined);
       }
-    } catch {
-      warnings.push(
-        'Catálogo local indisponível; a importação direta poderá ser repetida.',
-      );
+    } catch (prepareError) {
       console.warn('[XANDEFLIX_LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED]', {
         errorCode: 'LOCAL_CATALOG_BACKGROUND_PREPARE_FAILED',
+        error: prepareError instanceof Error ? prepareError.message : String(prepareError),
       });
+      throw prepareError;
     }
   }
 
@@ -798,6 +814,7 @@ export async function runAppBootstrap({
 
   if (
     cachedResult &&
+    isPopulatedBootstrapResult(cachedResult) &&
     resolvedSourceId?.trim() &&
     isBootstrapResultForScope({
       result: cachedResult,
@@ -891,7 +908,14 @@ export async function runAppBootstrap({
       },
     };
 
-    cacheAppBootstrapResultForSession(criticalResult);
+    const isConfirmedMetadataReadable = await localCatalogRepository
+      .getImportMetadata(resolvedSourceId.trim())
+      .then(isLocalCatalogReadable)
+      .catch(() => false);
+
+    if (isPopulatedBootstrapResult(criticalResult) || isConfirmedMetadataReadable) {
+      cacheAppBootstrapResultForSession(criticalResult);
+    }
 
     emitProgress(onProgress, {
       stepId: 'done',
@@ -900,6 +924,7 @@ export async function runAppBootstrap({
       totalSteps: TOTAL_BOOTSTRAP_STEPS,
       warning: warnings[0],
     });
+
 
     return criticalResult;
   }
