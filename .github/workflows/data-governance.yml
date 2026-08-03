@@ -4,18 +4,13 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - fix/tablet-regression-recovery
-    paths:
-      - .github/workflows/data-governance.yml
 
 permissions:
   contents: write
 
 jobs:
   apply-tablet-recovery:
-    if: github.event_name == 'push'
+    if: github.head_ref == 'fix/tablet-regression-recovery'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -159,13 +154,12 @@ jobs:
                   src/features/catalog/pages/CatalogPage.tsx \
                   src/components/media/CatalogHero.tsx \
                   scripts/run-tablet-regression-source-smokes.mjs \
-                  .github/workflows/data-governance.yml \
-                  .github/workflows/apply-tablet-recovery-fix.yml
+                  .github/workflows/data-governance.yml
+          git add -u .github/workflows/apply-tablet-recovery-fix.yml
           git commit -m "fix(tablet): restore horizontal hero and episode playback"
           git push origin HEAD:fix/tablet-regression-recovery
 
   data-governance:
-    if: github.event_name == 'pull_request'
     name: Data governance guardrail
     runs-on: ubuntu-latest
 
