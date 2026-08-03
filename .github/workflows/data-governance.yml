@@ -5,48 +5,7 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-
 jobs:
-  apply-tablet-recovery:
-    if: github.head_ref == 'fix/tablet-regression-recovery'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: fix/tablet-regression-recovery
-          fetch-depth: 0
-
-      - name: Apply targeted recovery patch
-        run: python scripts/apply-tablet-recovery-patch.py
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Validate patch
-        run: |
-          npm ci --ignore-scripts
-          npm run test:tablet-regressions
-          npm run governance:check
-          npm run build
-          git diff --check
-
-      - name: Commit recovery patch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/features/catalog/pages/CatalogCategoryPage.tsx \
-                  src/features/catalog/pages/CatalogPage.tsx \
-                  src/components/media/CatalogHero.tsx \
-                  scripts/run-tablet-regression-source-smokes.mjs
-          git commit -m "fix(tablet): restore horizontal hero and episode playback"
-          git push origin HEAD:fix/tablet-regression-recovery
-
   data-governance:
     name: Data governance guardrail
     runs-on: ubuntu-latest
