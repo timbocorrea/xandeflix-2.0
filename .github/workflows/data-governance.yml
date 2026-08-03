@@ -28,5 +28,8 @@ jobs:
       - name: Run data governance guardrail
         run: npm run governance:check
 
+      - name: Run tablet regression source smoke
+        run: npm run test:tablet-regressions
+
       - name: Build project
         run: npm run build --if-present
