@@ -22,12 +22,6 @@ jobs:
       - name: Apply targeted recovery patch
         run: python scripts/apply-tablet-recovery-patch.py
 
-      - name: Restore temporary automation files
-        run: |
-          git show HEAD~3:.github/workflows/data-governance.yml > .github/workflows/data-governance.yml
-          rm -f .github/workflows/apply-tablet-recovery-fix.yml
-          rm -f scripts/apply-tablet-recovery-patch.py
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,10 +43,7 @@ jobs:
           git add src/features/catalog/pages/CatalogCategoryPage.tsx \
                   src/features/catalog/pages/CatalogPage.tsx \
                   src/components/media/CatalogHero.tsx \
-                  scripts/run-tablet-regression-source-smokes.mjs \
-                  .github/workflows/data-governance.yml
-          git add -u .github/workflows/apply-tablet-recovery-fix.yml \
-                     scripts/apply-tablet-recovery-patch.py
+                  scripts/run-tablet-regression-source-smokes.mjs
           git commit -m "fix(tablet): restore horizontal hero and episode playback"
           git push origin HEAD:fix/tablet-regression-recovery
 
