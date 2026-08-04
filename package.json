@@ -12,6 +12,7 @@
     "governance:test": "node scripts/guardrails/check-data-governance.test.mjs",
     "test:runtime-access": "node scripts/run-u2-runtime-access-smokes.mjs",
     "test:multi-device-bootstrap": "node scripts/run-multi-device-bootstrap-smokes.mjs",
+    "test:catalog-refresh": "node scripts/run-catalog-refresh-smokes.mjs",
     "postinstall": "node scripts/patch-capacitor-java17.cjs"
   },
   "dependencies": {

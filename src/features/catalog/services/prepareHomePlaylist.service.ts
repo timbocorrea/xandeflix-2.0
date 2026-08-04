@@ -13,6 +13,9 @@ import { localCatalogRepository } from '@/features/localCatalog/repositories/loc
 import type { CatalogRepository } from '@/features/localCatalog/repositories/catalogRepository.types';
 import { isLocalCatalogReadable } from '@/features/localCatalog/services/localCatalogReadability.service';
 import { deriveLocalCatalogScope } from '@/features/localCatalog/services/localCatalogScope.service';
+import { getNetworkStatus } from '@/features/network/services/networkMode.service';
+import { evaluateCatalogRefreshPolicy } from './catalogRefreshPolicy.service';
+import { runCatalogBackgroundRefresh } from './catalogBackgroundRefresh.service';
 
 export type PrepareHomePlaylistInput = {
   licenseCode: string;
@@ -37,6 +40,7 @@ export type PrepareHomePlaylistInput = {
 export type PrepareHomePlaylistDependencies = {
   getAuthorizedSource: typeof getAuthorizedIptvSource;
   repository: Pick<CatalogRepository, 'getImportMetadata'>;
+  getNetworkStatus?: typeof getNetworkStatus;
 };
 
 export type PreparedHomePlaylist = {
@@ -48,6 +52,7 @@ export type PreparedHomePlaylist = {
 const defaultDependencies: PrepareHomePlaylistDependencies = {
   getAuthorizedSource: getAuthorizedIptvSource,
   repository: localCatalogRepository,
+  getNetworkStatus,
 };
 
 const inFlightPrepareMap = new Map<string, Promise<PreparedHomePlaylist>>();
@@ -187,10 +192,18 @@ export async function prepareHomePlaylist({
         sourceId,
       );
     } catch {
-      // IndexedDB indisponível torna o catálogo local inutilizável;
+      // IndexedDB indisponÃ­vel torna o catÃ¡logo local inutilizÃ¡vel;
       // o fallback direto autorizado permanece no endpoint.
     }
   }
+
+  const currentNetworkStatus = (
+    dependencies.getNetworkStatus ?? getNetworkStatus
+  )();
+  const refreshDecision = evaluateCatalogRefreshPolicy({
+    metadata,
+    networkStatus: currentNetworkStatus,
+  });
 
   if (isLocalCatalogReadable(metadata)) {
     loadFromChannels({
@@ -198,6 +211,17 @@ export async function prepareHomePlaylist({
       channels: [],
       authorizationContext,
     });
+
+    if (refreshDecision.shouldRefreshInBackground) {
+      void runCatalogBackgroundRefresh({
+        playlistSource,
+        authorizationContext,
+        networkMode: currentNetworkStatus.mode,
+        bootMode: refreshDecision.bootMode,
+        snapshotAgeMs: refreshDecision.snapshotAgeMs,
+      }).catch(() => undefined);
+    }
+
     return preparedPlaylist;
   }
 
