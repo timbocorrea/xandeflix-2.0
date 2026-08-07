@@ -366,13 +366,13 @@ A materialização documental não inicia VS-01.
 
 Até este ponto:
 
-`GIT_ADD_EXECUTED=NAO`
+`GIT_ADD_EXECUTED=SIM`
 
-`COMMIT_EXECUTED=NAO`
+`COMMIT_EXECUTED=SIM`
 
-`PUSH_EXECUTED=NAO`
+`PUSH_EXECUTED=SIM`
 
-`PR_CREATE_EXECUTED=NAO`
+`PR_CREATE_EXECUTED=SIM`
 
 `READY_FOR_REVIEW_EXECUTED=NAO`
 
@@ -385,6 +385,8 @@ Autorizações:
 `PUSH_AUTHORIZED=SIM`
 
 `PR_AUTHORIZED=SIM`
+
+`READY_FOR_REVIEW_AUTHORIZED=NAO`
 
 `MERGE_AUTHORIZED=NAO`
 
@@ -427,7 +429,9 @@ Os oito documentos autorizados pelo MVP-S0.2 foram materializados localmente.
 
 `CANON_PUBLISHED=SIM`
 
-`UNTRACKED_EXPECTED=SIM`
+`WORKTREE_CLEAN_EXPECTED=SIM`
+
+`UNTRACKED_EXPECTED=NAO`
 
 `STAGED_EXPECTED=NAO`
 
@@ -455,6 +459,24 @@ A materialização local foi publicada em branch remota e Draft PR, sem integra�
 `CANON_PR_NUMBER=29`
 
 `CANON_MERGED=NAO`
+
+Snapshot técnico da etapa pré-integração validada antes desta normalização:
+
+`STATUS_SNAPSHOT_STAGE=PRE_MERGE_DRAFT_PR`
+
+`MASTER_REMOTE_PR_GATE_TECHNICAL=PASS`
+
+`DATA_GOVERNANCE_REMOTE=PASS`
+
+`BUILD_REMOTE=PASS`
+
+`PR_29_STATE=DRAFT_OPEN`
+
+`PR_29_HEAD=e11c9c154d4334c0259f449466841943ee5c0489`
+
+`CANON_MERGED_TO_MAIN=NAO`
+
+`VS_01_STARTED=NAO`
 
 ## 16.1 Correções editoriais registradas durante auditoria
 
