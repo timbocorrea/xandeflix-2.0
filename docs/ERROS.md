@@ -338,7 +338,7 @@ Nenhum registro deste arquivo autoriza:
 - stream proxy;
 - restream;
 - backend content search;
-- IndexedDB sync to backend.
+- O catálogo local/IndexedDB não deve ser enviado nem replicado para infraestrutura central do Xandeflix.
 
 O Architecture Contract continua tendo poder de veto.
 

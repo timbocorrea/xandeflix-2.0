@@ -115,9 +115,9 @@ No contexto canônico deste documento:
 
 Um Draft PR pode conter evidência ou implementação candidata, mas não altera automaticamente o produto canônico.
 
-Nenhuma PR nova é criada pelo ciclo MVP-S0.2.
+A publicação documental do ciclo MVP-S0.2 está registrada na Draft PR #29.
 
-`MVP_S0_2_PR_CREATED=NAO`
+`MVP_S0_2_PR_CREATED=SIM`
 
 ---
 
@@ -189,13 +189,13 @@ Antes da criação deste STATUS, estavam materializados localmente e não versio
 
 Este próprio `STATUS.md` passa a ser o sétimo documento local após materialização bem-sucedida.
 
-`MVP_S0_2_PUBLICATION_STATUS=LOCAL_UNPUBLISHED`
+`MVP_S0_2_PUBLICATION_STATUS=REMOTE_DRAFT_PR`
 
-`MVP_S0_2_COMMIT_STATUS=NOT_COMMITTED`
+`MVP_S0_2_COMMIT_STATUS=COMMITTED`
 
-`MVP_S0_2_PUSH_STATUS=NOT_PUSHED`
+`MVP_S0_2_PUSH_STATUS=PUSHED`
 
-`MVP_S0_2_PR_STATUS=NOT_CREATED`
+`MVP_S0_2_PR_STATUS=DRAFT_OPEN`
 
 ---
 
@@ -326,7 +326,7 @@ Não existe autorização neste STATUS para:
 - stream proxy;
 - restream;
 - backend content search;
-- IndexedDB sync to backend.
+- O catálogo local/IndexedDB não deve ser enviado nem replicado para infraestrutura central do Xandeflix.
 
 ---
 
@@ -425,7 +425,7 @@ Os oito documentos autorizados pelo MVP-S0.2 foram materializados localmente.
 
 `CANON_MATERIALIZATION_COMPLETE=SIM`
 
-`CANON_PUBLISHED=NAO`
+`CANON_PUBLISHED=SIM`
 
 `UNTRACKED_EXPECTED=SIM`
 
@@ -444,13 +444,15 @@ Os oito arquivos são:
 7. `docs/STATUS.md`
 8. `docs/ERROS.md`
 
-A materialização local completa não equivale a publicação Git.
+A materialização local foi publicada em branch remota e Draft PR, sem integração na `main`.
 
-`CANON_FILES_COMMITTED=NAO`
+`CANON_FILES_COMMITTED=SIM`
 
-`CANON_FILES_PUSHED=NAO`
+`CANON_FILES_PUSHED=SIM`
 
-`CANON_PR_CREATED=NAO`
+`CANON_PR_CREATED=SIM`
+
+`CANON_PR_NUMBER=29`
 
 `CANON_MERGED=NAO`
 
