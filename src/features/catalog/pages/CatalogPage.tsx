@@ -51,7 +51,6 @@ import {
 import { useAutoRotatingHero } from '@/hooks/useAutoRotatingHero';
 import { markDiscoveryPerformance } from '@/features/catalog/services/discoveryPerformance.service';
 
-import { catalogSections } from '../data/catalogSections';
 import {
   getCachedHomeVodSections,
   loadHomeVodSections,
@@ -64,30 +63,16 @@ const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
 const SECTION_LOADING_CARD_COUNT = 4;
+type HomeCatalogStatus = 'loading' | 'content' | 'empty' | 'error';
 const TOP_CATEGORY_ITEMS = [
   { label: 'Ao Vivo', path: '/live', Icon: Tv },
   { label: 'Filmes', path: '/category/filmes', Icon: Clapperboard },
   { label: 'S\u00e9ries', path: '/category/series', Icon: MonitorPlay },
 ] as const;
 
-type CatalogPageItem = (typeof catalogSections)[number]['items'][number] & {
-  streamUrl?: string;
-  kind?: 'movie' | 'series' | 'unknown';
-  groupTitle?: string;
-  tmdbId?: string;
-  tmdbTitle?: string;
-  tmdbGenres?: string;
-  tmdbRating?: string;
-  tmdbReleaseYear?: string;
-  seriesKey?: string;
-  episodeCount?: number;
-  artworkCandidates?: HomeVodItem['artworkCandidates'];
-  isSeriesCollection?: boolean;
-};
-
-type CatalogPageSection = Omit<(typeof catalogSections)[number], 'items'> & {
-  items: CatalogPageItem[];
-};
+type CatalogPageItem = HomeVodItem;
+type CatalogPageSection = HomeVodSection;
+const EMPTY_CATALOG_SECTIONS: CatalogPageSection[] = [];
 
 function resolveHomeSectionSeeAllRoute(section: CatalogPageSection) {
   const representativeItem = section.items.find(
@@ -328,7 +313,8 @@ function createInitialHomeCatalogState(
     cachedBootstrap &&
     cachedBootstrap.licenseCode.trim().toUpperCase() ===
       loadInput?.licenseCode.trim().toUpperCase() &&
-    cachedBootstrap.deviceIdentifier === loadInput.deviceIdentifier
+    cachedBootstrap.deviceIdentifier === loadInput.deviceIdentifier &&
+    cachedBootstrap.sourceId === loadInput.sourceId
       ? cachedBootstrap.homeSections
       : null;
   const safeCachedSections = filterRenderableVodHomeSections(cachedSections);
@@ -428,9 +414,15 @@ export function CatalogPage() {
   const [realCatalogSections, setRealCatalogSections] = useState<
     CatalogPageSection[] | null
   >(initialHomeCatalogState.sections);
-  const [isRealCatalogLoading, setIsRealCatalogLoading] = useState(
-    !initialHomeCatalogState.sections?.length,
+  const [homeCatalogStatus, setHomeCatalogStatus] = useState<HomeCatalogStatus>(
+    initialHomeCatalogState.sections?.length ? 'content' : 'loading',
   );
+  const [homeCatalogErrorMessage, setHomeCatalogErrorMessage] = useState<
+    string | null
+  >(null);
+  const [homeCatalogRetryKey, setHomeCatalogRetryKey] = useState(0);
+  const realCatalogSectionsRef = useRef(realCatalogSections);
+  realCatalogSectionsRef.current = realCatalogSections;
   const homeVodLimitPerSection = getHomeVodLimitPerSection(isTv);
   const wasInitialCatalogHydratedFromCache =
     initialHomeCatalogState.wasHydratedFromCache &&
@@ -461,19 +453,17 @@ export function CatalogPage() {
     }
   }, [currentHomeDiscoveryScope]);
 
-  const canonicalCatalogSections = realCatalogSections?.length
-    ? realCatalogSections
-    : catalogSections;
+  const localCatalogSections = realCatalogSections ?? EMPTY_CATALOG_SECTIONS;
 
   const discoveryGenerationKey = useMemo(
     () =>
       createBoundedDiscoveryGenerationKey({
         sourceId: playlistSource?.sourceId ?? 'local-source',
         activeGenerationId: localCatalogGenerationId,
-        candidates: canonicalCatalogSections.flatMap((section) => section.items),
+        candidates: localCatalogSections.flatMap((section) => section.items),
       }),
     [
-      canonicalCatalogSections,
+      localCatalogSections,
       localCatalogGenerationId,
       playlistSource?.sourceId,
     ],
@@ -499,10 +489,10 @@ export function CatalogPage() {
 
   const resolvedCatalogSections = useMemo(() => {
     if (!currentHomeDiscoveryScope) {
-      return canonicalCatalogSections;
+      return localCatalogSections;
     }
 
-    return canonicalCatalogSections.map((section) => {
+    return localCatalogSections.map((section) => {
       const contentKind = resolveHomeSectionContentKind(section.title);
       const sectionKey = contentKind
         ? buildHomeDiscoverySectionKey(contentKind, section.title)
@@ -526,7 +516,7 @@ export function CatalogPage() {
       };
     });
   }, [
-    canonicalCatalogSections,
+    localCatalogSections,
     currentHomeDiscoveryScope,
     discoveryGenerationKey,
   ]);
@@ -541,13 +531,13 @@ export function CatalogPage() {
       }
     }
 
-    const candidates = Array.from(uniqueItems.values()).filter(
-      (item) => getHorizontalHeroArtworkCandidates(item).length > 0,
-    );
+    const candidates = Array.from(uniqueItems.values());
 
     if (!currentHomeDiscoveryScope) {
       return candidates.slice(0, 5);
     }
+
+    const heroArtworkMode = isMobile ? 'mobile' : 'horizontal';
 
     return resolveLocalCatalogDiscoverySnapshot({
       scope: currentHomeDiscoveryScope,
@@ -558,11 +548,14 @@ export function CatalogPage() {
       slotCount: Math.min(5, candidates.length),
       historyKind: 'HOME_HERO',
       isArtworkReady: (item) =>
-        getHorizontalHeroArtworkCandidates(item).length > 0,
+        heroArtworkMode === 'mobile'
+          ? Boolean(resolveHomeHeroArtworkUrl(item, 'mobile'))
+          : getHorizontalHeroArtworkCandidates(item).length > 0,
     }).items;
   }, [
     currentHomeDiscoveryScope,
     discoveryGenerationKey,
+    isMobile,
     resolvedCatalogSections,
   ]);
   const heroRotation = useAutoRotatingHero({
@@ -643,36 +636,85 @@ export function CatalogPage() {
 
   useEffect(() => {
     let isMounted = true;
+    let timeoutId: number | null = null;
+
+    function clearCatalogTimeout() {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    }
+
+    function commitCatalogSections(nextSections: CatalogPageSection[]) {
+      if (!isMounted || nextSections.length === 0) {
+        return;
+      }
+
+      realCatalogSectionsRef.current = nextSections;
+      setRealCatalogSections(nextSections);
+      setHomeCatalogStatus('content');
+      setHomeCatalogErrorMessage(null);
+    }
 
     async function loadRealCatalog() {
-      setIsRealCatalogLoading(true);
+      const hasUsableCatalog = Boolean(realCatalogSectionsRef.current?.length);
 
-      const timeoutId = window.setTimeout(() => {
-        if (isMounted && !realCatalogSections?.length) {
-          setIsRealCatalogLoading(false);
-          spatialDebug(
-            'catalog-grid',
-            'Timeout de 3s atingido. Continuando carregamento em background com fallback catalogSections.'
-          );
-        }
-      }, 3000);
+      if (!hasUsableCatalog) {
+        setHomeCatalogStatus('loading');
+        setHomeCatalogErrorMessage(null);
+      }
 
       try {
-        const homeVodLoadInput =
-          initialHomeCatalogState.limitPerSection === homeVodLimitPerSection
-            ? initialHomeCatalogState.loadInput
-            : createHomeVodLoadInput(
-                homeVodLimitPerSection,
-                playlistSource?.sourceId,
-                playlistSource?.sourceType,
-                localCatalogScopeKey ?? undefined,
-              );
+        const homeVodLoadInput = createHomeVodLoadInput(
+          homeVodLimitPerSection,
+          playlistSource?.sourceId,
+          playlistSource?.sourceType,
+          localCatalogScopeKey ?? undefined,
+        );
 
         if (!homeVodLoadInput) {
-          window.clearTimeout(timeoutId);
-          setRealCatalogSections(null);
+          if (!hasUsableCatalog) {
+            setHomeCatalogStatus('error');
+            setHomeCatalogErrorMessage(
+              'Nao foi possivel preparar o catalogo local desta licenca.',
+            );
+          }
           return;
         }
+
+        if (!homeVodLoadInput.sourceId?.trim()) {
+          if (playlistStatus === 'empty') {
+            realCatalogSectionsRef.current = [];
+            setRealCatalogSections([]);
+            setHomeCatalogStatus('empty');
+          } else if (hasUsableCatalog) {
+            setHomeCatalogStatus('content');
+          } else if (playlistStatus === 'error') {
+            setHomeCatalogStatus('error');
+            setHomeCatalogErrorMessage(
+              'Nao foi possivel acessar o catalogo local agora.',
+            );
+          } else if (
+            playlistStatus !== 'idle' &&
+            playlistStatus !== 'loading'
+          ) {
+            setHomeCatalogStatus('error');
+            setHomeCatalogErrorMessage(
+              'A fonte local autorizada nao esta disponivel agora.',
+            );
+          }
+          return;
+        }
+
+        timeoutId = window.setTimeout(() => {
+          if (isMounted && !realCatalogSectionsRef.current?.length) {
+            setHomeCatalogStatus('error');
+            setHomeCatalogErrorMessage(
+              'O catalogo local demorou para responder. Tente novamente.',
+            );
+            spatialDebug('catalog-grid', 'HOME_LOCAL_CATALOG_READ_TIMEOUT');
+          }
+        }, 3000);
 
         const homeVodSections = await loadHomeVodSections({
           ...homeVodLoadInput,
@@ -681,9 +723,10 @@ export function CatalogPage() {
           scopeKey: localCatalogScopeKey ?? undefined,
           limitPerSection: homeVodLimitPerSection,
           preferFresh: true,
+          propagateReadError: true,
         });
 
-        window.clearTimeout(timeoutId);
+        clearCatalogTimeout();
 
         if (!isMounted) {
           return;
@@ -710,18 +753,40 @@ export function CatalogPage() {
         const nextSections =
           mapHomeVodSectionsToCatalogSections(overlaySections);
 
-        setRealCatalogSections(nextSections.length > 0 ? nextSections : null);
+        if (nextSections.length > 0) {
+          commitCatalogSections(nextSections);
+        } else if (playlistStatus === 'loading' || playlistStatus === 'idle') {
+          if (realCatalogSectionsRef.current?.length) {
+            setHomeCatalogStatus('content');
+            setHomeCatalogErrorMessage(null);
+          } else {
+            setHomeCatalogStatus('loading');
+          }
+        } else if (playlistStatus === 'error') {
+          if (realCatalogSectionsRef.current?.length) {
+            setHomeCatalogStatus('content');
+            setHomeCatalogErrorMessage(null);
+          } else {
+            setHomeCatalogStatus('error');
+            setHomeCatalogErrorMessage(
+              'Nao foi possivel acessar o catalogo local agora.',
+            );
+          }
+        } else {
+          realCatalogSectionsRef.current = [];
+          setRealCatalogSections([]);
+          setHomeCatalogStatus('empty');
+          setHomeCatalogErrorMessage(null);
+        }
 
         void enrichHomeVodSectionsInBackground(
           overlaySections,
           playlistSource?.sourceId,
           discoveryScope,
           (enrichedSections) => {
-            if (isMounted) {
-              setRealCatalogSections(
-                mapHomeVodSectionsToCatalogSections(enrichedSections),
-              );
-            }
+            commitCatalogSections(
+              mapHomeVodSectionsToCatalogSections(enrichedSections),
+            );
           },
         );
 
@@ -736,55 +801,84 @@ export function CatalogPage() {
               }
               const finalSections =
                 mapHomeVodSectionsToCatalogSections(discoverySections);
-              setRealCatalogSections(finalSections);
+              commitCatalogSections(finalSections);
 
               void enrichHomeVodSectionsInBackground(
                 discoverySections,
                 playlistSource?.sourceId,
                 discoveryScope,
                 (enrichedSections) => {
-                  if (isMounted) {
-                    setRealCatalogSections(
-                      mapHomeVodSectionsToCatalogSections(enrichedSections),
-                    );
-                  }
+                  commitCatalogSections(
+                    mapHomeVodSectionsToCatalogSections(enrichedSections),
+                  );
                 },
               );
             })
             .catch((err) => {
-              console.warn('[XANDEFLIX_HOME_DISCOVERY_BACKGROUND_ERROR]', err);
+              console.warn('[XANDEFLIX_HOME_DISCOVERY_BACKGROUND_ERROR]', {
+                errorName: err instanceof Error ? err.name : 'UnknownError',
+              });
             });
         }
       } catch (error) {
-        window.clearTimeout(timeoutId);
+        clearCatalogTimeout();
         spatialDebug(
           'catalog-grid',
-          'Falha ao carregar Home VOD real:',
-          error instanceof Error ? error.message : String(error),
+          'HOME_LOCAL_CATALOG_READ_FAILED',
+          error instanceof Error ? error.name : 'UnknownError',
         );
 
         if (isMounted) {
-          setRealCatalogSections(null);
+          if (realCatalogSectionsRef.current?.length) {
+            setHomeCatalogStatus('content');
+            setHomeCatalogErrorMessage(null);
+          } else {
+            setHomeCatalogStatus('error');
+            setHomeCatalogErrorMessage(
+              'Nao foi possivel carregar o catalogo local. Tente novamente.',
+            );
+          }
         }
       } finally {
-        if (isMounted) {
-          setIsRealCatalogLoading(false);
-        }
+        clearCatalogTimeout();
       }
     }
 
     void loadRealCatalog();
 
+    let progressiveIntervalId: number | null = null;
+
+    if (
+      (!realCatalogSectionsRef.current || realCatalogSectionsRef.current.length === 0) &&
+      (playlistStatus === 'loading' || playlistStatus === 'ready')
+    ) {
+      progressiveIntervalId = window.setInterval(() => {
+        if (
+          isMounted &&
+          (!realCatalogSectionsRef.current || realCatalogSectionsRef.current.length === 0)
+        ) {
+          setHomeCatalogRetryKey((current) => current + 1);
+        } else if (progressiveIntervalId !== null) {
+          window.clearInterval(progressiveIntervalId);
+          progressiveIntervalId = null;
+        }
+      }, 1000);
+    }
+
     return () => {
       isMounted = false;
+      clearCatalogTimeout();
+      if (progressiveIntervalId !== null) {
+        window.clearInterval(progressiveIntervalId);
+      }
     };
   }, [
     homeVodLimitPerSection,
-    initialHomeCatalogState,
     playlistSource?.sourceId,
     playlistSource?.sourceType,
     playlistStatus,
     localCatalogScopeKey,
+    homeCatalogRetryKey,
   ]);
 
   useEffect(() => {
@@ -855,9 +949,11 @@ export function CatalogPage() {
     isTv && visibleSectionCount < displayCatalogSections.length;
 
   const shouldShowInitialCatalogLoading =
-    isRealCatalogLoading &&
-    !displayCatalogSections.length &&
-    !realCatalogSections?.length;
+    homeCatalogStatus === 'loading' && !displayCatalogSections.length;
+  const shouldShowHomeCatalogError =
+    homeCatalogStatus === 'error' && !displayCatalogSections.length;
+  const shouldShowHomeCatalogEmpty =
+    homeCatalogStatus === 'empty' && !displayCatalogSections.length;
   const isCompactFireStickHero = useMemo(
     () => isTv && isFireStickUserAgent(),
     [isTv],
@@ -869,6 +965,10 @@ export function CatalogPage() {
 
   function handleNextHeroItem() {
     heroRotation.next();
+  }
+
+  function retryHomeCatalog() {
+    setHomeCatalogRetryKey((currentKey) => currentKey + 1);
   }
 
   useRouteInitialFocus();
@@ -1050,16 +1150,17 @@ export function CatalogPage() {
           </nav>
         ) : null}
 
-        <CatalogHero
-          itemId={heroItem?.id}
-          title={heroItem?.title}
+        {heroItem ? (
+          <CatalogHero
+          itemId={heroItem.id}
+          title={heroItem.title}
           description={
             heroItem?.overview ??
             heroItem?.subtitle ??
             'Conteudos recomendados para sua licenca.'
           }
           metadata={isMobile ? buildMobileHomeHeroMetadata(heroItem) : undefined}
-          backgroundUrl={resolveHomeHeroArtworkUrl(heroItem, 'horizontal')}
+          backgroundUrl={resolveHomeHeroArtworkUrl(heroItem, isMobile ? 'mobile' : 'horizontal')}
           artworkCandidates={isMobile ? undefined : getHorizontalHeroArtworkCandidateRecords(heroItem)}
           onSectionArrowPress={spatialNavigation.handleHeroSectionArrowPress}
           onPlayArrowPress={spatialNavigation.handleHeroPlayArrowPress}
@@ -1087,10 +1188,14 @@ export function CatalogPage() {
           onPreviousHeroItem={handlePreviousHeroItem}
 
           onNextHeroItem={handleNextHeroItem}
-        />
+          />
+        ) : null}
 
         {shouldShowInitialCatalogLoading ? (
-          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-8">
+          <section
+            data-xf-home-catalog-state="loading"
+            className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-8"
+          >
             <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
               Carregando catalogo
             </p>
@@ -1109,13 +1214,37 @@ export function CatalogPage() {
               )}
             </div>
           </section>
-        ) : visibleCatalogSections.length === 0 ? (
-          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
+        ) : shouldShowHomeCatalogError ? (
+          <section
+            data-xf-home-catalog-state="error"
+            className="rounded-[0.18rem] border border-red-500/30 bg-black/40 px-6 py-10 text-center"
+          >
             <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
               Catalogo indisponivel
             </p>
             <p className="mt-3 text-sm font-semibold text-zinc-300">
-              Nenhuma secao foi carregada para a Home neste momento.
+              {homeCatalogErrorMessage ??
+                'Nao foi possivel carregar o catalogo local.'}
+            </p>
+            <FocusableButton
+              focusKey="home-catalog-retry"
+              onClick={retryHomeCatalog}
+              onEnterPress={retryHomeCatalog}
+              className="mt-5 rounded-[0.18rem] bg-xf-red px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-white"
+            >
+              Tentar novamente
+            </FocusableButton>
+          </section>
+        ) : shouldShowHomeCatalogEmpty ? (
+          <section
+            data-xf-home-catalog-state="empty"
+            className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center"
+          >
+            <p className="text-[0.72rem] font-black uppercase tracking-[0.26em] text-xf-red">
+              Catalogo vazio
+            </p>
+            <p className="mt-3 text-sm font-semibold text-zinc-300">
+              Nenhum conteudo foi encontrado no catalogo local.
             </p>
           </section>
         ) : (

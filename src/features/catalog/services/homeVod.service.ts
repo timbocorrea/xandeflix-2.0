@@ -61,6 +61,7 @@ export type LoadHomeVodInput = {
   limitPerSection?: number;
   launchesLimit?: number;
   preferFresh?: boolean;
+  propagateReadError?: boolean;
 };
 
 export type LoadHomeVodCategoryInput = {
@@ -71,6 +72,7 @@ export type LoadHomeVodCategoryInput = {
   groupTitles: string[];
   limit?: number;
   slug?: string;
+  propagateReadError?: boolean;
 };
 
 const DEFAULT_LIMIT_PER_SECTION = 20;
@@ -332,6 +334,11 @@ export async function loadHomeVodSections(
     console.warn('[XANDEFLIX_HOME_LOCAL_CATALOG_READ_FAILED]', {
       errorName: error instanceof Error ? error.name : 'UnknownError',
     });
+
+    if (input.propagateReadError) {
+      throw error;
+    }
+
     return [];
   }
 }
@@ -407,6 +414,11 @@ export async function loadHomeVodCategoryItems(
     console.warn('[XANDEFLIX_CATEGORY_LOCAL_CATALOG_READ_FAILED]', {
       errorName: error instanceof Error ? error.name : 'UnknownError',
     });
+
+    if (input.propagateReadError) {
+      throw error;
+    }
+
     return [];
   }
 }

@@ -38,6 +38,7 @@ if (!browserExecutable) {
 const entrySource = `
 import { runHomeDiscoveryPresentationSmokeTest } from '@/features/catalog/services/homeDiscoveryPresentationSmokeTest.service';
 import { runHomeHotReturnSmokeTest } from '@/features/catalog/services/homeHotReturnSmokeTest.service';
+import { runLocalCatalogDiscoverySnapshotSmokeTest } from '@/features/catalog/services/localCatalogDiscoverySnapshotSmokeTest.service';
 import { runDiscoveryPresentationLifecycleSmokeTest } from '@/features/catalog/services/discoveryPresentationLifecycleSmokeTest.service';
 import { runDiscoveryRuntimePresentationStoreSmokeTest } from '@/features/catalog/services/discoveryRuntimePresentationStoreSmokeTest.service';
 import { runDiscoverySelectorSmokeTest } from '@/features/catalog/services/discoverySelectorSmokeTest.service';
@@ -76,6 +77,7 @@ const allSuites = [
   ['discovery-2b', runDiscoveryPresentationLifecycleSmokeTest],
   ['discovery-3a1', runDiscoveryRuntimePresentationStoreSmokeTest],
   ['discovery-3a2', runHomeDiscoveryPresentationSmokeTest],
+  ['discovery-snapshot-vs02', runLocalCatalogDiscoverySnapshotSmokeTest],
 ];
 const suites = ${JSON.stringify(requestedSuite)}
   ? allSuites.filter(([name]) => name === ${JSON.stringify(requestedSuite)})

@@ -1,8 +1,10 @@
 import type { HomeVodItem } from './homeVod.service';
 import {
+  createDiscoveryCandidatePool,
   createDiscoveryGenerationKey,
   createDiscoveryPresentationSnapshot,
   fnv1a32Pure,
+  refreshDiscoveryPresentationSnapshotItems,
   type DiscoveryCandidateItem,
 } from './discoverySelector.service';
 import {
@@ -60,11 +62,15 @@ export function resolveLocalCatalogDiscoverySnapshot<
   historyItemCount?: number;
   isArtworkReady?: (candidate: T) => boolean;
 }) {
+  const currentCandidates = createDiscoveryCandidatePool(
+    input.candidates,
+    input.isArtworkReady,
+  );
   const runtimeContext = getOrCreateDiscoveryRuntimeContext(input.scope);
 
   if (!runtimeContext.isValid || !runtimeContext.sessionSeed) {
     return {
-      items: input.candidates.slice(0, Math.max(0, input.slotCount)),
+      items: currentCandidates.slice(0, Math.max(0, input.slotCount)),
       created: false,
       poolExhausted: false,
     };
@@ -77,11 +83,37 @@ export function resolveLocalCatalogDiscoverySnapshot<
   );
 
   if (stored?.slots.length) {
-    return {
-      items: stored.slots.map((slot) => slot.payload),
-      created: false,
-      poolExhausted: false,
-    };
+    const currentCandidateIds = new Set(
+      currentCandidates.map((candidate) => candidate.id),
+    );
+    const allStoredItemsStillExist = stored.slots.every((slot) =>
+      currentCandidateIds.has(slot.id.trim()),
+    );
+
+    if (allStoredItemsStillExist) {
+      const refreshedStored = refreshDiscoveryPresentationSnapshotItems(
+        stored,
+        currentCandidates,
+        input.isArtworkReady,
+      );
+      const currentStored =
+        refreshedStored.generationKey === input.generationKey
+          ? refreshedStored
+          : {
+              ...refreshedStored,
+              generationKey: input.generationKey,
+            };
+
+      if (currentStored !== stored) {
+        setDiscoveryRuntimePresentationSnapshot(input.scope, currentStored);
+      }
+
+      return {
+        items: currentStored.slots.map((slot) => slot.payload),
+        created: false,
+        poolExhausted: false,
+      };
+    }
   }
 
   const recentIds = getRecentRotationItemIds({
@@ -90,7 +122,7 @@ export function resolveLocalCatalogDiscoverySnapshot<
     surfaceKey: `${input.surfaceKey}:${input.sectionKey}`,
   });
   const candidateIds = new Set(
-    input.candidates.map((candidate) => candidate.id.trim()).filter(Boolean),
+    currentCandidates.map((candidate) => candidate.id),
   );
   const poolExhausted =
     candidateIds.size > 0 &&
@@ -98,12 +130,12 @@ export function resolveLocalCatalogDiscoverySnapshot<
       recentIds.includes(candidateId),
     );
   const snapshot = createDiscoveryPresentationSnapshot({
-    candidates: input.candidates,
+    candidates: currentCandidates,
     sessionSeed: runtimeContext.sessionSeed,
     generationKey: input.generationKey,
     surfaceKey: input.surfaceKey,
     sectionKey: input.sectionKey,
-    slotCount: input.slotCount,
+    slotCount: Math.min(input.slotCount, currentCandidates.length),
     isArtworkReady: input.isArtworkReady,
     excludedIds: poolExhausted ? [] : recentIds,
   });
