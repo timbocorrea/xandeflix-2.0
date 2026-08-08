@@ -8,7 +8,7 @@ import {
   setFocus,
   useFocusable,
 } from '@noriginmedia/norigin-spatial-navigation';
-import { Search } from 'lucide-react';
+import { Search, LoaderCircle } from 'lucide-react';
 import {
   useLocation,
   useNavigate,
@@ -35,7 +35,17 @@ import {
   LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY,
   resolveLocalCatalogSearchInputArrowTarget,
 } from '../lib/localCatalogSearchUiContract';
-import { ensureLegacyLocalCatalogSearchIndex } from '../services/localCatalogSearchIndex.service';
+import {
+  ensureLegacyLocalCatalogSearchIndex,
+  getLegacyLocalCatalogSearchIndexState,
+} from '../services/localCatalogSearchIndex.service';
+import {
+  LOCAL_CATALOG_SEARCHING_MESSAGE,
+  LOCAL_CATALOG_MISSING_CONTENT_MESSAGE,
+  LOCAL_CATALOG_RELATED_RESULTS_HEADING,
+  resolveLocalCatalogSearchArtworkUx,
+  resolveLocalCatalogSearchUxRules,
+} from '../lib/localCatalogSearchUxRules';
 
 function getKindLabel(item: LocalCatalogSearchResultItem) {
   const labels = {
@@ -62,6 +72,12 @@ function getCardKind(
   return 'unknown';
 }
 
+function getSearchCardPosterUrl(item: LocalCatalogSearchResultItem) {
+  return resolveLocalCatalogSearchArtworkUx(
+    getSafeLocalCatalogArtworkUrl(item.artworkUrl),
+  ).posterUrl;
+}
+
 export default function LocalCatalogSearchPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -80,6 +96,8 @@ export default function LocalCatalogSearchPage() {
   const [hasLocalError, setHasLocalError] = useState(false);
   const [indexRefreshTick, setIndexRefreshTick] = useState(0);
   const requestIdRef = useRef(0);
+  const foregroundSearchKeyRef = useRef('');
+  const lastIndexRefreshKeyRef = useRef('');
   const { ref: inputRef, focused: inputSpatiallyFocused } = useFocusable({
     focusKey: LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY,
   });
@@ -119,6 +137,7 @@ export default function LocalCatalogSearchPage() {
     const trimmedQuery = query.trim();
 
     if (!trimmedQuery) {
+      foregroundSearchKeyRef.current = '';
       const timeoutId = window.setTimeout(() => {
         setPage({
           status: 'empty_query',
@@ -133,6 +152,7 @@ export default function LocalCatalogSearchPage() {
     }
 
     if (!localCatalogScopeKey) {
+      foregroundSearchKeyRef.current = '';
       const timeoutId = window.setTimeout(() => {
         console.info('[XANDEFLIX_SEARCH_SCOPE]', {
           present: false,
@@ -149,8 +169,19 @@ export default function LocalCatalogSearchPage() {
       return () => window.clearTimeout(timeoutId);
     }
 
+    const searchKey = `${localCatalogScopeKey}\u0000${trimmedQuery}`;
+    const isBackgroundRefresh =
+      foregroundSearchKeyRef.current === searchKey;
+
+    if (!isBackgroundRefresh) {
+      foregroundSearchKeyRef.current = searchKey;
+      lastIndexRefreshKeyRef.current = '';
+    }
+
     const timeoutId = window.setTimeout(() => {
-      setIsSearching(true);
+      if (!isBackgroundRefresh) {
+        setIsSearching(true);
+      }
       setHasLocalError(false);
       void searchLocalCatalog({
         scopeKey: localCatalogScopeKey,
@@ -181,16 +212,61 @@ export default function LocalCatalogSearchPage() {
   useEffect(() => {
     if (
       (page.status !== 'indexing' && !page.indexingInBackground) ||
-      !query.trim()
+      !query.trim() ||
+      !localCatalogScopeKey
     ) {
       return;
     }
-    const timeoutId = window.setTimeout(() => {
-      setIndexRefreshTick((current) => current + 1);
-    }, 1_000);
-    return () => window.clearTimeout(timeoutId);
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const schedulePoll = () => {
+      timeoutId = window.setTimeout(() => {
+        void getLegacyLocalCatalogSearchIndexState(
+          localCatalogScopeKey,
+        )
+          .then((state) => {
+            if (cancelled || !state) {
+              return;
+            }
+
+            const refreshKey = [
+              state.generation,
+              state.status,
+              state.processedCount,
+            ].join(':');
+
+            if (
+              lastIndexRefreshKeyRef.current !== refreshKey
+            ) {
+              lastIndexRefreshKeyRef.current = refreshKey;
+              setIndexRefreshTick((current) => current + 1);
+            }
+
+            if (state.status === 'building') {
+              schedulePoll();
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              schedulePoll();
+            }
+          });
+      }, 1_500);
+    };
+
+    schedulePoll();
+
+    return () => {
+      cancelled = true;
+
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [
-    indexRefreshTick,
+    localCatalogScopeKey,
     page.indexingInBackground,
     page.status,
     query,
@@ -295,11 +371,17 @@ export default function LocalCatalogSearchPage() {
     }
   }
 
-  const showNoResults =
-    !isSearching &&
-    !hasLocalError &&
-    page.status === 'ready' &&
-    page.items.length === 0;
+  const {
+    searchInProgress,
+    showFriendlySearching,
+    showMissingContentMessage,
+    showRelatedResultsHeading,
+  } = resolveLocalCatalogSearchUxRules({
+    query,
+    isSearching,
+    hasLocalError,
+    page,
+  });
 
   return (
     <AppShell
@@ -343,25 +425,28 @@ export default function LocalCatalogSearchPage() {
           />
         </div>
 
-        <div className="mt-8 min-h-52" aria-live="polite">
+        <div
+          className="mt-8 min-h-52"
+          aria-busy={searchInProgress}
+        >
           {!query.trim() ? (
             <p className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-xf-muted">
               Digite para buscar no catálogo local completo.
             </p>
           ) : null}
 
-          {isSearching ? (
-            <p className="text-sm font-semibold text-xf-muted">Buscando…</p>
-          ) : null}
-
-          {(page.status === 'indexing' || page.indexingInBackground) &&
-          query.trim() ? (
-            <p className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-6 text-sky-100">
-              Preparando a busca local…
-              {typeof page.indexedItems === 'number' &&
-              typeof page.totalItems === 'number'
-                ? ` Indexando ${page.indexedItems.toLocaleString('pt-BR')} de ${page.totalItems.toLocaleString('pt-BR')} itens.`
-                : ''}
+          {showFriendlySearching ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-xf-muted"
+            >
+              <LoaderCircle
+                aria-hidden="true"
+                className="animate-spin text-zinc-400"
+                size={20}
+              />
+              <span>{LOCAL_CATALOG_SEARCHING_MESSAGE}</span>
             </p>
           ) : null}
 
@@ -392,9 +477,9 @@ export default function LocalCatalogSearchPage() {
             </p>
           ) : null}
 
-          {showNoResults ? (
+          {showMissingContentMessage ? (
             <p className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-xf-muted">
-              Nenhum resultado encontrado.
+              {LOCAL_CATALOG_MISSING_CONTENT_MESSAGE}
             </p>
           ) : null}
 
@@ -403,6 +488,13 @@ export default function LocalCatalogSearchPage() {
               Não foi possível consultar o catálogo local agora. Tente novamente.
             </p>
           ) : null}
+
+          {showRelatedResultsHeading ? (
+            <h2 className="mb-4 mt-6 text-xl font-bold text-white">
+              {LOCAL_CATALOG_RELATED_RESULTS_HEADING}
+            </h2>
+          ) : null}
+
 
           {page.items.length > 0 ? (
             <FocusableSection
@@ -416,7 +508,7 @@ export default function LocalCatalogSearchPage() {
                   focusKey={getLocalCatalogSearchResultFocusKey(index)}
                   title={item.title}
                   subtitle={getKindLabel(item)}
-                  posterUrl={getSafeLocalCatalogArtworkUrl(item.artworkUrl)}
+                  posterUrl={getSearchCardPosterUrl(item)}
                   kind={getCardKind(item)}
                   onEnterPress={() => openResult(item)}
                 />

@@ -20,7 +20,10 @@ import {
 } from '@/features/localCatalog/services/localPlaylistImport.service';
 import type { LocalCatalogRuntimeSnapshotBridge } from '@/features/localCatalog/services/localCatalogRuntimeSnapshotBridge.service';
 import { deriveLocalCatalogScope } from '@/features/localCatalog/services/localCatalogScope.service';
-import { getReadableLocalCatalogActiveSnapshot } from '@/features/localCatalog/services/localCatalogSnapshotLifecycle.service';
+import {
+  ensureLocalCatalogReadScope,
+  getReadableLocalCatalogActiveSnapshot,
+} from '@/features/localCatalog/services/localCatalogSnapshotLifecycle.service';
 import {
   refreshLocalCatalogInBackground,
   type LocalCatalogBackgroundRefreshResult,
@@ -423,26 +426,40 @@ export function PlaylistRuntimeProvider({
         authorizationContext?.internalLicenseId.trim() &&
         nextSource.sourceId?.trim()
       ) {
-        void deriveLocalCatalogScope({
-          internalLicenseId: authorizationContext.internalLicenseId,
-          sourceId: nextSource.sourceId,
-        })
-          .then(async (derivedScope) => {
+        const internalLicenseId = authorizationContext.internalLicenseId.trim();
+        const sourceId = nextSource.sourceId.trim();
+        void (async () => {
+          try {
+            const derivedScope = await deriveLocalCatalogScope({
+              internalLicenseId,
+              sourceId,
+            });
+            await ensureLocalCatalogReadScope({
+              scopeKey: derivedScope.scopeKey,
+              tenantScopeId: derivedScope.tenantScopeId,
+              sourceId: derivedScope.sourceId,
+              timestamp: new Date().toISOString(),
+            });
             console.info('[XANDEFLIX_SEARCH_SCOPE]', { present: true });
             setLocalCatalogScopeKey(derivedScope.scopeKey);
             const activeSnapshot = await getReadableLocalCatalogActiveSnapshot(
               derivedScope.scopeKey,
             );
             setLocalCatalogGenerationId(activeSnapshot?.snapshotId ?? null);
-          })
-          .catch(() => {
+          } catch (scopeError) {
+            const failureCode =
+              scopeError instanceof Error &&
+              /^LOCAL_CATALOG_[A-Z0-9_]+$/.test(scopeError.message)
+                ? scopeError.message
+                : 'LOCAL_CATALOG_SCOPE_HYDRATION_FAILED';
             console.warn('[XANDEFLIX_SEARCH_SCOPE]', {
               present: false,
-              failureCode: 'LOCAL_CATALOG_SCOPE_DERIVATION_FAILED',
+              failureCode,
             });
             setLocalCatalogScopeKey(null);
             setLocalCatalogGenerationId(null);
-          });
+          }
+        })();
       }
     },
     [cancelActiveSnapshotBridge],

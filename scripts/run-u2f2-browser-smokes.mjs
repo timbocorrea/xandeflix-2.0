@@ -53,6 +53,7 @@ import { runLocalCatalogSmokeTest } from '@/features/localCatalog/services/local
 import { runLocalCatalogSourceFreshnessSmokeTest } from '@/features/localCatalog/services/localCatalogSourceFreshnessSmokeTest.service';
 import { runLocalCatalogSnapshotImportSmokeTest } from '@/features/localCatalog/services/localCatalogSnapshotImportSmokeTest.service';
 import { runLocalCatalogSnapshotLifecycleSmokeTest } from '@/features/localCatalog/services/localCatalogSnapshotLifecycleSmokeTest.service';
+import { runLocalCatalogReadScopeSmokeTest } from '@/features/localCatalog/services/localCatalogReadScopeSmokeTest.service';
 import { runLocalPlaylistImportSmokeTest } from '@/features/localCatalog/services/localPlaylistImportSmokeTest.service';
 import { runAuthorizedIptvSourceRuntimeContextSmokeTest } from '@/features/playlists/services/authorizedIptvSourceRuntimeContextSmokeTest.service';
 
@@ -63,6 +64,7 @@ const allSuites = [
   ['playlist-import-v2', runLocalPlaylistImportSmokeTest],
   ['schema-v3', runLocalCatalogSchemaSmokeTest],
   ['snapshot-lifecycle', runLocalCatalogSnapshotLifecycleSmokeTest],
+  ['read-scope-u2f32', runLocalCatalogReadScopeSmokeTest],
   ['snapshot-import', runLocalCatalogSnapshotImportSmokeTest],
   ['source-freshness-u2f4d6', runLocalCatalogSourceFreshnessSmokeTest],
   ['runtime-snapshot-bridge', runLocalCatalogRuntimeSnapshotBridgeSmokeTest],

@@ -2,6 +2,7 @@ export {
   beginLocalCatalogStagingSnapshot,
   cancelLocalCatalogStagingSnapshot,
   commitLocalCatalogImportCheckpoint,
+  ensureLocalCatalogReadScope,
   evaluateLocalCatalogResume,
   failLocalCatalogStagingSnapshot,
   getReadableLocalCatalogActiveSnapshot,

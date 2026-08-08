@@ -232,6 +232,54 @@ export async function prepareLocalCatalogRuntimeScope(input: {
   });
 }
 
+export async function ensureLocalCatalogReadScope(input: {
+  scopeKey: string;
+  tenantScopeId: string;
+  sourceId: string;
+  timestamp: string;
+}) {
+  if (!input.scopeKey || !input.tenantScopeId || !input.sourceId) {
+    throw code('LOCAL_CATALOG_SCOPE_ID_INVALID');
+  }
+
+  return runTransaction([LOCAL_CATALOG_V3_STORES.scopes], 'readwrite', async (transaction) => {
+    const scopeStore = transaction.objectStore(LOCAL_CATALOG_V3_STORES.scopes);
+    const storedScope = (await requestResult(
+      scopeStore.get(input.scopeKey),
+    )) as LocalCatalogScope | undefined;
+
+    if (!storedScope) {
+      const created: LocalCatalogScope = {
+        scopeKey: input.scopeKey,
+        tenantScopeId: input.tenantScopeId,
+        sourceId: input.sourceId,
+        activeSnapshotId: null,
+        stagingSnapshotId: null,
+        accessStatus: 'active',
+        runtimeEpoch: 1,
+        retentionPolicyVersion: 1,
+        createdAt: input.timestamp,
+        updatedAt: input.timestamp,
+      };
+      await requestResult(scopeStore.add(created));
+      return created;
+    }
+
+    if (
+      storedScope.tenantScopeId !== input.tenantScopeId ||
+      storedScope.sourceId !== input.sourceId
+    ) {
+      throw code('LOCAL_CATALOG_SCOPE_IDENTITY_MISMATCH');
+    }
+
+    if (storedScope.accessStatus !== 'active') {
+      throw code('LOCAL_CATALOG_SCOPE_ACCESS_BLOCKED');
+    }
+
+    return storedScope;
+  });
+}
+
 export async function beginLocalCatalogStagingSnapshot(input: BeginStagingInput) {
   assertNonNegativeIntegers(
     input.expectedRuntimeEpoch, input.classificationVersion, input.schemaVersion,

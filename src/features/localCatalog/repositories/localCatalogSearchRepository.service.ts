@@ -412,7 +412,13 @@ export const localCatalogSearchRepository: LocalCatalogSearchRepository = {
     if (!snapshot) {
       console.info('[XANDEFLIX_SEARCH_SNAPSHOT]', { active: false });
       const legacyIndex = await ensureLegacyLocalCatalogSearchIndex(scopeKey);
-      if (legacyIndex?.status === 'ready') {
+      if (
+        legacyIndex &&
+        (
+          legacyIndex.status === 'ready' ||
+          legacyIndex.status === 'building'
+        )
+      ) {
         const tokenMatches = await listTokenMatches(
           legacyIndex.generation,
           tokens,
@@ -425,20 +431,34 @@ export const localCatalogSearchRepository: LocalCatalogSearchRepository = {
           documentIds,
           tokenMatches,
         );
-        console.info('[XANDEFLIX_SEARCH_SNAPSHOT]', {
-          active: false,
-          legacyTokenIndex: true,
-          resultCount: candidates.length,
-        });
-        return {
-          snapshotId: legacyIndex.generation,
-          candidates,
-          status: 'ready',
-          dataPath: 'LEGACY_TOKEN_INDEX',
-          processedCount: legacyIndex.processedCount,
-          totalItems: legacyIndex.totalItems,
-        };
+
+        if (
+          legacyIndex.status === 'ready' ||
+          candidates.length > 0
+        ) {
+          console.info('[XANDEFLIX_SEARCH_SNAPSHOT]', {
+            active: false,
+            legacyTokenIndex: true,
+            legacyTokenIndexPartial:
+              legacyIndex.status === 'building',
+            resultCount: candidates.length,
+          });
+
+          return {
+            snapshotId: legacyIndex.generation,
+            candidates,
+            status: 'ready',
+            dataPath: 'LEGACY_TOKEN_INDEX',
+            processedCount: legacyIndex.processedCount,
+            totalItems: legacyIndex.totalItems,
+            indexingInBackground:
+              legacyIndex.status === 'building'
+                ? true
+                : undefined,
+          };
+        }
       }
+
       return findLegacyCandidates({
         scopeKey,
         normalizedQuery,
