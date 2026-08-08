@@ -712,6 +712,7 @@ function getSeriesHeroItem(items: HomeVodItem[]) {
     items.find(
       (item) => getHorizontalHeroArtworkCandidates(item).length > 0,
     ) ??
+    items.find((item) => Boolean(item.title?.trim())) ??
     null
   );
 }
@@ -863,6 +864,7 @@ function getMovieHeroItem(items: HomeVodItem[]) {
     items.find(
       (item) => getHorizontalHeroArtworkCandidates(item).length > 0,
     ) ??
+    items.find((item) => Boolean(item.title?.trim())) ??
     null
   );
 }
@@ -976,6 +978,7 @@ function buildMovieDetailMetadataItems(item: HomeVodItem) {
 
 function MovieCategoryHero({
   item,
+  isLoading,
   totalItems,
   heroTotal,
   onPlayItem,
@@ -983,6 +986,7 @@ function MovieCategoryHero({
   onButtonArrowPress,
 }: {
   item: HomeVodItem | null;
+  isLoading: boolean;
   totalItems: number;
   heroTotal: number;
   onPlayItem: (item: HomeVodItem, index: number) => void;
@@ -1154,11 +1158,11 @@ function MovieCategoryHero({
                 </span>
               </div>
             </>
-          ) : (
+          ) : isLoading ? (
             <div className="mt-5 inline-flex w-fit rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
               Carregando filmes...
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </section>
@@ -1167,6 +1171,7 @@ function MovieCategoryHero({
 
 function SeriesCategoryHero({
   item,
+  isLoading,
   totalItems,
   heroIndex,
   heroTotal,
@@ -1174,6 +1179,7 @@ function SeriesCategoryHero({
   onButtonArrowPress,
 }: {
   item: HomeVodItem | null;
+  isLoading: boolean;
   totalItems: number;
   heroIndex: number;
   heroTotal: number;
@@ -1361,11 +1367,11 @@ function SeriesCategoryHero({
                   : null}
               </div>
             </>
-          ) : (
+          ) : isLoading ? (
             <div className="mt-5 inline-flex w-fit rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-zinc-300">
               Carregando séries...
             </div>
-          )}
+          ) : null}
         </div>
 
       </div>
@@ -1814,6 +1820,7 @@ export function CatalogCategoryPage({
   const [isSeriesDetailPreparing, setIsSeriesDetailPreparing] = useState(false);
   const [seriesDetailPollTick, setSeriesDetailPollTick] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [categoryRetryKey, setCategoryRetryKey] = useState(0);
   const [categoryTotalCount, setCategoryTotalCount] = useState(0);
   const [loadedCategoryRawOffset, setLoadedCategoryRawOffset] = useState(0);
   const [hasMoreCategoryItems, setHasMoreCategoryItems] = useState(false);
@@ -2032,11 +2039,15 @@ export function CatalogCategoryPage({
         totalLimit: CATEGORY_ITEM_LIMIT,
       });
 
-      return localResult.status === 'ready' ? localResult.items : [];
+      if (localResult.status !== 'ready') {
+        throw new Error('LOCAL_MOVIE_CATEGORY_UNAVAILABLE');
+      }
+
+      return localResult.items;
     } catch (error) {
       const errorName = error instanceof Error ? error.name : 'UnknownError';
       console.warn('[XANDEFLIX_MOVIES_LOCAL_FIRST_LOAD_ERROR]', { errorName });
-      return [];
+      throw error;
     }
   }
 
@@ -2142,6 +2153,34 @@ export function CatalogCategoryPage({
         return;
       }
 
+      if (
+        !isMovieDetailPage &&
+        !isSeriesDetailPage &&
+        !playlistSource?.sourceId?.trim()
+      ) {
+        if (playlistStatus === 'empty') {
+          setItems([]);
+          setVisibleItemCount(0);
+          setIsLoading(false);
+        } else if (initialItems.length > 0) {
+          setItems(initialItems);
+          setVisibleItemCount(resolveVisibleCount(initialItems.length));
+          setIsLoading(false);
+        } else if (playlistStatus === 'error') {
+          setErrorMessage('Nao foi possivel acessar o catalogo local agora.');
+          setIsLoading(false);
+        } else if (
+          playlistStatus !== 'idle' &&
+          playlistStatus !== 'loading'
+        ) {
+          setErrorMessage(
+            'A fonte local autorizada nao esta disponivel agora.',
+          );
+          setIsLoading(false);
+        }
+        return;
+      }
+
       try {
         const storedActivation = getStoredLicenseActivation();
         const licenseCode = storedActivation?.licenseCode?.trim();
@@ -2149,6 +2188,9 @@ export function CatalogCategoryPage({
         if (!licenseCode) {
           setItems([]);
           setVisibleItemCount(0);
+          setErrorMessage(
+            'Nao foi possivel validar a licenca para carregar esta categoria.',
+          );
           return;
         }
 
@@ -2326,6 +2368,7 @@ export function CatalogCategoryPage({
                 groupTitles: category.groupTitles,
                 limit: CATEGORY_ITEM_LIMIT,
                 slug: category.slug,
+                propagateReadError: true,
               }));
 
         if (!isMounted) {
@@ -2370,7 +2413,9 @@ export function CatalogCategoryPage({
           );
         }
       } catch (error) {
-        console.warn('[XANDEFLIX_CATEGORY_LOAD_ERROR]', error);
+        console.warn('[XANDEFLIX_CATEGORY_LOAD_ERROR]', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
 
         if (isMounted) {
           const hasFallbackItems = initialItems.length > 0;
@@ -2400,7 +2445,9 @@ export function CatalogCategoryPage({
     };
   }, [
     category,
+    categoryRetryKey,
     initialItems,
+    isMovieDetailPage,
     isMovieSeeAllPage,
     isSeriesDetailPage,
     seriesTmdbId,
@@ -2842,13 +2889,7 @@ export function CatalogCategoryPage({
 
     return locallyEnrichedMovieHeroHighlights;
   }, [locallyEnrichedMovieHeroHighlights, movieHeroHighlights]);
-  const horizontalMovieHeroHighlights = useMemo(
-    () =>
-      effectiveMovieHeroHighlights.filter(
-        (item) => getHorizontalHeroArtworkCandidates(item).length > 0,
-      ),
-    [effectiveMovieHeroHighlights],
-  );
+  const movieHeroPresentationItems = effectiveMovieHeroHighlights;
 
   const movieHeroItem = useMemo(() => {
     if (!isMoviesCategoryPage) {
@@ -2861,11 +2902,11 @@ export function CatalogCategoryPage({
   }, [isMoviesCategoryPage, moviesCategorySectionsBase]);
 
   const movieHeroRotation = useAutoRotatingHero({
-    poolIds: horizontalMovieHeroHighlights.map((item) => item.id),
+    poolIds: movieHeroPresentationItems.map((item) => item.id),
     heroSelector: '[data-xf-movie-category-hero="true"]',
   });
   const activeMovieHeroItem =
-    horizontalMovieHeroHighlights[movieHeroRotation.activeIndex] ?? movieHeroItem;
+    movieHeroPresentationItems[movieHeroRotation.activeIndex] ?? movieHeroItem;
 
   useEffect(() => {
     if (!isMoviesCategoryPage || movieHeroHighlights.length === 0) {
@@ -3057,13 +3098,7 @@ export function CatalogCategoryPage({
 
     return locallyEnrichedSeriesHeroHighlights;
   }, [locallyEnrichedSeriesHeroHighlights, seriesHeroHighlights]);
-  const horizontalSeriesHeroHighlights = useMemo(
-    () =>
-      effectiveSeriesHeroHighlights.filter(
-        (item) => getHorizontalHeroArtworkCandidates(item).length > 0,
-      ),
-    [effectiveSeriesHeroHighlights],
-  );
+  const seriesHeroPresentationItems = effectiveSeriesHeroHighlights;
   const seriesHeroItem = useMemo(() => {
     if (!isSeriesCategoryPage) {
       return null;
@@ -3074,12 +3109,12 @@ export function CatalogCategoryPage({
     );
   }, [isSeriesCategoryPage, seriesCategorySectionsBase]);
   const seriesHeroRotation = useAutoRotatingHero({
-    poolIds: horizontalSeriesHeroHighlights.map((item) => item.id),
+    poolIds: seriesHeroPresentationItems.map((item) => item.id),
     heroSelector: '[data-xf-series-category-hero="true"]',
   });
   const activeSeriesHeroIndex = seriesHeroRotation.activeIndex;
   const activeSeriesHeroItem =
-    horizontalSeriesHeroHighlights[activeSeriesHeroIndex] ?? seriesHeroItem;
+    seriesHeroPresentationItems[activeSeriesHeroIndex] ?? seriesHeroItem;
   const seriesCollectionCount = seriesCategorySectionsBase.reduce(
     (total, section) => total + section.items.length,
     0,
@@ -3088,17 +3123,17 @@ export function CatalogCategoryPage({
     () =>
       moveDiscoveryHeroOutOfFirstSlot(
         moviesCategorySectionsBase,
-        horizontalMovieHeroHighlights.map((item) => item.id),
+        movieHeroPresentationItems.map((item) => item.id),
       ),
-    [horizontalMovieHeroHighlights, moviesCategorySectionsBase],
+    [movieHeroPresentationItems, moviesCategorySectionsBase],
   );
   const seriesCategorySections = useMemo(
     () =>
       moveDiscoveryHeroOutOfFirstSlot(
         seriesCategorySectionsBase,
-        horizontalSeriesHeroHighlights.map((item) => item.id),
+        seriesHeroPresentationItems.map((item) => item.id),
       ),
-    [horizontalSeriesHeroHighlights, seriesCategorySectionsBase],
+    [seriesHeroPresentationItems, seriesCategorySectionsBase],
   );
   const categoryFirstPaintKey = isMoviesCategoryPage
     ? 'movies'
@@ -4468,6 +4503,10 @@ export function CatalogCategoryPage({
     return false;
   }
 
+  function retryCategoryLoad() {
+    setCategoryRetryKey((currentKey) => currentKey + 1);
+  }
+
   return (
     <AppShell
       onSignOut={() => {
@@ -4668,25 +4707,26 @@ export function CatalogCategoryPage({
           </SeriesDetailHeroFrame>
         ) : (
           <>
-            {isSeriesCategoryPage ? (
+            {isSeriesCategoryPage && (activeSeriesHeroItem || isLoading) ? (
               <SeriesCategoryHero
                 item={activeSeriesHeroItem}
+                isLoading={isLoading}
                 totalItems={seriesCollectionCount}
                 heroIndex={activeSeriesHeroIndex}
-                heroTotal={horizontalSeriesHeroHighlights.length}
+                heroTotal={seriesHeroPresentationItems.length}
                 onOpenItem={openSeriesCollection}
                 onButtonArrowPress={handleSeriesCategoryHeroButtonArrowPress}
               />
-            ) : isMoviesCategoryPage ? (
+            ) : isMoviesCategoryPage && (activeMovieHeroItem || isLoading) ? (
               <MovieCategoryHero
                 item={activeMovieHeroItem}
+                isLoading={isLoading}
                 totalItems={items.length}
-                heroTotal={horizontalMovieHeroHighlights.length}
+                heroTotal={movieHeroPresentationItems.length}
                 onPlayItem={openEpisode}
                 onInfoItem={(item) => openMovieDetail(item)}
                 onButtonArrowPress={handleMoviesCategoryHeroButtonArrowPress}
               />
-
             ) : (
               <header className="mb-6">
                 <p className="text-[0.58rem] font-black uppercase tracking-[0.32em] text-xf-red">
@@ -4777,18 +4817,35 @@ export function CatalogCategoryPage({
               Preparando episódios...
             </p>
           </section>
+        ) : errorMessage && visibleItems.length === 0 ? (
+          <section
+            data-xf-category-state="error"
+            className="rounded-[0.18rem] border border-red-500/30 bg-red-500/10 px-6 py-10 text-center"
+          >
+            <p className="text-sm font-semibold text-red-100">{errorMessage}</p>
+            <FocusableButton
+              focusKey="category-retry"
+              onClick={retryCategoryLoad}
+              onEnterPress={retryCategoryLoad}
+              className="mt-5 rounded-[0.18rem] bg-xf-red px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-white"
+            >
+              Tentar novamente
+            </FocusableButton>
+          </section>
         ) : isLoading && visibleItems.length === 0 ? (
-          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
+          <section
+            data-xf-category-state="loading"
+            className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center"
+          >
             <p className="text-sm font-semibold text-zinc-300">
               Carregando categoria...
             </p>
           </section>
-        ) : errorMessage ? (
-          <section className="rounded-[0.18rem] border border-red-500/30 bg-red-500/10 px-6 py-10 text-center">
-            <p className="text-sm font-semibold text-red-100">{errorMessage}</p>
-          </section>
         ) : visibleItems.length === 0 ? (
-          <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
+          <section
+            data-xf-category-state="empty"
+            className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center"
+          >
             <p className="text-sm font-semibold text-zinc-300">
               Nenhum conteudo encontrado nesta categoria.
             </p>

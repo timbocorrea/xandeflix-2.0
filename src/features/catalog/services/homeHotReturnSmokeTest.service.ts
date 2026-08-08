@@ -32,6 +32,10 @@ export type HomeHotReturnSmokeTestResult = {
   readability: boolean;
   artworkMapping: boolean;
   missingArtworkFallback: boolean;
+  validLocalContentPreserved: boolean;
+  noAuthoritativeDemoFallback: boolean;
+  confirmedEmptyPreserved: boolean;
+  readErrorPropagated: boolean;
   categoryFullScanAvoided: boolean;
   bootstrapPreparationSkippedOnHotReturn: boolean;
 };
@@ -233,6 +237,37 @@ export async function runHomeHotReturnSmokeTest(): Promise<HomeHotReturnSmokeTes
     );
   const missingArtworkFallback =
     missingArtworkViewModel.posterUrl === undefined;
+  const validLocalContentPreserved = homeMovies && homeSeries;
+  const confirmedEmptySections = await loadHomeVodSections(
+    {
+      ...inputA,
+      sourceId: 'source-confirmed-empty',
+      preferFresh: true,
+    },
+    async () => [],
+  );
+  const confirmedEmptyPreserved = confirmedEmptySections.length === 0;
+  const noAuthoritativeDemoFallback = confirmedEmptySections.length === 0;
+  let readErrorPropagated = false;
+
+  try {
+    await loadHomeVodSections(
+      {
+        ...inputA,
+        sourceId: 'source-read-error',
+        preferFresh: true,
+        propagateReadError: true,
+      },
+      async () => {
+        throw new Error('LOCAL_CATALOG_SMOKE_READ_FAILURE');
+      },
+    );
+  } catch (error) {
+    readErrorPropagated =
+      error instanceof Error &&
+      error.message === 'LOCAL_CATALOG_SMOKE_READ_FAILURE';
+  }
+
   let sourceLoads = 0;
   const cachedBootstrapResult: AppBootstrapResult = {
     licenseCode: LICENSE_CODE,
@@ -274,6 +309,10 @@ export async function runHomeHotReturnSmokeTest(): Promise<HomeHotReturnSmokeTes
     readability,
     artworkMapping,
     missingArtworkFallback,
+    validLocalContentPreserved,
+    noAuthoritativeDemoFallback,
+    confirmedEmptyPreserved,
+    readErrorPropagated,
     categoryFullScanAvoided,
     bootstrapPreparationSkippedOnHotReturn,
   };
