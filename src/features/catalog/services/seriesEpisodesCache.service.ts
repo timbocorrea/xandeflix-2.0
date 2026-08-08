@@ -66,6 +66,18 @@ function isCachedSeriesEpisode(item: unknown): item is HomeVodItem {
   );
 }
 
+function normalizeCachedSeriesEpisode(item: HomeVodItem): HomeVodItem {
+  const seriesIdentityKey =
+    item.seriesIdentityKey?.trim() || item.seriesKey?.trim() || undefined;
+
+  return {
+    ...item,
+    ...(seriesIdentityKey ? { seriesIdentityKey } : {}),
+    seriesKey: undefined,
+    isSeriesCollection: false,
+  };
+}
+
 export function readCachedSeriesEpisodes(input: SeriesEpisodesCacheInput) {
   if (typeof window === 'undefined') {
     return [];
@@ -90,7 +102,9 @@ export function readCachedSeriesEpisodes(input: SeriesEpisodesCacheInput) {
       return [];
     }
 
-    return parsed.filter(isCachedSeriesEpisode);
+    return parsed
+      .filter(isCachedSeriesEpisode)
+      .map(normalizeCachedSeriesEpisode);
   } catch {
     return [];
   }
@@ -113,7 +127,11 @@ export function storeCachedSeriesEpisodes(
 
     window.localStorage.setItem(
       cacheKey,
-      JSON.stringify(items.filter(isCachedSeriesEpisode)),
+      JSON.stringify(
+        items
+          .filter(isCachedSeriesEpisode)
+          .map(normalizeCachedSeriesEpisode),
+      ),
     );
   } catch {
     // Cache best-effort. Falha nao deve bloquear a navegacao.

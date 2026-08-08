@@ -1,4 +1,5 @@
 import type { HomeVodItem } from './homeVod.service';
+import { getHorizontalHeroArtworkCandidates } from './heroArtworkPolicy.service';
 import {
   createDiscoveryGenerationKey,
   createDiscoveryPresentationSnapshot,
@@ -47,6 +48,31 @@ export function createBoundedDiscoveryGenerationKey(input: {
   ]);
 }
 
+function prepareDiscoveryCandidates<T extends DiscoveryCandidateItem>(input: {
+  surfaceKey: string;
+  sectionKey: string;
+  candidates: T[];
+}) {
+  if (input.surfaceKey !== 'home' || input.sectionKey !== 'hero') {
+    return input.candidates;
+  }
+
+  return input.candidates
+    .filter(
+      (candidate) =>
+        getHorizontalHeroArtworkCandidates(
+          candidate as unknown as HomeVodItem,
+        ).length > 0,
+    )
+    .map(
+      (candidate) =>
+        ({
+          ...candidate,
+          posterUrl: undefined,
+        }) as T,
+    );
+}
+
 export function resolveLocalCatalogDiscoverySnapshot<
   T extends DiscoveryCandidateItem,
 >(input: {
@@ -60,11 +86,17 @@ export function resolveLocalCatalogDiscoverySnapshot<
   historyItemCount?: number;
   isArtworkReady?: (candidate: T) => boolean;
 }) {
+  const candidates = prepareDiscoveryCandidates(input);
+  const candidateById = new Map(
+    candidates
+      .map((candidate) => [candidate.id.trim(), candidate] as const)
+      .filter(([candidateId]) => Boolean(candidateId)),
+  );
   const runtimeContext = getOrCreateDiscoveryRuntimeContext(input.scope);
 
   if (!runtimeContext.isValid || !runtimeContext.sessionSeed) {
     return {
-      items: input.candidates.slice(0, Math.max(0, input.slotCount)),
+      items: candidates.slice(0, Math.max(0, input.slotCount)),
       created: false,
       poolExhausted: false,
     };
@@ -77,11 +109,17 @@ export function resolveLocalCatalogDiscoverySnapshot<
   );
 
   if (stored?.slots.length) {
-    return {
-      items: stored.slots.map((slot) => slot.payload),
-      created: false,
-      poolExhausted: false,
-    };
+    const refreshedStoredItems = stored.slots
+      .map((slot) => candidateById.get(slot.id.trim()))
+      .filter((candidate): candidate is T => Boolean(candidate));
+
+    if (refreshedStoredItems.length === stored.slots.length) {
+      return {
+        items: refreshedStoredItems,
+        created: false,
+        poolExhausted: false,
+      };
+    }
   }
 
   const recentIds = getRecentRotationItemIds({
@@ -89,21 +127,19 @@ export function resolveLocalCatalogDiscoverySnapshot<
     kind: input.historyKind,
     surfaceKey: `${input.surfaceKey}:${input.sectionKey}`,
   });
-  const candidateIds = new Set(
-    input.candidates.map((candidate) => candidate.id.trim()).filter(Boolean),
-  );
+  const candidateIds = new Set(candidateById.keys());
   const poolExhausted =
     candidateIds.size > 0 &&
     Array.from(candidateIds).every((candidateId) =>
       recentIds.includes(candidateId),
     );
   const snapshot = createDiscoveryPresentationSnapshot({
-    candidates: input.candidates,
+    candidates,
     sessionSeed: runtimeContext.sessionSeed,
     generationKey: input.generationKey,
     surfaceKey: input.surfaceKey,
     sectionKey: input.sectionKey,
-    slotCount: input.slotCount,
+    slotCount: Math.min(input.slotCount, candidates.length),
     isArtworkReady: input.isArtworkReady,
     excludedIds: poolExhausted ? [] : recentIds,
   });

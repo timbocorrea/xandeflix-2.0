@@ -39,6 +39,7 @@ export type HomeVodItem = {
   >;
   metadataSourceUrls?: Partial<Record<MetadataProviderId, string>>;
   seriesKey?: string;
+  seriesIdentityKey?: string;
   episodeCount?: number;
   isSeriesCollection?: boolean;
   kind: HomeVodKind;
@@ -116,6 +117,27 @@ function cloneHomeVodSections(sections: HomeVodSection[]) {
 
 function cloneHomeVodItems(items: HomeVodItem[]) {
   return items.map((item) => ({ ...item }));
+}
+
+function normalizeSeriesDetailEpisodeItems(
+  items: HomeVodItem[],
+  slug?: string,
+) {
+  if (slug !== 'series-detail') {
+    return cloneHomeVodItems(items);
+  }
+
+  return items.map((item) => {
+    const seriesIdentityKey =
+      item.seriesIdentityKey?.trim() || item.seriesKey?.trim() || undefined;
+
+    return {
+      ...item,
+      ...(seriesIdentityKey ? { seriesIdentityKey } : {}),
+      seriesKey: undefined,
+      isSeriesCollection: false,
+    };
+  });
 }
 
 function createHomeVodCacheKey({
@@ -275,7 +297,7 @@ export function getCachedHomeVodCategoryItems(input: LoadHomeVodCategoryInput) {
     return null;
   }
 
-  return cloneHomeVodItems(cachedEntry.items);
+  return normalizeSeriesDetailEpisodeItems(cachedEntry.items, input.slug);
 }
 
 export async function loadHomeVodSections(
@@ -396,13 +418,14 @@ export async function loadHomeVodCategoryItems(
       contentKinds: resolveCategoryContentKinds(normalizedGroupTitles, slug),
       limit,
     });
+    const normalizedItems = normalizeSeriesDetailEpisodeItems(items, slug);
 
     homeVodCategoryItemsCache.set(createHomeVodCategoryCacheKey(input), {
       createdAt: Date.now(),
-      items: cloneHomeVodItems(items),
+      items: cloneHomeVodItems(normalizedItems),
     });
 
-    return items;
+    return normalizedItems;
   } catch (error) {
     console.warn('[XANDEFLIX_CATEGORY_LOCAL_CATALOG_READ_FAILED]', {
       errorName: error instanceof Error ? error.name : 'UnknownError',

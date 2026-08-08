@@ -54,6 +54,7 @@ import {
   writePresentationRouteCache,
 } from '../services/presentationRouteCache.service';
 import { sortEpisodesNaturally } from '../services/episodeNaturalOrder.service';
+import { resolveCatalogItemOpenTarget } from '../services/catalogItemOpenPolicy.service';
 
 import {
   enrichSeriesCardPosters,
@@ -1559,12 +1560,12 @@ function EpisodeListRow({
     : 0;
 
   return (
-    <div
+    <button
       ref={ref}
-      role="button"
-      tabIndex={-1}
+      type="button"
+      onClick={onEnterPress}
       className={
-        'relative overflow-hidden grid grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
+        'relative grid w-full appearance-none grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 overflow-hidden rounded-[0.55rem] border px-3 py-2.5 text-left transition ' +
         (focused
           ? 'border-xf-red bg-xf-red/15 shadow-[0_0_0_0.18rem_rgba(229,9,20,0.28)]'
           : isStarted
@@ -1599,7 +1600,7 @@ function EpisodeListRow({
           />
         </div>
       ) : null}
-    </div>
+    </button>
   );
 }
 
@@ -3763,23 +3764,28 @@ export function CatalogCategoryPage({
 
 
   function openCategoryItem(item: HomeVodItem, index: number) {
-    const shouldOpenSeriesDetail =
-      category?.slug === 'series' ||
-      category?.slug === 'series-group' ||
-      item.isSeriesCollection ||
-      Boolean(item.seriesKey);
+    const openTarget = resolveCatalogItemOpenTarget({
+      categorySlug: category?.slug,
+      isMovieSeeAllPage,
+      isSeriesCollection: Boolean(item.isSeriesCollection),
+      isSeriesDetailPage,
+      seriesKey: item.seriesKey,
+    });
 
-    if (shouldOpenSeriesDetail) {
+    if (openTarget === 'episode') {
+      openEpisode(item, index);
+      return;
+    }
+
+    if (openTarget === 'series-detail') {
       openSeriesCollection(item);
       return;
     }
 
-    if (category?.slug === 'filmes' || isMovieSeeAllPage) {
+    if (openTarget === 'movie-detail') {
       openMovieDetail(item);
       return;
     }
-
-    openEpisode(item, index);
   }
 
   function openEpisode(item: HomeVodItem, index: number) {
@@ -4851,7 +4857,7 @@ export function CatalogCategoryPage({
                               category?.slug ?? 'category',
                               absoluteIndex,
                             )}
-                            onEnterPress={() => openCategoryItem(item, absoluteIndex)}
+                            onEnterPress={() => openEpisode(item, absoluteIndex)}
                             onArrowPress={(direction: string) =>
                               handleCategoryCardArrowPress(
                                 direction,
