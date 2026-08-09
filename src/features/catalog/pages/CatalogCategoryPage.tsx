@@ -1570,6 +1570,7 @@ function EpisodeListRow({
       ref={ref}
       role="button"
       tabIndex={-1}
+      onClick={onEnterPress}
       className={
         'relative overflow-hidden grid grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
         (focused
@@ -2488,6 +2489,67 @@ export function CatalogCategoryPage({
     seriesTmdbTitle,
     seriesTitle,
   ]);
+
+  const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<
+    number | null | undefined
+  >(undefined);
+
+  const seriesSeasons = useMemo(() => {
+    if (!isSeriesDetailPage || seriesDetailItems.length === 0) {
+      return [];
+    }
+
+    const seasonMap = new Map<
+      number | null,
+      Array<{ item: HomeVodItem; absoluteIndex: number }>
+    >();
+
+    seriesDetailItems.forEach((item, absoluteIndex) => {
+      const seasonNumber = getSeriesDetailSeasonNumber(item);
+      const list = seasonMap.get(seasonNumber) ?? [];
+      list.push({ item, absoluteIndex });
+      seasonMap.set(seasonNumber, list);
+    });
+
+    const seasons: Array<{
+      seasonNumber: number | null;
+      label: string;
+      episodes: Array<{ item: HomeVodItem; absoluteIndex: number }>;
+    }> = [];
+
+    const seasonNumbers = Array.from(seasonMap.keys()).sort((a, b) => {
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return a - b;
+    });
+
+    seasonNumbers.forEach((seasonNum) => {
+      const episodes = seasonMap.get(seasonNum) ?? [];
+      const label =
+        seasonNum === null ? 'Outros episódios' : `Temporada ${seasonNum}`;
+      seasons.push({ seasonNumber: seasonNum, label, episodes });
+    });
+
+    return seasons;
+  }, [isSeriesDetailPage, seriesDetailItems]);
+
+  const activeSeasonNumber = useMemo(() => {
+    if (seriesSeasons.length === 0) return null;
+    const exists = seriesSeasons.some(
+      (s) => s.seasonNumber === selectedSeasonNumber,
+    );
+    return exists ? selectedSeasonNumber : seriesSeasons[0].seasonNumber;
+  }, [seriesSeasons, selectedSeasonNumber]);
+
+  const activeSeason = useMemo(() => {
+    if (seriesSeasons.length === 0) return null;
+    return (
+      seriesSeasons.find((s) => s.seasonNumber === activeSeasonNumber) ??
+      seriesSeasons[0]
+    );
+  }, [seriesSeasons, activeSeasonNumber]);
+
+  const currentSeasonEpisodes = activeSeason?.episodes ?? [];
 
   const visibleItems = useMemo(
     () =>
@@ -4906,78 +4968,96 @@ export function CatalogCategoryPage({
           </section>
         ) : (
           isSeriesDetailPage ? (
-            <section className="flex w-full flex-nowrap items-start gap-4 pb-12">
-              <div className="min-w-0">
-                <div className="mb-4 flex items-end justify-between gap-3">
+            <section className="flex w-full flex-col items-stretch gap-4 pb-12 md:flex-row md:flex-nowrap md:items-start">
+              <div className="w-full min-w-0 md:flex-1">
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                   <h2 className="text-lg font-black tracking-[-0.03em] text-white">
-                    Episodios
+                    {activeSeason?.label ?? 'Episódios'}
                     <span className="ml-2 text-sm font-bold text-zinc-400">
-                      {seriesDetailItems.length}
+                      {currentSeasonEpisodes.length}
                     </span>
                   </h2>
 
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                    {seriesDetailItems.length > 0
-                      ? `${episodeWindowStart + 1}-${Math.min(
-                          episodeWindowStart + EPISODE_WINDOW_SIZE,
-                          seriesDetailItems.length,
-                        )} de ${seriesDetailItems.length}`
+                    {currentSeasonEpisodes.length > 0
+                      ? `1-${currentSeasonEpisodes.length} de ${currentSeasonEpisodes.length}`
                       : '0 de 0'}
                   </p>
                 </div>
 
-                <div className="h-[58vh] overflow-hidden rounded-[0.75rem] border border-white/5 bg-black/10 p-2">
-                  <div className="space-y-2">
-                    {episodeWindowItems.map((item, windowIndex) => {
-                      const absoluteIndex = episodeWindowStart + windowIndex;
-                      const seasonNumber = getSeriesDetailSeasonNumber(item);
-                      const previousSeasonNumber = getSeriesDetailSeasonNumber(
-                        seriesDetailItems[absoluteIndex - 1],
-                      );
-                      const showSeasonHeading =
-                        windowIndex === 0 ||
-                        seasonNumber !== previousSeasonNumber;
-
+                {seriesSeasons.length > 1 ? (
+                  <div className="mb-4 flex w-full gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-none">
+                    {seriesSeasons.map((season) => {
+                      const isSelected =
+                        season.seasonNumber === activeSeasonNumber;
                       return (
-                        <div key={item.id}>
-                          {showSeasonHeading ? (
-                            <p className="mb-2 mt-3 px-2 text-xs font-black uppercase tracking-[0.16em] text-zinc-400 first:mt-0">
-                              {seasonNumber === null
-                                ? 'Outros episódios'
-                                : `Temporada ${seasonNumber}`}
-                            </p>
-                          ) : null}
-                          <EpisodeListRow
-                            index={absoluteIndex}
-                            title={resolveEpisodeTitle(item, absoluteIndex)}
-                            playbackStatus={resolveEpisodePlaybackStatus(
-                              item,
-                              absoluteIndex,
-                            )}
-                            progressPercent={resolveEpisodePlaybackProgressPercent(
-                              item,
-                              absoluteIndex,
-                            )}
-                            focusKey={getCategoryItemFocusKey(
-                              category?.slug ?? 'category',
-                              absoluteIndex,
-                            )}
-                            onEnterPress={() => openCategoryItem(item, absoluteIndex)}
-                            onArrowPress={(direction: string) =>
-                              handleCategoryCardArrowPress(
-                                direction,
-                                absoluteIndex,
-                              )
-                            }
-                          />
-                        </div>
+                        <button
+                          key={`season-selector-${season.seasonNumber ?? 'null'}`}
+                          type="button"
+                          onClick={() =>
+                            setSelectedSeasonNumber(season.seasonNumber)
+                          }
+                          className={
+                            'shrink-0 rounded-full border px-4 py-1.5 text-xs font-black transition ' +
+                            (isSelected
+                              ? 'border-xf-red bg-xf-red text-white shadow-[0_0_12px_rgba(229,9,20,0.4)]'
+                              : 'border-white/15 bg-black/40 text-zinc-300 hover:border-white/30 hover:bg-white/10')
+                          }
+                        >
+                          {season.label}
+                        </button>
                       );
                     })}
+                  </div>
+                ) : null}
+
+                <div className="h-[58vh] overflow-y-auto overflow-x-hidden overscroll-contain rounded-[0.75rem] border border-white/5 bg-black/10 p-2">
+                  <div className="space-y-2">
+                    {currentSeasonEpisodes.map(
+                      ({ item, absoluteIndex }, seasonEpisodeIndex) => {
+                        const epNum = (item as SeriesDetailEpisode)
+                          ?.episodeNumber;
+                        const displayIndex =
+                          typeof epNum === 'number' && epNum > 0
+                            ? epNum - 1
+                            : seasonEpisodeIndex;
+
+                        return (
+                          <div key={item.id}>
+                            <EpisodeListRow
+                              index={displayIndex}
+                              title={resolveEpisodeTitle(item, absoluteIndex)}
+                              playbackStatus={resolveEpisodePlaybackStatus(
+                                item,
+                                absoluteIndex,
+                              )}
+                              progressPercent={resolveEpisodePlaybackProgressPercent(
+                                item,
+                                absoluteIndex,
+                              )}
+                              focusKey={getCategoryItemFocusKey(
+                                category?.slug ?? 'category',
+                                absoluteIndex,
+                              )}
+                              onEnterPress={() =>
+                                openEpisode(item, absoluteIndex)
+                              }
+                              onArrowPress={(direction: string) =>
+                                handleCategoryCardArrowPress(
+                                  direction,
+                                  absoluteIndex,
+                                )
+                              }
+                            />
+                          </div>
+                        );
+                      },
+                    )}
                   </div>
                 </div>
               </div>
 
-              <aside className="w-[24rem] shrink-0 self-start">
+              <aside className="w-full shrink-0 self-start md:w-[24rem]">
                 <h2 className="mb-4 text-lg font-black tracking-[-0.03em] text-white">
                   Semelhantes
                 </h2>
