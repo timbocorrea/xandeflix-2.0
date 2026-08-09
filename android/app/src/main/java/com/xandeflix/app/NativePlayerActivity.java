@@ -37,6 +37,10 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String EXTRA_STREAM_TITLE = "streamTitle";
     public static final String EXTRA_STREAM_KIND = "streamKind";
     public static final String EXTRA_START_POSITION_MS = "startPositionMs";
+    public static final String EXTRA_CONTINUITY_POLICY = "continuityPolicy";
+    public static final String CONTINUITY_POLICY_LEGACY = "LEGACY";
+    public static final String CONTINUITY_POLICY_MOVIE_CANONICAL_POSITION_ONLY =
+            "MOVIE_CANONICAL_POSITION_ONLY";
 
     private static final String TAG = "XandeflixNativePlayer";
     private static final long SEEK_BACK_MS = 5000L;
@@ -58,6 +62,8 @@ public class NativePlayerActivity extends AppCompatActivity {
     private String currentKind = "unknown";
     private String currentStreamUrl = "";
     private long requestedStartPositionMs = 0L;
+    private boolean capturedPlaybackPositionSinceResume = false;
+    private String currentContinuityPolicy = CONTINUITY_POLICY_LEGACY;
     private List<NativeStreamRequest> playbackRequests = new ArrayList<>();
     private int currentRequestIndex = 0;
     private final android.os.Handler controllerHandler = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -89,6 +95,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         String streamUrl = getIntent().getStringExtra(EXTRA_STREAM_URL);
         String streamTitle = getIntent().getStringExtra(EXTRA_STREAM_TITLE);
         String streamKind = getIntent().getStringExtra(EXTRA_STREAM_KIND);
+        String continuityPolicy = getIntent().getStringExtra(EXTRA_CONTINUITY_POLICY);
         requestedStartPositionMs = Math.max(
                 0L,
                 getIntent().getLongExtra(EXTRA_START_POSITION_MS, 0L)
@@ -106,6 +113,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                 ? streamTitle.trim()
                 : "Xandeflix Player";
         currentKind = sanitizeStreamKind(streamKind);
+        currentContinuityPolicy = sanitizeContinuityPolicy(continuityPolicy);
         currentHasTitle = hasText(currentTitle);
 
         Log.i(
@@ -116,6 +124,8 @@ public class NativePlayerActivity extends AppCompatActivity {
                         + currentKind
                         + " positionMs="
                         + requestedStartPositionMs
+                        + " movieCanonicalPositionOnly="
+                        + isMovieCanonicalPositionOnly()
         );
 
         FrameLayout root = new FrameLayout(this);
@@ -305,13 +315,16 @@ public class NativePlayerActivity extends AppCompatActivity {
         }
 
         MediaItem mediaItem = MediaItem.fromUri(Uri.parse(request.getMediaUrl()));
-        long savedPlaybackPositionMs = shouldResumePlaybackPosition()
+        long savedPlaybackPositionMs = !isMovieCanonicalPositionOnly()
+                && shouldResumePlaybackPosition()
                 ? readSavedPlaybackPositionMs(currentStreamUrl)
                 : 0L;
-        long resumePositionMs = Math.max(
-                requestedStartPositionMs,
-                savedPlaybackPositionMs
-        );
+        long resumePositionMs = isMovieCanonicalPositionOnly()
+                ? requestedStartPositionMs
+                : Math.max(
+                        requestedStartPositionMs,
+                        savedPlaybackPositionMs
+                );
         boolean hasExplicitEpisodeResume =
                 requestedStartPositionMs >= MIN_RESUME_POSITION_MS;
         boolean hasSavedPosition = savedPlaybackPositionMs >= MIN_RESUME_POSITION_MS;
@@ -411,6 +424,12 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     private boolean shouldResumePlaybackPosition() {
         return !"mpegts".equalsIgnoreCase(currentKind);
+    }
+
+    private boolean isMovieCanonicalPositionOnly() {
+        return CONTINUITY_POLICY_MOVIE_CANONICAL_POSITION_ONLY.equals(
+                currentContinuityPolicy
+        );
     }
 
     @Override
@@ -543,13 +562,24 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     private void saveCurrentPlaybackPosition() {
         try {
-            if (player == null || currentStreamUrl == null || currentStreamUrl.isEmpty() || !shouldResumePlaybackPosition()) {
+            if (player == null || currentStreamUrl == null || currentStreamUrl.isEmpty()) {
                 return;
             }
 
             long currentPositionMs = player.getCurrentPosition();
 
             if (currentPositionMs < MIN_RESUME_POSITION_MS) {
+                return;
+            }
+
+            if (isMovieCanonicalPositionOnly()) {
+                lastPlaybackPositionMs = currentPositionMs;
+                lastPlaybackStreamUrl = "";
+                Log.i(TAG, "Posicao nativa Movie capturada para retorno. positionMs=" + currentPositionMs);
+                return;
+            }
+
+            if (!shouldResumePlaybackPosition()) {
                 return;
             }
 
@@ -594,6 +624,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        capturedPlaybackPositionSinceResume = false;
         hideSystemUi();
 
         if (player != null) {
@@ -607,6 +638,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     protected void onPause() {
         if (player != null) {
             saveCurrentPlaybackPosition();
+            capturedPlaybackPositionSinceResume = true;
             player.pause();
         }
 
@@ -627,7 +659,9 @@ public class NativePlayerActivity extends AppCompatActivity {
         }
 
         if (player != null) {
-            saveCurrentPlaybackPosition();
+            if (!capturedPlaybackPositionSinceResume) {
+                saveCurrentPlaybackPosition();
+            }
             player.release();
             player = null;
         }
@@ -643,6 +677,14 @@ public class NativePlayerActivity extends AppCompatActivity {
         }
 
         return kind.trim();
+    }
+
+    private String sanitizeContinuityPolicy(String continuityPolicy) {
+        if (CONTINUITY_POLICY_MOVIE_CANONICAL_POSITION_ONLY.equals(continuityPolicy)) {
+            return CONTINUITY_POLICY_MOVIE_CANONICAL_POSITION_ONLY;
+        }
+
+        return CONTINUITY_POLICY_LEGACY;
     }
 
     private String getPlaybackErrorName(PlaybackException error) {

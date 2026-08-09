@@ -91,6 +91,7 @@ import {
   hasEpisodePlaybackProgress,
   type EpisodePlaybackProgressStatus,
 } from '../services/episodePlaybackProgress.service';
+import { resolveMoviePlaybackProgress } from '../services/moviePlaybackProgress.service';
 
 const GRID_COLUMNS = 5;
 const INITIAL_VISIBLE_ITEMS = 60;
@@ -1623,12 +1624,15 @@ export function CatalogCategoryPage({
   const location = useLocation();
   const params = useParams();
   const [searchParams] = useSearchParams();
+  const moviePlaybackScopeKey =
+    localCatalogScopeKey?.trim() || playlistSource?.sourceId?.trim() || null;
 
   const seriesGroupTitle = searchParams.get('groupTitle')?.trim() || null;
   const seriesTitle = searchParams.get('title')?.trim() || null;
   const seriesTmdbId = searchParams.get('tmdbId')?.trim() || null;
   const seriesTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
   const seriesKey = searchParams.get('seriesKey')?.trim() || null;
+  const movieId = searchParams.get('movieId')?.trim() || null;
   const movieTitle = searchParams.get('title')?.trim() || null;
   const movieTmdbId = searchParams.get('tmdbId')?.trim() || null;
   const movieTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
@@ -1682,7 +1686,7 @@ export function CatalogCategoryPage({
   const isMovieDetailPage =
     !isSeriesGroupListPage &&
     (groupSlugOverride ?? params.groupSlug) === 'movie-detail' &&
-    Boolean(movieTitle || movieTmdbId || movieTmdbTitle);
+    Boolean(movieId || movieTitle || movieTmdbId || movieTmdbTitle);
 
   const category = useMemo<CatalogCategoryDefinition | null>(() => {
     if (isSeriesGroupListPage && seriesGroupTitle) {
@@ -2646,8 +2650,13 @@ export function CatalogCategoryPage({
     const requestedTmdbId = normalizeMovieValue(movieTmdbId);
     const requestedTmdbTitle = normalizeMovieValue(movieTmdbTitle);
     const requestedTitle = normalizeMovieValue(movieTitle);
+    const requestedMovieId = normalizeMovieValue(movieId);
 
     const matchedItem = movieDetailCandidates.find((item) => {
+      if (requestedMovieId) {
+        return normalizeMovieValue(item.id) === requestedMovieId;
+      }
+
       if (requestedTmdbId && normalizeMovieValue(item.tmdbId) === requestedTmdbId) {
         return true;
       }
@@ -2669,12 +2678,11 @@ export function CatalogCategoryPage({
       );
     });
 
-    return matchedItem ?? movieNavigationState?.selectedMovieItem ?? items[0] ?? null;
+    return matchedItem ?? null;
   }, [
     isMovieDetailPage,
-    items,
     movieDetailCandidates,
-    movieNavigationState?.selectedMovieItem,
+    movieId,
     movieTitle,
     movieTmdbId,
     movieTmdbTitle,
@@ -3738,6 +3746,7 @@ export function CatalogCategoryPage({
 
   function openMovieDetail(item: HomeVodItem) {
     const params = new URLSearchParams({
+      movieId: item.id,
       title: item.tmdbTitle ?? item.title,
     });
 
@@ -3864,6 +3873,32 @@ export function CatalogCategoryPage({
     navigate(`/player?${params.toString()}`);
   }
 
+  function openMovie(item: HomeVodItem) {
+    spatialDebug('catalog-grid', 'Abrir filme:', item.title);
+
+    if (!item.streamUrl) {
+      return;
+    }
+
+    const movieProgress = resolveMoviePlaybackProgress({
+      scopeKey: moviePlaybackScopeKey,
+      movieId: item.id,
+    });
+    const params = new URLSearchParams({
+      src: item.streamUrl,
+      title: item.tmdbTitle ?? item.title,
+      movieId: item.id,
+      startPositionMs: String(movieProgress.startPositionMs),
+      direct: '1',
+    });
+
+    if (moviePlaybackScopeKey) {
+      params.set('scopeKey', moviePlaybackScopeKey);
+    }
+
+    navigate(`/player?${params.toString()}`);
+  }
+
   // FASE 4: foco inicial do detalhe de filme
   useEffect(() => {
     if (!isMovieDetailPage || !movieDetailItem) {
@@ -3931,11 +3966,13 @@ export function CatalogCategoryPage({
   }
 
   function playMovieDetailItem() {
-    if (!movieDetailItem) {
+    const playableMovieItem = effectiveMovieDetailItem ?? movieDetailItem;
+
+    if (!playableMovieItem) {
       return;
     }
 
-    openEpisode(movieDetailItem, 0);
+    openMovie(playableMovieItem);
   }
 
   function handleSeriesHeroArrowPress(direction: string) {
@@ -4626,6 +4663,23 @@ export function CatalogCategoryPage({
 
             </div>
           </SeriesDetailHeroFrame>
+        ) : isMovieDetailPage ? (
+          <section
+            data-xf-movie-detail-state="unavailable"
+            className="rounded-[0.65rem] border border-amber-400/30 bg-amber-500/10 px-6 py-10 text-center"
+          >
+            <p className="text-sm font-semibold text-amber-100">
+              Este filme não está mais disponível nesta fonte.
+            </p>
+            <FocusableButton
+              focusKey="movie-detail-back"
+              onClick={() => navigate(-1)}
+              onEnterPress={() => navigate(-1)}
+              className="mt-5 rounded-[0.18rem] bg-white px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-black"
+            >
+              Voltar
+            </FocusableButton>
+          </section>
         ) : isSeriesDetailPage && effectiveSeriesDetailHero ? (
           <SeriesDetailHeroFrame
             disabled={seriesDetailItems.length === 0}
@@ -4723,7 +4777,7 @@ export function CatalogCategoryPage({
                 isLoading={isLoading}
                 totalItems={items.length}
                 heroTotal={movieHeroPresentationItems.length}
-                onPlayItem={openEpisode}
+                onPlayItem={openMovie}
                 onInfoItem={(item) => openMovieDetail(item)}
                 onButtonArrowPress={handleMoviesCategoryHeroButtonArrowPress}
               />
@@ -4765,7 +4819,7 @@ export function CatalogCategoryPage({
           </>
         )}
 
-        {isMovieDetailPage ? (
+        {isMovieDetailPage && effectiveMovieDetailItem ? (
           <section className="space-y-4 pb-12">
             <div className="flex items-end justify-between gap-3">
               <h2 className="text-lg font-black tracking-[-0.03em] text-white">
@@ -4811,7 +4865,7 @@ export function CatalogCategoryPage({
               </section>
             )}
           </section>
-        ) : isSeriesDetailPreparing ? (
+        ) : isMovieDetailPage ? null : isSeriesDetailPreparing ? (
           <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
             <p className="text-sm font-semibold text-zinc-300">
               Preparando episódios...

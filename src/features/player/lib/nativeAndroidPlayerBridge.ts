@@ -1,10 +1,15 @@
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
+export type NativeAndroidPlayerContinuityPolicy =
+  | 'LEGACY'
+  | 'MOVIE_CANONICAL_POSITION_ONLY';
+
 type NativeAndroidPlayerOpenOptions = {
   url: string;
   title?: string;
   kind?: string;
   startPositionMs?: number;
+  continuityPolicy?: NativeAndroidPlayerContinuityPolicy;
 };
 
 type NativeAndroidPlayerOpenResult = {
