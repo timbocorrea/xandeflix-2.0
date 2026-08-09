@@ -15,7 +15,9 @@ import { createMpegTsAdapter } from '../lib/mpegTsAdapter';
 import {
   createNativeAndroidPlayerAdapter,
   isNativeAndroidPlayerAvailable,
+  MOVIE_NATIVE_CONTINUITY_POLICY,
 } from '../lib/nativeAndroidPlayerAdapter';
+import { addNativeAndroidPlayerResumeListener } from '../lib/nativeAndroidPlayerBridge';
 import { createNativeVideoAdapter } from '../lib/nativeVideoAdapter';
 import { logPlayerDebugEvent } from '../lib/playerDebug';
 import { prepareUniversalPlayerSource } from '../lib/playerFactory';
@@ -28,6 +30,7 @@ import {
   markEpisodePlaybackStarted,
   updateEpisodePlaybackPosition,
 } from '@/features/catalog/services/episodePlaybackProgress.service';
+import { updateMoviePlaybackPosition } from '@/features/catalog/services/moviePlaybackProgress.service';
 import type {
   PlayerError,
   PlayerTelemetryEvent,
@@ -162,6 +165,8 @@ export default function UniversalPlayerPage() {
   const streamUrl = searchParams.get('src') ?? '';
   const title = searchParams.get('title') ?? 'Conteúdo Xandeflix';
   const isDirectPlayback = searchParams.get('direct') === '1';
+  const movieId = searchParams.get('movieId')?.trim() || null;
+  const movieScopeKey = searchParams.get('scopeKey')?.trim() || null;
   const episodeId = searchParams.get('episodeId');
   const episodeIndex = searchParams.get('episodeIndex');
   const startPositionMs = Number(searchParams.get('startPositionMs') ?? 0);
@@ -169,6 +174,7 @@ export default function UniversalPlayerPage() {
   const seriesGroupTitle = searchParams.get('seriesGroupTitle');
   const seriesTmdbId = searchParams.get('seriesTmdbId');
   const seriesTmdbTitle = searchParams.get('seriesTmdbTitle');
+  const isMovieContinuity = Boolean(movieId);
 
   const preparation = useMemo(() => {
     return prepareUniversalPlayerSource({
@@ -337,16 +343,18 @@ export default function UniversalPlayerPage() {
 
       playbackSessionIdRef.current = playbackSession.id;
 
-      markEpisodePlaybackStarted({
-        episodeId,
-        streamUrl,
-        title,
-        seriesTitle,
-        seriesGroupTitle,
-        seriesTmdbId,
-        seriesTmdbTitle,
-        episodeIndex: episodeIndex ? Number(episodeIndex) : null,
-      });
+      if (!isMovieContinuity) {
+        markEpisodePlaybackStarted({
+          episodeId,
+          streamUrl,
+          title,
+          seriesTitle,
+          seriesGroupTitle,
+          seriesTmdbId,
+          seriesTmdbTitle,
+          episodeIndex: episodeIndex ? Number(episodeIndex) : null,
+        });
+      }
 
       pushPlayerEvent(
         'PLAYBACK_SESSION_STARTED',
@@ -367,6 +375,7 @@ export default function UniversalPlayerPage() {
     }, [
       episodeId,
       episodeIndex,
+      isMovieContinuity,
       startPositionMs,
       pushPlayerEvent,
       seriesGroupTitle,
@@ -438,7 +447,12 @@ export default function UniversalPlayerPage() {
               onTelemetryEvent: pushTelemetryEvent,
             })
           : useNativeAndroidAdapter
-            ? createNativeAndroidPlayerAdapter(stream.kind)
+            ? createNativeAndroidPlayerAdapter(
+                stream.kind,
+                isMovieContinuity
+                  ? { continuityPolicy: MOVIE_NATIVE_CONTINUITY_POLICY }
+                  : undefined,
+              )
             : stream.kind === 'mpegts'
               ? createMpegTsAdapter(videoElement as HTMLVideoElement, {
                   onTelemetryEvent: pushTelemetryEvent,
@@ -523,6 +537,7 @@ export default function UniversalPlayerPage() {
       };
     }, [
       endCurrentPlaybackSession,
+      isMovieContinuity,
       loadAttempt,
       preparation,
       pushPlayerEvent,
@@ -700,6 +715,52 @@ export default function UniversalPlayerPage() {
     navigate('/');
   }, [endCurrentPlaybackSession, navigate]);
 
+  const updateContinuityPosition = useCallback(
+    (positionSeconds: number) => {
+      if (!Number.isFinite(positionSeconds) || positionSeconds < 5) {
+        return;
+      }
+
+      if (isMovieContinuity) {
+        updateMoviePlaybackPosition(
+          {
+            scopeKey: movieScopeKey,
+            movieId,
+          },
+          positionSeconds,
+        );
+        return;
+      }
+
+      updateEpisodePlaybackPosition(
+        {
+          episodeId,
+          streamUrl,
+          title,
+          seriesTitle,
+          seriesGroupTitle,
+          seriesTmdbId,
+          seriesTmdbTitle,
+          episodeIndex: episodeIndex ? Number(episodeIndex) : null,
+        },
+        positionSeconds,
+      );
+    },
+    [
+      episodeId,
+      episodeIndex,
+      isMovieContinuity,
+      movieId,
+      movieScopeKey,
+      seriesGroupTitle,
+      seriesTitle,
+      seriesTmdbId,
+      seriesTmdbTitle,
+      streamUrl,
+      title,
+    ],
+  );
+
   useEffect(() => {
     let isActive = true;
     let listener: { remove: () => Promise<void> } | null = null;
@@ -762,23 +823,31 @@ export default function UniversalPlayerPage() {
           ? Math.max(0, event.positionMs)
           : 0;
 
-      const parsedEpisodeIndex =
-        episodeIndex !== null ? Number(episodeIndex) : Number.NaN;
+      if (returnedPositionMs >= 5000) {
+        if (isMovieContinuity) {
+          updateMoviePlaybackPosition(
+            {
+              scopeKey: movieScopeKey,
+              movieId,
+            },
+            Math.floor(returnedPositionMs / 1000),
+          );
+        } else {
+          const parsedEpisodeIndex =
+            episodeIndex !== null ? Number(episodeIndex) : Number.NaN;
 
-      if (
-        returnedPositionMs >= 5000 &&
-        episodeId &&
-        Number.isFinite(parsedEpisodeIndex)
-      ) {
-        updateEpisodePlaybackPosition(
-          {
-            episodeId,
-            episodeIndex: parsedEpisodeIndex,
-            streamUrl,
-            title,
-          },
-          Math.floor(returnedPositionMs / 1000),
-        );
+          if (episodeId && Number.isFinite(parsedEpisodeIndex)) {
+            updateEpisodePlaybackPosition(
+              {
+                episodeId,
+                episodeIndex: parsedEpisodeIndex,
+                streamUrl,
+                title,
+              },
+              Math.floor(returnedPositionMs / 1000),
+            );
+          }
+        }
       }
 
       shouldReturnFromDirectPlayerRef.current = false;
@@ -822,10 +891,12 @@ export default function UniversalPlayerPage() {
     window.addEventListener('focus', handleWindowFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    const appListenerPromise = App.addListener(
-      'resume',
-      returnFromDirectNativePlayer,
-    );
+    const appListenerPromise = isMovieContinuity
+      ? App.addListener('resume', scheduleFallbackReturn)
+      : App.addListener('resume', returnFromDirectNativePlayer);
+    const movieResumeListenerPromise = isMovieContinuity
+      ? addNativeAndroidPlayerResumeListener(returnFromDirectNativePlayer)
+      : null;
 
     return () => {
       isActive = false;
@@ -836,12 +907,21 @@ export default function UniversalPlayerPage() {
       void appListenerPromise.then((listener) => {
         listener.remove();
       });
+
+      if (movieResumeListenerPromise) {
+        void movieResumeListenerPromise.then((listener) => {
+          listener.remove();
+        });
+      }
     };
   }, [
     endCurrentPlaybackSession,
     episodeId,
     episodeIndex,
     isDirectPlayback,
+    isMovieContinuity,
+    movieId,
+    movieScopeKey,
     navigate,
     streamUrl,
     title,
@@ -917,37 +997,13 @@ export default function UniversalPlayerPage() {
                   return;
                 }
 
-                updateEpisodePlaybackPosition(
-                  {
-                    episodeId,
-                    streamUrl,
-                    title,
-                    seriesTitle,
-                    seriesGroupTitle,
-                    seriesTmdbId,
-                    seriesTmdbTitle,
-                    episodeIndex: episodeIndex ? Number(episodeIndex) : null,
-                  },
-                  videoElement.currentTime,
-                );
+                updateContinuityPosition(videoElement.currentTime);
               }}
               onPause={() => {
                 const videoElement = videoRef.current;
 
                 if (videoElement && videoElement.currentTime >= 5) {
-                  updateEpisodePlaybackPosition(
-                    {
-                      episodeId,
-                      streamUrl,
-                      title,
-                      seriesTitle,
-                      seriesGroupTitle,
-                      seriesTmdbId,
-                      seriesTmdbTitle,
-                      episodeIndex: episodeIndex ? Number(episodeIndex) : null,
-                    },
-                    videoElement.currentTime,
-                  );
+                  updateContinuityPosition(videoElement.currentTime);
                 }
 
                 setStatus((currentStatus) => {

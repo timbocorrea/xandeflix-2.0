@@ -1,6 +1,9 @@
 import { Capacitor } from '@capacitor/core';
 
-import { openNativeAndroidPlayer } from './nativeAndroidPlayerBridge';
+import {
+  openNativeAndroidPlayer,
+  type NativeAndroidPlayerContinuityPolicy,
+} from './nativeAndroidPlayerBridge';
 import type {
   UniversalPlayerAdapter,
   UniversalPlayerSource,
@@ -8,6 +11,13 @@ import type {
 import type { StreamKind } from '../types/stream';
 
 type NativeAndroidPlayableKind = Extract<StreamKind, 'mpegts' | 'mp4'>;
+
+export const MOVIE_NATIVE_CONTINUITY_POLICY =
+  'MOVIE_CANONICAL_POSITION_ONLY' as const;
+
+type NativeAndroidPlayerAdapterOptions = {
+  continuityPolicy?: NativeAndroidPlayerContinuityPolicy;
+};
 
 export function isNativeAndroidPlayerAvailable(kind: StreamKind | undefined) {
   return (
@@ -19,6 +29,7 @@ export function isNativeAndroidPlayerAvailable(kind: StreamKind | undefined) {
 
 export function createNativeAndroidPlayerAdapter(
   kind: StreamKind,
+  options: NativeAndroidPlayerAdapterOptions = {},
 ): UniversalPlayerAdapter {
   if (kind !== 'mpegts' && kind !== 'mp4') {
     throw new Error(`Tipo de stream não suportado pelo player nativo Android: ${kind}`);
@@ -55,6 +66,7 @@ export function createNativeAndroidPlayerAdapter(
         title: currentSource.title ?? 'Xandeflix Player',
         kind: nativeKind,
         startPositionMs: currentSource.startPositionMs,
+        continuityPolicy: options.continuityPolicy,
       });
 
       console.info('[XANDEFLIX_NATIVE_ANDROID_ADAPTER_OPEN_SUCCESS]', {
