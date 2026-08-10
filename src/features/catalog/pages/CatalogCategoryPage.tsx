@@ -127,6 +127,7 @@ type SeriesNavigationState = {
   fromSeriesDetail?: boolean;
   returnTo?: string;
   selectedSeriesItem?: HomeVodItem;
+  selectedSeasonNumber?: number | null;
 };
 
 type EnrichedMovieDetailState = {
@@ -2488,7 +2489,7 @@ export function CatalogCategoryPage({
 
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<
     number | null | undefined
-  >(undefined);
+  >(navigationState?.selectedSeasonNumber);
 
   const seriesSeasons = useMemo(() => {
     if (!isSeriesDetailPage || seriesDetailItems.length === 0) {
@@ -3926,6 +3927,17 @@ export function CatalogCategoryPage({
     navigate(`/player?${params.toString()}`);
   }
 
+  function selectSeriesSeason(seasonNumber: number | null) {
+    setSelectedSeasonNumber(seasonNumber);
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: {
+        ...(navigationState ?? {}),
+        selectedSeasonNumber: seasonNumber,
+      },
+    });
+  }
+
   // FASE 4: foco inicial do detalhe de filme
   useEffect(() => {
     if (!isMovieDetailPage || !movieDetailItem) {
@@ -4940,9 +4952,7 @@ export function CatalogCategoryPage({
                         <button
                           key={`season-selector-${season.seasonNumber ?? 'null'}`}
                           type="button"
-                          onClick={() =>
-                            setSelectedSeasonNumber(season.seasonNumber)
-                          }
+                          onClick={() => selectSeriesSeason(season.seasonNumber)}
                           className={
                             'shrink-0 rounded-full border px-4 py-1.5 text-xs font-black transition ' +
                             (isSelected
