@@ -91,6 +91,7 @@ import {
   hasEpisodePlaybackProgress,
   type EpisodePlaybackProgressStatus,
 } from '../services/episodePlaybackProgress.service';
+import { resolveMoviePlaybackProgress } from '../services/moviePlaybackProgress.service';
 
 const GRID_COLUMNS = 5;
 const INITIAL_VISIBLE_ITEMS = 60;
@@ -100,6 +101,7 @@ const BOOTSTRAP_CATEGORY_ITEM_LIMIT = INITIAL_VISIBLE_ITEMS;
 const CATEGORY_ITEM_FOCUS_PREFIX = 'category-grid-item';
 const SERIES_DETAIL_HERO_FOCUS_KEY = 'series-detail-hero';
 const SIMILAR_ITEM_FOCUS_PREFIX = 'series-similar-item';
+const SERIES_SEASON_FOCUS_PREFIX = 'series-season-item';
 const SERIES_HERO_HIGHLIGHT_LIMIT = 10;
 const SERIES_HERO_CANDIDATE_SCAN_LIMIT = 500;
 const SERIES_CATEGORY_ROW_VISIBLE_LIMIT = 15;
@@ -127,6 +129,7 @@ type SeriesNavigationState = {
   fromSeriesDetail?: boolean;
   returnTo?: string;
   selectedSeriesItem?: HomeVodItem;
+  selectedSeasonNumber?: number | null;
 };
 
 type EnrichedMovieDetailState = {
@@ -245,6 +248,13 @@ function getCategoryItemFocusKey(categorySlug: string, index: number) {
 
 function getSimilarItemFocusKey(categorySlug: string, index: number) {
   return `${SIMILAR_ITEM_FOCUS_PREFIX}-${categorySlug}-${index}`;
+}
+
+function getSeriesSeasonFocusKey(
+  seasonNumber: number | null | undefined,
+  index: number,
+) {
+  return `${SERIES_SEASON_FOCUS_PREFIX}-${seasonNumber ?? 'null'}-${index}`;
 }
 
 function getMovieSimilarItemFocusKey(movieFocusSlug: string, index: number) {
@@ -1569,6 +1579,7 @@ function EpisodeListRow({
       ref={ref}
       role="button"
       tabIndex={-1}
+      onClick={onEnterPress}
       className={
         'relative overflow-hidden grid grid-cols-[3.6rem_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] border px-3 py-2.5 transition ' +
         (focused
@@ -1623,12 +1634,15 @@ export function CatalogCategoryPage({
   const location = useLocation();
   const params = useParams();
   const [searchParams] = useSearchParams();
+  const moviePlaybackScopeKey =
+    localCatalogScopeKey?.trim() || playlistSource?.sourceId?.trim() || null;
 
   const seriesGroupTitle = searchParams.get('groupTitle')?.trim() || null;
   const seriesTitle = searchParams.get('title')?.trim() || null;
   const seriesTmdbId = searchParams.get('tmdbId')?.trim() || null;
   const seriesTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
   const seriesKey = searchParams.get('seriesKey')?.trim() || null;
+  const movieId = searchParams.get('movieId')?.trim() || null;
   const movieTitle = searchParams.get('title')?.trim() || null;
   const movieTmdbId = searchParams.get('tmdbId')?.trim() || null;
   const movieTmdbTitle = searchParams.get('tmdbTitle')?.trim() || null;
@@ -1682,7 +1696,7 @@ export function CatalogCategoryPage({
   const isMovieDetailPage =
     !isSeriesGroupListPage &&
     (groupSlugOverride ?? params.groupSlug) === 'movie-detail' &&
-    Boolean(movieTitle || movieTmdbId || movieTmdbTitle);
+    Boolean(movieId || movieTitle || movieTmdbId || movieTmdbTitle);
 
   const category = useMemo<CatalogCategoryDefinition | null>(() => {
     if (isSeriesGroupListPage && seriesGroupTitle) {
@@ -2485,6 +2499,83 @@ export function CatalogCategoryPage({
     seriesTitle,
   ]);
 
+  const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<
+    number | null | undefined
+  >(navigationState?.selectedSeasonNumber);
+
+  const seriesSeasons = useMemo(() => {
+    if (!isSeriesDetailPage || seriesDetailItems.length === 0) {
+      return [];
+    }
+
+    const seasonMap = new Map<
+      number | null,
+      Array<{ item: HomeVodItem; absoluteIndex: number }>
+    >();
+
+    seriesDetailItems.forEach((item, absoluteIndex) => {
+      const seasonNumber = getSeriesDetailSeasonNumber(item);
+      const list = seasonMap.get(seasonNumber) ?? [];
+      list.push({ item, absoluteIndex });
+      seasonMap.set(seasonNumber, list);
+    });
+
+    const seasons: Array<{
+      seasonNumber: number | null;
+      label: string;
+      episodes: Array<{ item: HomeVodItem; absoluteIndex: number }>;
+    }> = [];
+
+    const seasonNumbers = Array.from(seasonMap.keys()).sort((a, b) => {
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return a - b;
+    });
+
+    seasonNumbers.forEach((seasonNum) => {
+      const episodes = seasonMap.get(seasonNum) ?? [];
+      const label =
+        seasonNum === null ? 'Outros episódios' : `Temporada ${seasonNum}`;
+      seasons.push({ seasonNumber: seasonNum, label, episodes });
+    });
+
+    return seasons;
+  }, [isSeriesDetailPage, seriesDetailItems]);
+
+  const activeSeasonNumber = useMemo(() => {
+    if (seriesSeasons.length === 0) return null;
+    const exists = seriesSeasons.some(
+      (s) => s.seasonNumber === selectedSeasonNumber,
+    );
+    return exists ? selectedSeasonNumber : seriesSeasons[0].seasonNumber;
+  }, [seriesSeasons, selectedSeasonNumber]);
+
+  const activeSeason = useMemo(() => {
+    if (seriesSeasons.length === 0) return null;
+    return (
+      seriesSeasons.find((s) => s.seasonNumber === activeSeasonNumber) ??
+      seriesSeasons[0]
+    );
+  }, [seriesSeasons, activeSeasonNumber]);
+
+  const currentSeasonEpisodes = activeSeason?.episodes ?? [];
+
+  const pendingEpisodeFocusRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (pendingEpisodeFocusRef.current !== null) {
+      const targetAbsoluteIndex = pendingEpisodeFocusRef.current;
+      pendingEpisodeFocusRef.current = null;
+      setEpisodeFocusIndex(targetAbsoluteIndex);
+      setFocus(
+        getCategoryItemFocusKey(
+          category?.slug ?? 'category',
+          targetAbsoluteIndex,
+        ),
+      );
+    }
+  }, [activeSeasonNumber, category?.slug]);
+
   const visibleItems = useMemo(
     () =>
       isMovieSeeAllPage || isSeriesGroupListPage
@@ -2646,8 +2737,13 @@ export function CatalogCategoryPage({
     const requestedTmdbId = normalizeMovieValue(movieTmdbId);
     const requestedTmdbTitle = normalizeMovieValue(movieTmdbTitle);
     const requestedTitle = normalizeMovieValue(movieTitle);
+    const requestedMovieId = normalizeMovieValue(movieId);
 
     const matchedItem = movieDetailCandidates.find((item) => {
+      if (requestedMovieId) {
+        return normalizeMovieValue(item.id) === requestedMovieId;
+      }
+
       if (requestedTmdbId && normalizeMovieValue(item.tmdbId) === requestedTmdbId) {
         return true;
       }
@@ -2669,12 +2765,11 @@ export function CatalogCategoryPage({
       );
     });
 
-    return matchedItem ?? movieNavigationState?.selectedMovieItem ?? items[0] ?? null;
+    return matchedItem ?? null;
   }, [
     isMovieDetailPage,
-    items,
     movieDetailCandidates,
-    movieNavigationState?.selectedMovieItem,
+    movieId,
     movieTitle,
     movieTmdbId,
     movieTmdbTitle,
@@ -3738,6 +3833,7 @@ export function CatalogCategoryPage({
 
   function openMovieDetail(item: HomeVodItem) {
     const params = new URLSearchParams({
+      movieId: item.id,
       title: item.tmdbTitle ?? item.title,
     });
 
@@ -3864,6 +3960,43 @@ export function CatalogCategoryPage({
     navigate(`/player?${params.toString()}`);
   }
 
+  function selectSeriesSeason(seasonNumber: number | null) {
+    setSelectedSeasonNumber(seasonNumber);
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: {
+        ...(navigationState ?? {}),
+        selectedSeasonNumber: seasonNumber,
+      },
+    });
+  }
+
+  function openMovie(item: HomeVodItem) {
+    spatialDebug('catalog-grid', 'Abrir filme:', item.title);
+
+    if (!item.streamUrl) {
+      return;
+    }
+
+    const movieProgress = resolveMoviePlaybackProgress({
+      scopeKey: moviePlaybackScopeKey,
+      movieId: item.id,
+    });
+    const params = new URLSearchParams({
+      src: item.streamUrl,
+      title: item.tmdbTitle ?? item.title,
+      movieId: item.id,
+      startPositionMs: String(movieProgress.startPositionMs),
+      direct: '1',
+    });
+
+    if (moviePlaybackScopeKey) {
+      params.set('scopeKey', moviePlaybackScopeKey);
+    }
+
+    navigate(`/player?${params.toString()}`);
+  }
+
   // FASE 4: foco inicial do detalhe de filme
   useEffect(() => {
     if (!isMovieDetailPage || !movieDetailItem) {
@@ -3931,11 +4064,13 @@ export function CatalogCategoryPage({
   }
 
   function playMovieDetailItem() {
-    if (!movieDetailItem) {
+    const playableMovieItem = effectiveMovieDetailItem ?? movieDetailItem;
+
+    if (!playableMovieItem) {
       return;
     }
 
-    openEpisode(movieDetailItem, 0);
+    openMovie(playableMovieItem);
   }
 
   function handleSeriesHeroArrowPress(direction: string) {
@@ -3943,20 +4078,101 @@ export function CatalogCategoryPage({
       return false;
     }
 
-    if (direction === 'down' && items.length > 0) {
-      setEpisodeFocusIndex(0);
+    if (direction === 'down') {
+      if (isSeriesDetailPage) {
+        if (seriesSeasons.length > 0) {
+          const activeIndex = seriesSeasons.findIndex(
+            (s) => s.seasonNumber === activeSeasonNumber,
+          );
+          const targetIndex = activeIndex >= 0 ? activeIndex : 0;
+          const targetSeason = seriesSeasons[targetIndex];
+          setFocus(
+            getSeriesSeasonFocusKey(
+              targetSeason.seasonNumber,
+              targetIndex,
+            ),
+          );
+          return false;
+        }
 
-      if (isSeriesCategoryPage && seriesCategorySections[0]?.items.length) {
-        setFocus(getCategoryItemFocusKey(seriesCategorySections[0].id, 0));
+        if (seriesDetailItems.length > 0) {
+          setEpisodeFocusIndex(0);
+          setFocus(getCategoryItemFocusKey(category.slug, 0));
+          return false;
+        }
+
         return false;
       }
 
-      setFocus(getCategoryItemFocusKey(category.slug, 0));
-      return false;
+      if (items.length > 0) {
+        setEpisodeFocusIndex(0);
+
+        if (isSeriesCategoryPage && seriesCategorySections[0]?.items.length) {
+          setFocus(getCategoryItemFocusKey(seriesCategorySections[0].id, 0));
+          return false;
+        }
+
+        setFocus(getCategoryItemFocusKey(category.slug, 0));
+        return false;
+      }
     }
 
     if (direction === 'left') {
       setFocus(FOCUS_KEYS.SIDEBAR_HOME);
+      return false;
+    }
+
+    return false;
+  }
+
+  function handleSeasonArrowPress(direction: string, seasonIndex: number) {
+    const targetSeason = seriesSeasons[seasonIndex];
+
+    if (direction === 'left') {
+      if (seasonIndex > 0) {
+        const prevSeason = seriesSeasons[seasonIndex - 1];
+        setFocus(
+          getSeriesSeasonFocusKey(prevSeason.seasonNumber, seasonIndex - 1),
+        );
+        return false;
+      }
+      return false;
+    }
+
+    if (direction === 'right') {
+      if (seasonIndex < seriesSeasons.length - 1) {
+        const nextSeason = seriesSeasons[seasonIndex + 1];
+        setFocus(
+          getSeriesSeasonFocusKey(nextSeason.seasonNumber, seasonIndex + 1),
+        );
+        return false;
+      }
+      return false;
+    }
+
+    if (direction === 'up') {
+      setFocus(SERIES_DETAIL_HERO_FOCUS_KEY);
+      return false;
+    }
+
+    if (direction === 'down') {
+      if (!targetSeason || targetSeason.episodes.length === 0) {
+        return false;
+      }
+
+      const firstEp = targetSeason.episodes[0];
+      if (targetSeason.seasonNumber === activeSeasonNumber) {
+        setEpisodeFocusIndex(firstEp.absoluteIndex);
+        setFocus(
+          getCategoryItemFocusKey(
+            category?.slug ?? 'category',
+            firstEp.absoluteIndex,
+          ),
+        );
+      } else {
+        pendingEpisodeFocusRef.current = firstEp.absoluteIndex;
+        selectSeriesSeason(targetSeason.seasonNumber);
+      }
       return false;
     }
 
@@ -4387,16 +4603,38 @@ export function CatalogCategoryPage({
         return false;
       }
 
+      const episodeIndexInSeason = currentSeasonEpisodes.findIndex(
+        (e) => e.absoluteIndex === index,
+      );
+
       if (direction === 'up') {
-        if (index === 0) {
-          setEpisodeFocusIndex(0);
+        if (episodeIndexInSeason <= 0) {
+          if (seriesSeasons.length > 0) {
+            const activeIndex = seriesSeasons.findIndex(
+              (s) => s.seasonNumber === activeSeasonNumber,
+            );
+            const targetIndex = activeIndex >= 0 ? activeIndex : 0;
+            const targetSeason = seriesSeasons[targetIndex];
+            setFocus(
+              getSeriesSeasonFocusKey(
+                targetSeason.seasonNumber,
+                targetIndex,
+              ),
+            );
+            return false;
+          }
+
           setFocus(SERIES_DETAIL_HERO_FOCUS_KEY);
           return false;
         }
 
-        const previousIndex = index - 1;
-        setEpisodeFocusIndex(previousIndex);
-        setFocus(getCategoryItemFocusKey(category.slug, previousIndex));
+        const previousEp = currentSeasonEpisodes[episodeIndexInSeason - 1];
+        if (previousEp) {
+          setEpisodeFocusIndex(previousEp.absoluteIndex);
+          setFocus(
+            getCategoryItemFocusKey(category.slug, previousEp.absoluteIndex),
+          );
+        }
         return false;
       }
 
@@ -4406,14 +4644,20 @@ export function CatalogCategoryPage({
       }
 
       if (direction === 'down') {
-        const nextIndex = index + 1;
-
-        if (nextIndex >= seriesDetailItems.length) {
+        if (
+          episodeIndexInSeason >= 0 &&
+          episodeIndexInSeason < currentSeasonEpisodes.length - 1
+        ) {
+          const nextEp = currentSeasonEpisodes[episodeIndexInSeason + 1];
+          if (nextEp) {
+            setEpisodeFocusIndex(nextEp.absoluteIndex);
+            setFocus(
+              getCategoryItemFocusKey(category.slug, nextEp.absoluteIndex),
+            );
+          }
           return false;
         }
 
-        setEpisodeFocusIndex(nextIndex);
-        setFocus(getCategoryItemFocusKey(category.slug, nextIndex));
         return false;
       }
 
@@ -4626,6 +4870,23 @@ export function CatalogCategoryPage({
 
             </div>
           </SeriesDetailHeroFrame>
+        ) : isMovieDetailPage ? (
+          <section
+            data-xf-movie-detail-state="unavailable"
+            className="rounded-[0.65rem] border border-amber-400/30 bg-amber-500/10 px-6 py-10 text-center"
+          >
+            <p className="text-sm font-semibold text-amber-100">
+              Este filme não está mais disponível nesta fonte.
+            </p>
+            <FocusableButton
+              focusKey="movie-detail-back"
+              onClick={() => navigate(-1)}
+              onEnterPress={() => navigate(-1)}
+              className="mt-5 rounded-[0.18rem] bg-white px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-black"
+            >
+              Voltar
+            </FocusableButton>
+          </section>
         ) : isSeriesDetailPage && effectiveSeriesDetailHero ? (
           <SeriesDetailHeroFrame
             disabled={seriesDetailItems.length === 0}
@@ -4723,7 +4984,7 @@ export function CatalogCategoryPage({
                 isLoading={isLoading}
                 totalItems={items.length}
                 heroTotal={movieHeroPresentationItems.length}
-                onPlayItem={openEpisode}
+                onPlayItem={openMovie}
                 onInfoItem={(item) => openMovieDetail(item)}
                 onButtonArrowPress={handleMoviesCategoryHeroButtonArrowPress}
               />
@@ -4765,7 +5026,7 @@ export function CatalogCategoryPage({
           </>
         )}
 
-        {isMovieDetailPage ? (
+        {isMovieDetailPage && effectiveMovieDetailItem ? (
           <section className="space-y-4 pb-12">
             <div className="flex items-end justify-between gap-3">
               <h2 className="text-lg font-black tracking-[-0.03em] text-white">
@@ -4811,7 +5072,7 @@ export function CatalogCategoryPage({
               </section>
             )}
           </section>
-        ) : isSeriesDetailPreparing ? (
+        ) : isMovieDetailPage ? null : isSeriesDetailPreparing ? (
           <section className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center">
             <p className="text-sm font-semibold text-zinc-300">
               Preparando episódios...
@@ -4832,7 +5093,7 @@ export function CatalogCategoryPage({
               Tentar novamente
             </FocusableButton>
           </section>
-        ) : isLoading && visibleItems.length === 0 ? (
+        ) : (isLoading || isSeriesDetailPreparing || playlistStatus === 'loading' || playlistStatus === 'idle') && visibleItems.length === 0 && !errorMessage ? (
           <section
             data-xf-category-state="loading"
             className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center"
@@ -4841,7 +5102,7 @@ export function CatalogCategoryPage({
               Carregando categoria...
             </p>
           </section>
-        ) : visibleItems.length === 0 ? (
+        ) : visibleItems.length === 0 && !errorMessage && !isSeriesDetailPreparing ? (
           <section
             data-xf-category-state="empty"
             className="rounded-[0.18rem] border border-white/10 bg-black/40 px-6 py-10 text-center"
@@ -4852,78 +5113,103 @@ export function CatalogCategoryPage({
           </section>
         ) : (
           isSeriesDetailPage ? (
-            <section className="flex w-full flex-nowrap items-start gap-4 pb-12">
-              <div className="min-w-0">
-                <div className="mb-4 flex items-end justify-between gap-3">
+            <section className="flex w-full flex-col items-stretch gap-4 pb-12 md:flex-row md:flex-nowrap md:items-start">
+              <div className="w-full min-w-0 md:flex-1">
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                   <h2 className="text-lg font-black tracking-[-0.03em] text-white">
-                    Episodios
+                    {activeSeason?.label ?? 'Episódios'}
                     <span className="ml-2 text-sm font-bold text-zinc-400">
-                      {seriesDetailItems.length}
+                      {currentSeasonEpisodes.length}
                     </span>
                   </h2>
 
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                    {seriesDetailItems.length > 0
-                      ? `${episodeWindowStart + 1}-${Math.min(
-                          episodeWindowStart + EPISODE_WINDOW_SIZE,
-                          seriesDetailItems.length,
-                        )} de ${seriesDetailItems.length}`
+                    {currentSeasonEpisodes.length > 0
+                      ? `1-${currentSeasonEpisodes.length} de ${currentSeasonEpisodes.length}`
                       : '0 de 0'}
                   </p>
                 </div>
 
-                <div className="h-[58vh] overflow-hidden rounded-[0.75rem] border border-white/5 bg-black/10 p-2">
-                  <div className="space-y-2">
-                    {episodeWindowItems.map((item, windowIndex) => {
-                      const absoluteIndex = episodeWindowStart + windowIndex;
-                      const seasonNumber = getSeriesDetailSeasonNumber(item);
-                      const previousSeasonNumber = getSeriesDetailSeasonNumber(
-                        seriesDetailItems[absoluteIndex - 1],
+                {seriesSeasons.length > 0 ? (
+                  <div className="mb-4 flex w-full gap-2 overflow-x-auto pb-1.5 pt-0.5 scrollbar-none">
+                    {seriesSeasons.map((season, seasonIndex) => {
+                      const isSelected =
+                        season.seasonNumber === activeSeasonNumber;
+                      const seasonFocusKey = getSeriesSeasonFocusKey(
+                        season.seasonNumber,
+                        seasonIndex,
                       );
-                      const showSeasonHeading =
-                        windowIndex === 0 ||
-                        seasonNumber !== previousSeasonNumber;
-
                       return (
-                        <div key={item.id}>
-                          {showSeasonHeading ? (
-                            <p className="mb-2 mt-3 px-2 text-xs font-black uppercase tracking-[0.16em] text-zinc-400 first:mt-0">
-                              {seasonNumber === null
-                                ? 'Outros episódios'
-                                : `Temporada ${seasonNumber}`}
-                            </p>
-                          ) : null}
-                          <EpisodeListRow
-                            index={absoluteIndex}
-                            title={resolveEpisodeTitle(item, absoluteIndex)}
-                            playbackStatus={resolveEpisodePlaybackStatus(
-                              item,
-                              absoluteIndex,
-                            )}
-                            progressPercent={resolveEpisodePlaybackProgressPercent(
-                              item,
-                              absoluteIndex,
-                            )}
-                            focusKey={getCategoryItemFocusKey(
-                              category?.slug ?? 'category',
-                              absoluteIndex,
-                            )}
-                            onEnterPress={() => openCategoryItem(item, absoluteIndex)}
-                            onArrowPress={(direction: string) =>
-                              handleCategoryCardArrowPress(
-                                direction,
-                                absoluteIndex,
-                              )
-                            }
-                          />
-                        </div>
+                        <FocusableButton
+                          key={`season-selector-${season.seasonNumber ?? 'null'}-${seasonIndex}`}
+                          focusKey={seasonFocusKey}
+                          onClick={() => selectSeriesSeason(season.seasonNumber)}
+                          onEnterPress={() => selectSeriesSeason(season.seasonNumber)}
+                          onArrowPress={(direction) =>
+                            handleSeasonArrowPress(direction, seasonIndex)
+                          }
+                          className={
+                            'shrink-0 rounded-full border px-4 py-1.5 text-xs font-black transition cursor-pointer ' +
+                            (isSelected
+                              ? 'border-xf-red bg-xf-red text-white shadow-[0_0_12px_rgba(229,9,20,0.4)]'
+                              : 'border-white/15 bg-black/40 text-zinc-300 hover:border-white/30 hover:bg-white/10') +
+                            ' data-[focused=true]:border-white data-[focused=true]:bg-white data-[focused=true]:text-black data-[focused=true]:shadow-[0_0_12px_rgba(255,255,255,0.4)]'
+                          }
+                        >
+                          {season.label}
+                        </FocusableButton>
                       );
                     })}
+                  </div>
+                ) : null}
+
+                <div className="h-[58vh] overflow-y-auto overflow-x-hidden overscroll-contain rounded-[0.75rem] border border-white/5 bg-black/10 p-2">
+                  <div className="space-y-2">
+                    {currentSeasonEpisodes.map(
+                      ({ item, absoluteIndex }, seasonEpisodeIndex) => {
+                        const epNum = (item as SeriesDetailEpisode)
+                          ?.episodeNumber;
+                        const displayIndex =
+                          typeof epNum === 'number' && epNum > 0
+                            ? epNum - 1
+                            : seasonEpisodeIndex;
+
+                        return (
+                          <div key={item.id}>
+                            <EpisodeListRow
+                              index={displayIndex}
+                              title={resolveEpisodeTitle(item, absoluteIndex)}
+                              playbackStatus={resolveEpisodePlaybackStatus(
+                                item,
+                                absoluteIndex,
+                              )}
+                              progressPercent={resolveEpisodePlaybackProgressPercent(
+                                item,
+                                absoluteIndex,
+                              )}
+                              focusKey={getCategoryItemFocusKey(
+                                category?.slug ?? 'category',
+                                absoluteIndex,
+                              )}
+                              onEnterPress={() =>
+                                openEpisode(item, absoluteIndex)
+                              }
+                              onArrowPress={(direction: string) =>
+                                handleCategoryCardArrowPress(
+                                  direction,
+                                  absoluteIndex,
+                                )
+                              }
+                            />
+                          </div>
+                        );
+                      },
+                    )}
                   </div>
                 </div>
               </div>
 
-              <aside className="w-[24rem] shrink-0 self-start">
+              <aside className="w-full shrink-0 self-start md:w-[24rem]">
                 <h2 className="mb-4 text-lg font-black tracking-[-0.03em] text-white">
                   Semelhantes
                 </h2>
@@ -5100,7 +5386,7 @@ export function CatalogCategoryPage({
             </section>
 
           ) : (
-            <section className="grid grid-cols-5 gap-[0.25rem] pb-12">
+            <section className="grid grid-cols-2 gap-3 pb-12 md:grid-cols-5 md:gap-[0.25rem] [&>.media-card]:min-w-0 [&>.media-card]:w-full [&>.media-card]:max-w-full">
               {visibleItems.map((item, index) => (
                 <MediaCard
                   key={item.id}
@@ -5129,14 +5415,14 @@ export function CatalogCategoryPage({
               {isMovieSeeAllPage ? (
                 <div
                   ref={categorySentinelRef}
-                  className="col-span-5 h-px w-full"
+                  className="col-span-2 h-px w-full md:col-span-5"
                   aria-hidden="true"
                   data-xf-category-has-more={hasMoreCategoryItems}
                   data-xf-category-loading-next={isLoadingNextPage}
                 />
               ) : null}
               {isMovieSeeAllPage && isLoadingNextPage ? (
-                <p className="col-span-5 py-3 text-center text-xs font-bold text-zinc-500">
+                <p className="col-span-2 py-3 text-center text-xs font-bold text-zinc-500 md:col-span-5">
                   Carregando mais titulos...
                 </p>
               ) : null}

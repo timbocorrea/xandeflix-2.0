@@ -420,6 +420,8 @@ export function CatalogPage() {
   const [homeCatalogErrorMessage, setHomeCatalogErrorMessage] = useState<
     string | null
   >(null);
+  const [hasInitialHomeVodReadCompleted, setHasInitialHomeVodReadCompleted] =
+    useState(() => Boolean(initialHomeCatalogState.wasHydratedFromCache));
   const [homeCatalogRetryKey, setHomeCatalogRetryKey] = useState(0);
   const realCatalogSectionsRef = useRef(realCatalogSections);
   realCatalogSectionsRef.current = realCatalogSections;
@@ -659,7 +661,7 @@ export function CatalogPage() {
     async function loadRealCatalog() {
       const hasUsableCatalog = Boolean(realCatalogSectionsRef.current?.length);
 
-      if (!hasUsableCatalog) {
+      if (!hasUsableCatalog && !hasInitialHomeVodReadCompleted) {
         setHomeCatalogStatus('loading');
         setHomeCatalogErrorMessage(null);
       }
@@ -752,6 +754,8 @@ export function CatalogPage() {
 
         const nextSections =
           mapHomeVodSectionsToCatalogSections(overlaySections);
+
+        setHasInitialHomeVodReadCompleted(true);
 
         if (nextSections.length > 0) {
           commitCatalogSections(nextSections);

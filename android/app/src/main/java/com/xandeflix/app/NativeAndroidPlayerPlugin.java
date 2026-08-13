@@ -66,7 +66,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                         + " hasStreamUrl="
                         + hasText(lastStreamUrl)
         );
-        notifyListeners("resume", event, true);
+        notifyListeners("resume", event, false);
     }
 
     @PluginMethod
@@ -74,7 +74,16 @@ public class NativeAndroidPlayerPlugin extends Plugin {
         String url = call.getString("url");
         String title = call.getString("title", "Xandeflix Player");
         String kind = sanitizeStreamKind(call.getString("kind", "unknown"));
-        Long startPositionMs = call.getLong("startPositionMs", 0L);
+        Object rawStartPositionMs = call.getData().opt("startPositionMs");
+        long startPositionMs = rawStartPositionMs instanceof Number
+                ? Math.max(0L, ((Number) rawStartPositionMs).longValue())
+                : 0L;
+        String continuityPolicy = sanitizeContinuityPolicy(
+                call.getString(
+                        "continuityPolicy",
+                        NativePlayerActivity.CONTINUITY_POLICY_LEGACY
+                )
+        );
 
         if (url == null || url.trim().isEmpty()) {
             call.reject("URL do stream não informada.");
@@ -90,14 +99,17 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                         + " hasStreamUrl=true streamKind="
                         + kind
                         + " positionMs="
-                        + Math.max(0L, startPositionMs)
+                        + startPositionMs
+                        + " movieCanonicalPositionOnly="
+                        + NativePlayerActivity.CONTINUITY_POLICY_MOVIE_CANONICAL_POSITION_ONLY.equals(continuityPolicy)
         );
 
         Intent intent = new Intent(getContext(), NativePlayerActivity.class);
         intent.putExtra(NativePlayerActivity.EXTRA_STREAM_URL, trimmedUrl);
         intent.putExtra(NativePlayerActivity.EXTRA_STREAM_TITLE, title);
         intent.putExtra(NativePlayerActivity.EXTRA_STREAM_KIND, kind);
-        intent.putExtra(NativePlayerActivity.EXTRA_START_POSITION_MS, Math.max(0L, startPositionMs));
+        intent.putExtra(NativePlayerActivity.EXTRA_START_POSITION_MS, startPositionMs);
+        intent.putExtra(NativePlayerActivity.EXTRA_CONTINUITY_POLICY, continuityPolicy);
 
         getActivity().startActivity(intent);
 
@@ -163,7 +175,7 @@ public class NativeAndroidPlayerPlugin extends Plugin {
                 inlinePreviewView.setBackgroundColor(Color.BLACK);
                 inlinePreviewView.setShutterBackgroundColor(Color.BLACK);
                 inlinePreviewView.setKeepScreenOn(true);
-                inlinePreviewView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FILL);
+                inlinePreviewView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
                 inlinePreviewView.setFocusable(false);
                 inlinePreviewView.setFocusableInTouchMode(false);
 
@@ -479,6 +491,18 @@ public class NativeAndroidPlayerPlugin extends Plugin {
         }
 
         return kind.trim();
+    }
+
+    private String sanitizeContinuityPolicy(String continuityPolicy) {
+        if (
+                NativePlayerActivity.CONTINUITY_POLICY_MOVIE_CANONICAL_POSITION_ONLY.equals(
+                        continuityPolicy
+                )
+        ) {
+            return NativePlayerActivity.CONTINUITY_POLICY_MOVIE_CANONICAL_POSITION_ONLY;
+        }
+
+        return NativePlayerActivity.CONTINUITY_POLICY_LEGACY;
     }
 
     private String getPlaybackErrorName(PlaybackException error) {

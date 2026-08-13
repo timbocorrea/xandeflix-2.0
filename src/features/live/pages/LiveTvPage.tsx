@@ -35,6 +35,12 @@ import {
 import { usePlaylistRuntime } from "@/features/playlists/providers/PlaylistRuntimeProvider";
 import { localCatalogRepository } from "@/features/localCatalog/repositories/localCatalogRepository.service";
 import { loadReadableLocalLiveChannels } from "@/features/live/services/localLiveCatalog.service";
+import {
+  buildLiveContinuityStorageKey,
+  saveLiveLastChannel,
+  resolveLiveContinuity,
+  type LiveContinuityScope,
+} from "@/features/live/services/liveContinuity.service";
 import type { IptvChannel } from "@/features/playlists/types/playlist";
 import type {
   PlayerTelemetryEvent,
@@ -155,8 +161,11 @@ export default function LiveTvPage() {
   const [selectedGroupName, setSelectedGroupName] = useState<string | null>(
     null,
   );
-  const [, setSourceLoadError] = useState<string | null>(null);
+  const [sourceLoadError, setSourceLoadError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
   const hasRequestedSourceRef = useRef(false);
+  const continuityScopeRef = useRef<LiveContinuityScope | null>(null);
+  const restoredContinuityContextRef = useRef<string | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const previewAdapterRef = useRef<UniversalPlayerAdapter | null>(null);
@@ -214,179 +223,6 @@ export default function LiveTvPage() {
     };
   }, [navigate]);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    if (
-      hasRequestedSourceRef.current ||
-      status === "loading"
-    ) {
-      return () => {
-        isMounted = false;
-      };
-    }
-
-    hasRequestedSourceRef.current = true;
-    setSourceLoadError(null);
-
-    void (async () => {
-      try {
-        const deviceIdentifier = getOrCreateDeviceIdentifier();
-        const storedActivation = getStoredLicenseActivation();
-
-        const authorizedSource = await getAuthorizedIptvSource({
-          deviceIdentifier,
-          licenseCode: storedActivation?.licenseCode,
-        });
-
-        const playlistSource =
-          mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
-        const authorizationContext =
-          mapAuthorizedIptvSourceToRuntimeAuthorizationContext(
-            authorizedSource,
-          );
-        const sourceId = playlistSource.sourceId?.trim();
-
-        if (playlistSource.sourceType === "m3u" && sourceId) {
-          try {
-            const localLiveChannels =
-              await loadReadableLocalLiveChannels(
-                sourceId,
-                localCatalogRepository,
-              );
-
-            if (localLiveChannels !== null) {
-              loadFromChannels({
-                source: playlistSource,
-                channels: localLiveChannels,
-                authorizationContext,
-              });
-
-              return;
-            }
-          } catch {
-            // Falha local não bloqueia o fallback direto autorizado.
-          }
-        }
-
-        await loadFromSource(
-          playlistSource,
-          authorizationContext,
-        );
-      } catch (loadError) {
-        if (isMounted) {
-          setSourceLoadError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Não foi possível carregar os canais ao vivo.",
-          );
-        }
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [channels.length, loadFromChannels, loadFromSource, status]);
-
-  const liveTvChannels = useMemo(
-    () => channels.filter(isLiveTvPageChannel),
-    [channels],
-  );
-
-  const groups = useMemo<ChannelGroup[]>(() => {
-    const groupMap = new Map<string, number>();
-
-    for (const channel of liveTvChannels) {
-      const groupName = getChannelGroupName(channel);
-      groupMap.set(groupName, (groupMap.get(groupName) ?? 0) + 1);
-    }
-
-    return Array.from(groupMap.entries()).map(([name, count]) => ({
-      name,
-      count,
-    }));
-  }, [liveTvChannels]);
-
-  const activeGroupName =
-    selectedGroupName && groups.some((group) => group.name === selectedGroupName)
-      ? selectedGroupName
-      : groups[0]?.name ?? null;
-
-  const activeGroupIndex = activeGroupName
-    ? groups.findIndex((group) => group.name === activeGroupName)
-    : -1;
-
-
-  const activeGroupChannels = useMemo(() => {
-    if (!activeGroupName) {
-      return [];
-    }
-
-    return liveTvChannels
-      .filter((channel) => getChannelGroupName(channel) === activeGroupName)
-      .slice(0, MAX_VISIBLE_CHANNELS_PER_GROUP);
-  }, [activeGroupName, liveTvChannels]);
-
-  const handleSelectGroup = useCallback((groupName: string) => {
-    setSelectedGroupName(groupName);
-  }, []);
-
-  const handleGroupArrowPress = useCallback(
-    (direction: string, groupIndex: number) => {
-      if (direction === "right" && activeGroupChannels.length > 0) {
-        setFocus("live-channel-0");
-        return false;
-      }
-
-      if (direction !== "up" && direction !== "down") {
-        return true;
-      }
-
-      const now = Date.now();
-
-      if (now - lastLiveTvGroupVerticalNavigationAt < 320) {
-        return false;
-      }
-
-      const nextGroupIndex =
-        direction === "down" ? groupIndex + 1 : groupIndex - 1;
-
-      if (nextGroupIndex < 0 || nextGroupIndex >= groups.length) {
-        return false;
-      }
-
-      lastLiveTvGroupVerticalNavigationAt = now;
-      setFocus(`live-group-${nextGroupIndex}`);
-
-      return false;
-    },
-    [activeGroupChannels.length, groups.length],
-  );
-
-  const handleChannelArrowPress = useCallback(
-    (direction: string, channelIndex: number) => {
-      if (direction === "up" && channelIndex === 0) {
-        return false;
-      }
-
-      if (
-        direction === "down" &&
-        channelIndex === activeGroupChannels.length - 1
-      ) {
-        return false;
-      }
-
-      if (direction !== "left" || activeGroupIndex < 0) {
-        return true;
-      }
-
-      setFocus(`live-group-${activeGroupIndex}`);
-      return false;
-    },
-    [activeGroupChannels.length, activeGroupIndex],
-  );
-
   const destroyPreviewAdapter = useCallback(() => {
     nativeInlinePreviewActiveRef.current = false;
     nativeInlinePreviewLayoutKeyRef.current = null;
@@ -423,6 +259,9 @@ export default function LiveTvPage() {
   const openChannelFullscreen = useCallback(
     async (channel: IptvChannel) => {
       selectChannel(channel);
+      if (continuityScopeRef.current && channel.id) {
+        saveLiveLastChannel(continuityScopeRef.current, channel.id);
+      }
 
       const stream = detectStreamKind(channel.url);
 
@@ -483,6 +322,9 @@ export default function LiveTvPage() {
 
       selectChannel(channel);
       setPreviewChannel(channel);
+      if (continuityScopeRef.current && channel.id) {
+        saveLiveLastChannel(continuityScopeRef.current, channel.id);
+      }
       setPreviewStatus("loading");
       setPreviewError(null);
 
@@ -614,6 +456,282 @@ export default function LiveTvPage() {
       }
     },
     [destroyPreviewAdapter, handlePreviewTelemetryEvent, selectChannel],
+  );
+
+  const restorePreviewFromCatalog = useCallback(
+    (scope: LiveContinuityScope | null, catalogChannels: IptvChannel[]) => {
+      continuityScopeRef.current = scope;
+
+      const liveChannels = catalogChannels.filter(isLiveTvPageChannel);
+
+      if (liveChannels.length === 0) {
+        return;
+      }
+
+      const restoreContextKey = scope
+        ? buildLiveContinuityStorageKey(scope)
+        : null;
+
+      if (
+        restoreContextKey &&
+        restoredContinuityContextRef.current === restoreContextKey
+      ) {
+        return;
+      }
+
+      const restoredChannel = scope
+        ? resolveLiveContinuity(scope, liveChannels).channel
+        : liveChannels[0] ?? null;
+
+      restoredContinuityContextRef.current = restoreContextKey;
+
+      if (restoredChannel) {
+        void startChannelPreview(restoredChannel);
+      }
+    },
+    [startChannelPreview],
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (hasRequestedSourceRef.current) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    hasRequestedSourceRef.current = true;
+    setSourceLoadError(null);
+    continuityScopeRef.current = null;
+    restoredContinuityContextRef.current = null;
+
+    void (async () => {
+      try {
+        const deviceIdentifier = getOrCreateDeviceIdentifier();
+        const storedActivation = getStoredLicenseActivation();
+
+        const authorizedSource = await getAuthorizedIptvSource({
+          deviceIdentifier,
+          licenseCode: storedActivation?.licenseCode,
+        });
+
+        const playlistSource =
+          mapAuthorizedIptvSourceToPlaylistSource(authorizedSource);
+        const authorizationContext =
+          mapAuthorizedIptvSourceToRuntimeAuthorizationContext(
+            authorizedSource,
+          );
+        const sourceId = playlistSource.sourceId?.trim();
+        const internalLicenseId =
+          authorizationContext?.internalLicenseId.trim() ?? "";
+        const nextContinuityScope: LiveContinuityScope | null =
+          internalLicenseId && sourceId && deviceIdentifier
+            ? {
+                internalLicenseId,
+                sourceId,
+                deviceIdentifier,
+              }
+            : null;
+
+        if (playlistSource.sourceType === "m3u" && sourceId) {
+          try {
+            const localLiveChannels =
+              await loadReadableLocalLiveChannels(
+                sourceId,
+                localCatalogRepository,
+              );
+
+            if (!isMounted) {
+              return;
+            }
+
+            if (localLiveChannels !== null) {
+              loadFromChannels({
+                source: playlistSource,
+                channels: localLiveChannels,
+                authorizationContext,
+              });
+
+              restorePreviewFromCatalog(
+                nextContinuityScope,
+                localLiveChannels,
+              );
+
+              return;
+            }
+          } catch {
+            // Falha local não bloqueia o fallback direto autorizado.
+          }
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        await loadFromSource(
+          playlistSource,
+          authorizationContext,
+        );
+
+        if (playlistSource.sourceType === "m3u" && sourceId) {
+          try {
+            const importedLocalLiveChannels =
+              await loadReadableLocalLiveChannels(
+                sourceId,
+                localCatalogRepository,
+              );
+
+            if (!isMounted) {
+              return;
+            }
+
+            if (importedLocalLiveChannels !== null) {
+              loadFromChannels({
+                source: playlistSource,
+                channels: importedLocalLiveChannels,
+                authorizationContext,
+              });
+
+              restorePreviewFromCatalog(
+                nextContinuityScope,
+                importedLocalLiveChannels,
+              );
+
+              return;
+            }
+          } catch {
+            // O fallback direto continua disponível, sem persistir ID ordinal.
+          }
+        }
+
+        if (isMounted) {
+          continuityScopeRef.current = null;
+        }
+      } catch (loadError) {
+        if (isMounted) {
+          setSourceLoadError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Não foi possível carregar os canais ao vivo.",
+          );
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadFromChannels, loadFromSource, restorePreviewFromCatalog, retryTick]);
+
+  const liveTvChannels = useMemo(
+    () => channels.filter(isLiveTvPageChannel),
+    [channels],
+  );
+
+  const groups = useMemo<ChannelGroup[]>(() => {
+    const groupMap = new Map<string, number>();
+
+    for (const channel of liveTvChannels) {
+      const groupName = getChannelGroupName(channel);
+      groupMap.set(groupName, (groupMap.get(groupName) ?? 0) + 1);
+    }
+
+    return Array.from(groupMap.entries()).map(([name, count]) => ({
+      name,
+      count,
+    }));
+  }, [liveTvChannels]);
+
+  const currentPreviewChannel = previewChannel ?? selectedChannel;
+
+  const activeGroupName = useMemo(() => {
+    if (selectedGroupName && groups.some((group) => group.name === selectedGroupName)) {
+      return selectedGroupName;
+    }
+
+    if (currentPreviewChannel) {
+      const previewGroup = getChannelGroupName(currentPreviewChannel);
+      if (groups.some((group) => group.name === previewGroup)) {
+        return previewGroup;
+      }
+    }
+
+    return groups[0]?.name ?? null;
+  }, [currentPreviewChannel, groups, selectedGroupName]);
+
+  const activeGroupIndex = activeGroupName
+    ? groups.findIndex((group) => group.name === activeGroupName)
+    : -1;
+
+
+  const activeGroupChannels = useMemo(() => {
+    if (!activeGroupName) {
+      return [];
+    }
+
+    return liveTvChannels
+      .filter((channel) => getChannelGroupName(channel) === activeGroupName)
+      .slice(0, MAX_VISIBLE_CHANNELS_PER_GROUP);
+  }, [activeGroupName, liveTvChannels]);
+
+  const handleSelectGroup = useCallback((groupName: string) => {
+    setSelectedGroupName(groupName);
+  }, []);
+
+  const handleGroupArrowPress = useCallback(
+    (direction: string, groupIndex: number) => {
+      if (direction === "right" && activeGroupChannels.length > 0) {
+        setFocus("live-channel-0");
+        return false;
+      }
+
+      if (direction !== "up" && direction !== "down") {
+        return true;
+      }
+
+      const now = Date.now();
+
+      if (now - lastLiveTvGroupVerticalNavigationAt < 320) {
+        return false;
+      }
+
+      const nextGroupIndex =
+        direction === "down" ? groupIndex + 1 : groupIndex - 1;
+
+      if (nextGroupIndex < 0 || nextGroupIndex >= groups.length) {
+        return false;
+      }
+
+      lastLiveTvGroupVerticalNavigationAt = now;
+      setFocus(`live-group-${nextGroupIndex}`);
+
+      return false;
+    },
+    [activeGroupChannels.length, groups.length],
+  );
+
+  const handleChannelArrowPress = useCallback(
+    (direction: string, channelIndex: number) => {
+      if (direction === "up" && channelIndex === 0) {
+        return false;
+      }
+
+      if (
+        direction === "down" &&
+        channelIndex === activeGroupChannels.length - 1
+      ) {
+        return false;
+      }
+
+      if (direction !== "left" || activeGroupIndex < 0) {
+        return true;
+      }
+
+      setFocus(`live-group-${activeGroupIndex}`);
+      return false;
+    },
+    [activeGroupChannels.length, activeGroupIndex],
   );
 
   const syncNativeInlinePreviewLayout = useCallback(() => {
@@ -849,11 +967,31 @@ export default function LiveTvPage() {
     selectedChannel,
   ]);
 
+  const handleRetrySourceLoad = useCallback(() => {
+    setSourceLoadError(null);
+    continuityScopeRef.current = null;
+    hasRequestedSourceRef.current = false;
+    restoredContinuityContextRef.current = null;
+    setRetryTick((current) => current + 1);
+  }, []);
+
+  const liveState = useMemo<"loading" | "content" | "empty" | "error">(() => {
+    if (sourceLoadError || status === "error") {
+      return "error";
+    }
+    if (status === "loading" || status === "idle") {
+      return "loading";
+    }
+    if (liveTvChannels.length > 0) {
+      return "content";
+    }
+    return "empty";
+  }, [liveTvChannels.length, sourceLoadError, status]);
+
   const isLoading = status === "loading" && liveTvChannels.length === 0;
   const shouldShowInitialLiveTvLoading =
     isLoading ||
     (status !== "error" && groups.length === 0 && activeGroupChannels.length === 0);
-  const currentPreviewChannel = previewChannel ?? selectedChannel;
   const previewPanelDescription = !currentPreviewChannel
     ? "Selecione um canal para iniciar a prévia inline."
     : previewStatus === "loading"
@@ -863,8 +1001,6 @@ export default function LiveTvPage() {
         : previewStatus === "error"
           ? "Preview inline falhou. Pressione OK novamente no mesmo canal para tentar em tela cheia."
           : "Pressione OK no canal selecionado para iniciar a prévia.";
-
-
 
   const currentPreviewChannelKey = currentPreviewChannel
     ? getChannelKey(currentPreviewChannel)
@@ -887,7 +1023,10 @@ export default function LiveTvPage() {
       hideHeaderOnTv
       mainClassName="px-0 pt-0 pb-0 pr-0 md:px-0 md:pt-0 md:pb-0 md:pr-0 lg:px-0 lg:pt-0 lg:pb-0 lg:pr-0"
     >
-      <section className="xf-live-tv-page xf-live-tv-layout flex min-h-screen w-full max-w-[100vw] flex-col gap-y-4 overflow-x-hidden overflow-y-auto bg-black pb-24 text-white min-[560px]:grid min-[560px]:gap-x-0 min-[560px]:overflow-hidden min-[560px]:pb-0">
+      <section
+        data-xf-live-state={liveState}
+        className="xf-live-tv-page xf-live-tv-layout flex min-h-screen w-full max-w-[100vw] flex-col gap-y-4 overflow-x-hidden overflow-y-auto bg-black pb-24 text-white min-[560px]:grid min-[560px]:gap-x-0 min-[560px]:overflow-hidden min-[560px]:pb-0"
+      >
         <div className="order-2 space-y-4 px-5 pt-3 pb-4 min-[560px]:hidden">
           <label className="block">
             <span className="mb-2 block text-[0.68rem] font-black uppercase tracking-[0.28em] text-xf-red">
@@ -1171,7 +1310,23 @@ export default function LiveTvPage() {
                         </p>
                       ) : null}
                     </>
-                  ) : null}
+                  ) : (
+                    <div className="mt-5 flex flex-col items-center">
+                      <p className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-xf-muted">
+                        {sourceLoadError ?? (liveState === "empty" ? "Nenhum canal ao vivo encontrado nesta fonte." : "Selecione um canal para iniciar a prévia.")}
+                      </p>
+                      {liveState === "error" || liveState === "empty" ? (
+                        <FocusableButton
+                          focusKey="live-source-retry"
+                          className="mt-4 rounded-2xl bg-white px-5 py-2.5 text-xs font-black uppercase tracking-wider text-black hover:bg-white/90"
+                          onEnterPress={handleRetrySourceLoad}
+                          onClick={handleRetrySourceLoad}
+                        >
+                          Tentar novamente
+                        </FocusableButton>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}
