@@ -8,6 +8,12 @@ import { LOCAL_CATALOG_CLASSIFICATION_VERSION } from '@/features/localCatalog/se
 import { recordCatalogMetrics } from './catalogMetrics.service';
 import type { NetworkMode } from '@/features/network/services/networkMode.service';
 import type { CatalogBootMode } from './catalogRefreshPolicy.service';
+import {
+  endDiscoveryPerformanceSpan,
+  incrementDiscoveryPerformanceCounter,
+  markDiscoveryPerformance,
+  startDiscoveryPerformanceSpan,
+} from './discoveryPerformance.service';
 
 export type CatalogBackgroundRefreshInput = {
   playlistSource: PlaylistSource;
@@ -69,6 +75,15 @@ export async function runCatalogBackgroundRefresh({
   if (inFlightBackgroundRefreshMap.has(sourceId)) {
     return await inFlightBackgroundRefreshMap.get(sourceId)!;
   }
+
+  markDiscoveryPerformance(
+    'catalog_background_refresh_start',
+    { once: false },
+  );
+  startDiscoveryPerformanceSpan('catalog_background_refresh');
+  incrementDiscoveryPerformanceCounter(
+    'catalog_background_refresh_count',
+  );
 
   const refreshPromise = (async (): Promise<CatalogBackgroundRefreshResult> => {
     const startTime = Date.now();
@@ -191,6 +206,11 @@ export async function runCatalogBackgroundRefresh({
       };
     } finally {
       inFlightBackgroundRefreshMap.delete(sourceId);
+      markDiscoveryPerformance(
+        'catalog_background_refresh_end',
+        { once: false },
+      );
+      endDiscoveryPerformanceSpan('catalog_background_refresh');
     }
   })();
 

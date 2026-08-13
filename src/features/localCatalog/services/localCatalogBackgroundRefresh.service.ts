@@ -16,6 +16,12 @@ import {
 import { getReadableLocalCatalogActiveSnapshot } from './localCatalogSnapshotLifecycle.service';
 import { computeLocalCatalogSnapshotContentFingerprint } from '../readModels/localCatalogActiveSnapshotReadModel.service';
 import { LOCAL_CATALOG_CLASSIFICATION_VERSION } from './localPlaylistImport.service';
+import {
+  endDiscoveryPerformanceSpan,
+  incrementDiscoveryPerformanceCounter,
+  markDiscoveryPerformance,
+  startDiscoveryPerformanceSpan,
+} from '@/features/catalog/services/discoveryPerformance.service';
 
 export const SOURCE_REFRESH_MIN_INTERVAL_MS = 15 * 60 * 1_000;
 export const SOURCE_REFRESH_STATE_VERSION = 1;
@@ -467,10 +473,25 @@ export function refreshLocalCatalogInBackground(
     return inFlight;
   }
 
+  markDiscoveryPerformance(
+    'local_catalog_background_refresh_start',
+    { once: false },
+  );
+  startDiscoveryPerformanceSpan('local_catalog_background_refresh');
+  incrementDiscoveryPerformanceCounter(
+    'local_catalog_background_refresh_count',
+  );
+
   const refreshPromise = executeRefresh(input, dependencies).finally(() => {
     if (inFlightRefreshes.get(scopeKey) === refreshPromise) {
       inFlightRefreshes.delete(scopeKey);
     }
+
+    markDiscoveryPerformance(
+      'local_catalog_background_refresh_end',
+      { once: false },
+    );
+    endDiscoveryPerformanceSpan('local_catalog_background_refresh');
   });
   inFlightRefreshes.set(scopeKey, refreshPromise);
   return refreshPromise;

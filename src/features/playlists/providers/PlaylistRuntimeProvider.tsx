@@ -27,7 +27,13 @@ import {
 } from '@/features/localCatalog/services/localCatalogBackgroundRefresh.service';
 import { clearHomeVodCache } from '@/features/catalog/services/homeVod.service';
 import { invalidateAppBootstrapHomeCatalogCache } from '@/features/bootstrap/services/appBootstrap.service';
-import { markDiscoveryPerformance } from '@/features/catalog/services/discoveryPerformance.service';
+import {
+  endDiscoveryPerformanceSpan,
+  getDiscoveryPerformanceNow,
+  incrementDiscoveryPerformanceCounter,
+  markDiscoveryPerformance,
+  startDiscoveryPerformanceSpan,
+} from '@/features/catalog/services/discoveryPerformance.service';
 import type {
   IptvChannel,
   PlaylistDiagnostics,
@@ -186,15 +192,22 @@ export function PlaylistRuntimeProvider({
 
     let localImportSession: LocalCatalogImportSession | null = null;
     let snapshotBridge: LocalCatalogRuntimeSnapshotBridge | null = null;
+    let v2FirstBatchMeasured = false;
+    let v3FirstBatchMeasured = false;
 
     if (nextSource.sourceId && nextSource.sourceType === 'm3u') {
+      markDiscoveryPerformance('v2_import_start');
+      startDiscoveryPerformanceSpan('v2_import_prepare');
+
       try {
         localImportSession = await beginLocalCatalogImport({
           sourceId: nextSource.sourceId,
           sourceType: nextSource.sourceType,
           signal: loadAbortController.signal,
         });
+        markDiscoveryPerformance('v2_import_session_ready');
       } catch (importError) {
+        incrementDiscoveryPerformanceCounter('v2_failure_count');
         console.warn('[XANDEFLIX_LOCAL_CATALOG_IMPORT_SKIPPED]', {
           errorCode:
             importError instanceof Error &&
@@ -202,6 +215,8 @@ export function PlaylistRuntimeProvider({
               ? importError.message
               : 'LOCAL_CATALOG_IMPORT_INIT_FAILED',
         });
+      } finally {
+        endDiscoveryPerformanceSpan('v2_import_prepare');
       }
     }
 
@@ -211,6 +226,9 @@ export function PlaylistRuntimeProvider({
       nextSource.sourceId?.trim() &&
       nextSource.sourceType === 'm3u'
     ) {
+      markDiscoveryPerformance('v3_snapshot_prepare_start');
+      startDiscoveryPerformanceSpan('v3_snapshot_prepare');
+
       try {
         const { prepareLocalCatalogRuntimeSnapshotBridge } = await import(
           '@/features/localCatalog/services/localCatalogRuntimeSnapshotBridge.service'
@@ -225,10 +243,17 @@ export function PlaylistRuntimeProvider({
           classificationVersion: LOCAL_CATALOG_CLASSIFICATION_VERSION,
         });
         snapshotBridgeRef.current = snapshotBridge;
+        incrementDiscoveryPerformanceCounter(
+          'snapshot_staging_created_count',
+        );
       } catch (snapshotError) {
+        incrementDiscoveryPerformanceCounter('v3_failure_count');
         console.warn('[XANDEFLIX_LOCAL_CATALOG_SIDECAR_SKIPPED]', {
           failureCode: sanitizeSnapshotSidecarFailureCode(snapshotError),
         });
+      } finally {
+        markDiscoveryPerformance('v3_snapshot_prepare_end');
+        endDiscoveryPerformanceSpan('v3_snapshot_prepare');
       }
     }
 
@@ -257,22 +282,72 @@ export function PlaylistRuntimeProvider({
           ]);
 
           if (localImportSession) {
+            const isFirstV2Batch = !v2FirstBatchMeasured;
+            const v2WriteStartedAt = getDiscoveryPerformanceNow();
+
+            if (isFirstV2Batch) {
+              v2FirstBatchMeasured = true;
+              markDiscoveryPerformance('v2_first_batch_write_start');
+              startDiscoveryPerformanceSpan('v2_first_batch_write');
+            }
+
             try {
               await localImportSession.writeBatch(channelBatch);
+              incrementDiscoveryPerformanceCounter('v2_batch_count');
+              incrementDiscoveryPerformanceCounter(
+                'v2_item_count',
+                channelBatch.length,
+              );
             } catch (importError) {
+              incrementDiscoveryPerformanceCounter('v2_failure_count');
               await localImportSession.fail(importError).catch(() => undefined);
               localImportSession = null;
+            } finally {
+              incrementDiscoveryPerformanceCounter(
+                'v2_write_await_total_ms',
+                getDiscoveryPerformanceNow() - v2WriteStartedAt,
+              );
+
+              if (isFirstV2Batch) {
+                markDiscoveryPerformance('v2_first_batch_write_end');
+                endDiscoveryPerformanceSpan('v2_first_batch_write');
+              }
             }
           }
 
           if (snapshotBridge) {
+            const isFirstV3Batch = !v3FirstBatchMeasured;
+            const v3WriteStartedAt = getDiscoveryPerformanceNow();
+
+            if (isFirstV3Batch) {
+              v3FirstBatchMeasured = true;
+              markDiscoveryPerformance('v3_first_batch_write_start');
+              startDiscoveryPerformanceSpan('v3_first_batch_write');
+            }
+
             try {
               await snapshotBridge.writeBatch(channelBatch);
+              incrementDiscoveryPerformanceCounter('v3_batch_count');
+              incrementDiscoveryPerformanceCounter(
+                'v3_item_count',
+                channelBatch.length,
+              );
             } catch (snapshotError) {
+              incrementDiscoveryPerformanceCounter('v3_failure_count');
               await snapshotBridge
                 .fail(sanitizeSnapshotSidecarFailureCode(snapshotError))
                 .catch(() => undefined);
               snapshotBridge = null;
+            } finally {
+              incrementDiscoveryPerformanceCounter(
+                'v3_write_await_total_ms',
+                getDiscoveryPerformanceNow() - v3WriteStartedAt,
+              );
+
+              if (isFirstV3Batch) {
+                markDiscoveryPerformance('v3_first_batch_write_end');
+                endDiscoveryPerformanceSpan('v3_first_batch_write');
+              }
             }
           }
         },
@@ -284,7 +359,19 @@ export function PlaylistRuntimeProvider({
         return;
       }
 
-      await localImportSession?.complete().catch(() => undefined);
+      if (localImportSession) {
+        markDiscoveryPerformance('v2_import_complete_start');
+        startDiscoveryPerformanceSpan('v2_import_complete');
+
+        try {
+          await localImportSession.complete();
+        } catch {
+          incrementDiscoveryPerformanceCounter('v2_failure_count');
+        } finally {
+          markDiscoveryPerformance('v2_import_complete_end');
+          endDiscoveryPerformanceSpan('v2_import_complete');
+        }
+      }
 
       if (
         loadRequestIdRef.current !== loadRequestId ||
@@ -296,7 +383,16 @@ export function PlaylistRuntimeProvider({
 
       if (snapshotBridge) {
         try {
-          await snapshotBridge.complete({ parsedItems: playlist.total });
+          markDiscoveryPerformance('v3_snapshot_complete_start');
+          startDiscoveryPerformanceSpan('v3_snapshot_complete');
+
+          try {
+            await snapshotBridge.complete({ parsedItems: playlist.total });
+          } finally {
+            markDiscoveryPerformance('v3_snapshot_complete_end');
+            endDiscoveryPerformanceSpan('v3_snapshot_complete');
+          }
+
           if (
             loadRequestIdRef.current !== loadRequestId ||
             loadAbortController.signal.aborted
@@ -304,15 +400,28 @@ export function PlaylistRuntimeProvider({
             await snapshotBridge.cancel().catch(() => undefined);
             return;
           }
+
           if (
             env.localCatalogSnapshotPromotionEnabled &&
             loadRequestIdRef.current === loadRequestId &&
             !loadAbortController.signal.aborted
           ) {
-            await snapshotBridge.promote();
-            setLocalCatalogGenerationId(snapshotBridge.getSnapshotId());
+            markDiscoveryPerformance('v3_snapshot_promote_start');
+            startDiscoveryPerformanceSpan('v3_snapshot_promote');
+
+            try {
+              await snapshotBridge.promote();
+              incrementDiscoveryPerformanceCounter(
+                'snapshot_promotion_count',
+              );
+              setLocalCatalogGenerationId(snapshotBridge.getSnapshotId());
+            } finally {
+              markDiscoveryPerformance('v3_snapshot_promote_end');
+              endDiscoveryPerformanceSpan('v3_snapshot_promote');
+            }
           }
         } catch (snapshotError) {
+          incrementDiscoveryPerformanceCounter('v3_failure_count');
           await snapshotBridge
             .fail(sanitizeSnapshotSidecarFailureCode(snapshotError))
             .catch(() => undefined);
@@ -526,7 +635,9 @@ export function PlaylistRuntimeProvider({
     [localCatalogScopeKey, source],
   );
 
-  refreshCallbackRef.current = refreshFromSourceInBackground;
+  useEffect(() => {
+    refreshCallbackRef.current = refreshFromSourceInBackground;
+  }, [refreshFromSourceInBackground]);
 
   useEffect(() => {
     let isMounted = true;

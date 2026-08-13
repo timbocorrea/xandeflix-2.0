@@ -9,6 +9,12 @@ import type {
   SeriesMetadataQuery,
   SeriesMetadataResolution,
 } from './seriesMetadata.types';
+import {
+  endDiscoveryPerformanceSpan,
+  incrementDiscoveryPerformanceCounter,
+  markDiscoveryPerformance,
+  startDiscoveryPerformanceSpan,
+} from './discoveryPerformance.service';
 
 export const SERIES_METADATA_MATCHED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const SERIES_METADATA_NO_MATCH_TTL_MS = 24 * 60 * 60 * 1000;
@@ -198,22 +204,75 @@ export function createSeriesMetadataResolver({
       return cached;
     }
 
-    const primaryResult = await safelyLookup(
-      primaryProvider,
-      query,
-      { signal },
+    const primaryRequestNumber =
+      incrementDiscoveryPerformanceCounter(
+        'series_primary_metadata_count',
+      );
+    const primarySpanName =
+      `series_primary_metadata:${primaryRequestNumber}`;
+
+    markDiscoveryPerformance(
+      'series_primary_metadata_start',
+      { once: false },
     );
+    startDiscoveryPerformanceSpan(primarySpanName);
+
+    let primaryResult: ProviderLookupResult;
+
+    try {
+      primaryResult = await safelyLookup(
+        primaryProvider,
+        query,
+        { signal },
+      );
+    } finally {
+      markDiscoveryPerformance(
+        'series_primary_metadata_end',
+        { once: false },
+      );
+      endDiscoveryPerformanceSpan(primarySpanName);
+    }
+
     const shouldUseFallback =
       primaryResult.status !== 'matched' ||
       !isSeriesHeroMetadataComplete(primaryResult.metadata);
-    const fallbackResult = shouldUseFallback
-      ? await safelyLookup(fallbackProvider, query, {
-          signal,
-          skipImages:
-            primaryResult.status === 'matched' &&
-            Boolean(primaryResult.metadata.backdropUrl),
-        })
-      : null;
+
+    let fallbackResult: ProviderLookupResult | null = null;
+
+    if (shouldUseFallback) {
+      const fallbackRequestNumber =
+        incrementDiscoveryPerformanceCounter(
+          'series_fallback_metadata_count',
+        );
+      const fallbackSpanName =
+        `series_fallback_metadata:${fallbackRequestNumber}`;
+
+      markDiscoveryPerformance(
+        'series_fallback_metadata_start',
+        { once: false },
+      );
+      startDiscoveryPerformanceSpan(fallbackSpanName);
+
+      try {
+        fallbackResult = await safelyLookup(
+          fallbackProvider,
+          query,
+          {
+            signal,
+            skipImages:
+              primaryResult.status === 'matched' &&
+              Boolean(primaryResult.metadata.backdropUrl),
+          },
+        );
+      } finally {
+        markDiscoveryPerformance(
+          'series_fallback_metadata_end',
+          { once: false },
+        );
+        endDiscoveryPerformanceSpan(fallbackSpanName);
+      }
+    }
+
     const resolution = createResolution(
       primaryResult,
       fallbackResult,

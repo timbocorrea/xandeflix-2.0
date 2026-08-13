@@ -34,8 +34,11 @@ import {
 } from '@/features/catalog/services/localCatalogDiscoverySnapshot.service';
 import { resolveHomeHeroArtworkUrl } from '@/features/catalog/services/heroArtworkPolicy.service';
 import {
+  endDiscoveryPerformanceSpan,
+  incrementDiscoveryPerformanceCounter,
   markDiscoveryPerformance,
   preloadCriticalHeroArtwork,
+  startDiscoveryPerformanceSpan,
 } from '@/features/catalog/services/discoveryPerformance.service';
 
 import { notifyClientRuntimeAccessRevoked } from './clientRuntimeAccessEvents.service';
@@ -560,36 +563,56 @@ function preloadImage(url: string): Promise<boolean> {
 }
 
 async function preloadImages(urls: string[]) {
+  markDiscoveryPerformance('artwork_preload_start', {
+    once: false,
+  });
+  startDiscoveryPerformanceSpan('bulk_artwork_preload');
+  incrementDiscoveryPerformanceCounter(
+    'artwork_preload_count',
+  );
+
   let preloadedImages = 0;
   let failedImages = 0;
   let cursor = 0;
 
-  async function worker() {
-    while (cursor < urls.length) {
-      const currentIndex = cursor;
-      cursor += 1;
+  try {
+    async function worker() {
+      while (cursor < urls.length) {
+        const currentIndex = cursor;
+        cursor += 1;
 
-      const didLoad = await preloadImage(urls[currentIndex]);
+        const didLoad = await preloadImage(urls[currentIndex]);
 
-      if (didLoad) {
-        preloadedImages += 1;
-      } else {
-        failedImages += 1;
+        if (didLoad) {
+          preloadedImages += 1;
+        } else {
+          failedImages += 1;
+        }
       }
     }
+
+    const workers = Array.from(
+      {
+        length: Math.min(
+          IMAGE_PRELOAD_CONCURRENCY,
+          urls.length,
+        ),
+      },
+      () => worker(),
+    );
+
+    await Promise.all(workers);
+
+    return {
+      preloadedImages,
+      failedImages,
+    };
+  } finally {
+    markDiscoveryPerformance('artwork_preload_end', {
+      once: false,
+    });
+    endDiscoveryPerformanceSpan('bulk_artwork_preload');
   }
-
-  const workers = Array.from(
-    { length: Math.min(IMAGE_PRELOAD_CONCURRENCY, urls.length) },
-    () => worker(),
-  );
-
-  await Promise.all(workers);
-
-  return {
-    preloadedImages,
-    failedImages,
-  };
 }
 
 async function loadCategoryFirstFold({
@@ -853,16 +876,27 @@ export async function runAppBootstrap({
     const seriesGroupTitles =
       getCatalogCategoryDefinition('series')?.groupTitles ?? [];
 
-    const homeSections = await loadLocalCatalogHomeVodSections({
-      sourceId: resolvedSourceId.trim(),
-      scopeKey: resolvedLocalCatalogScopeKey ?? undefined,
-      maxSections: 4,
-      itemsPerSection: 20,
-      movieGroupTitles: movieGroupTitles.slice(0, 2),
-      seriesGroupTitles: seriesGroupTitles.slice(0, 2),
-      skipTmdbMetadata: true,
-      allowLegacyFallback: false,
-    });
+    markDiscoveryPerformance('home_sections_start');
+    startDiscoveryPerformanceSpan('home_sections_load');
+
+    let homeSections: HomeVodSection[];
+
+    try {
+      homeSections = await loadLocalCatalogHomeVodSections({
+        sourceId: resolvedSourceId.trim(),
+        scopeKey: resolvedLocalCatalogScopeKey ?? undefined,
+        maxSections: 4,
+        itemsPerSection: 20,
+        movieGroupTitles: movieGroupTitles.slice(0, 2),
+        seriesGroupTitles: seriesGroupTitles.slice(0, 2),
+        skipTmdbMetadata: true,
+        allowLegacyFallback: false,
+      });
+      markDiscoveryPerformance('home_sections_ready');
+    } finally {
+      endDiscoveryPerformanceSpan('home_sections_load');
+    }
+
     markDiscoveryPerformance('local_catalog_ready');
     const criticalDiscoveryCandidates = homeSections.flatMap(
       (section) => section.items,
@@ -957,13 +991,23 @@ export async function runAppBootstrap({
     totalSteps: TOTAL_BOOTSTRAP_STEPS,
   });
 
-  const homeSections = await loadHomeVodSections({
-    licenseCode: normalizedLicenseCode,
-    deviceIdentifier: normalizedDeviceIdentifier,
-    sourceId: resolvedSourceId,
-    limitPerSection: HOME_LIMIT_PER_SECTION,
-    launchesLimit: HOME_LAUNCHES_LIMIT,
-  });
+  markDiscoveryPerformance('home_sections_start');
+  startDiscoveryPerformanceSpan('home_sections_load');
+
+  let homeSections: HomeVodSection[];
+
+  try {
+    homeSections = await loadHomeVodSections({
+      licenseCode: normalizedLicenseCode,
+      deviceIdentifier: normalizedDeviceIdentifier,
+      sourceId: resolvedSourceId,
+      limitPerSection: HOME_LIMIT_PER_SECTION,
+      launchesLimit: HOME_LAUNCHES_LIMIT,
+    });
+    markDiscoveryPerformance('home_sections_ready');
+  } finally {
+    endDiscoveryPerformanceSpan('home_sections_load');
+  }
 
   emitProgress(onProgress, {
     stepId: 'live',

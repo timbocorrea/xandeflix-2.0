@@ -3,6 +3,12 @@ import {
   getLocalCatalogMetadata,
   putLocalCatalogMetadata,
 } from '@/features/localCatalog/services/localCatalogDb.service';
+import {
+  endDiscoveryPerformanceSpan,
+  incrementDiscoveryPerformanceCounter,
+  markDiscoveryPerformance,
+  startDiscoveryPerformanceSpan,
+} from './discoveryPerformance.service';
 
 import type { HomeVodItem } from './homeVod.service';
 import {
@@ -252,6 +258,7 @@ async function fetchMovieMetadata(
     () => controller.abort(),
     TMDB_REQUEST_TIMEOUT_MS,
   );
+  let performanceSpanName: string | null = null;
 
   try {
     const identity = parseMovieSearchIdentity(item.tmdbTitle || item.title);
@@ -269,6 +276,19 @@ async function fetchMovieMetadata(
     if (identity.year) {
       searchParams.append('year', identity.year);
     }
+
+    const requestNumber =
+      incrementDiscoveryPerformanceCounter(
+        'movie_metadata_enrichment_count',
+      );
+    performanceSpanName =
+      `movie_metadata_enrichment:${requestNumber}`;
+
+    markDiscoveryPerformance(
+      'movie_metadata_enrichment_start',
+      { once: false },
+    );
+    startDiscoveryPerformanceSpan(performanceSpanName);
 
     const response = await fetchImpl(
       `${TMDB_API_BASE_URL}/search/movie?${searchParams.toString()}`,
@@ -295,6 +315,14 @@ async function fetchMovieMetadata(
   } catch {
     return { status: 'error' as const };
   } finally {
+    if (performanceSpanName) {
+      markDiscoveryPerformance(
+        'movie_metadata_enrichment_end',
+        { once: false },
+      );
+      endDiscoveryPerformanceSpan(performanceSpanName);
+    }
+
     globalThis.clearTimeout(timeoutId);
   }
 }

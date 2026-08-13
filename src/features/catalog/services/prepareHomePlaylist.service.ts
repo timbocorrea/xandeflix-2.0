@@ -16,6 +16,11 @@ import { deriveLocalCatalogScope } from '@/features/localCatalog/services/localC
 import { getNetworkStatus } from '@/features/network/services/networkMode.service';
 import { evaluateCatalogRefreshPolicy } from './catalogRefreshPolicy.service';
 import { runCatalogBackgroundRefresh } from './catalogBackgroundRefresh.service';
+import {
+  endDiscoveryPerformanceSpan,
+  markDiscoveryPerformance,
+  startDiscoveryPerformanceSpan,
+} from './discoveryPerformance.service';
 
 export type PrepareHomePlaylistInput = {
   licenseCode: string;
@@ -124,19 +129,31 @@ export async function prepareHomePlaylist({
     );
   }
 
-  let authorizedSource = null;
+  markDiscoveryPerformance('license_validation_start');
+  markDiscoveryPerformance('source_resolution_start');
+  startDiscoveryPerformanceSpan('license_validation');
+  startDiscoveryPerformanceSpan('source_resolution');
+
+  let authorizedSource: Awaited<
+    ReturnType<typeof getAuthorizedIptvSource>
+  >;
   try {
     authorizedSource = await dependencies.getAuthorizedSource({
       deviceIdentifier,
       licenseCode,
     });
+    endDiscoveryPerformanceSpan('license_validation');
+    endDiscoveryPerformanceSpan('source_resolution');
   } catch (error) {
+    endDiscoveryPerformanceSpan('license_validation');
+    endDiscoveryPerformanceSpan('source_resolution');
     const fallbackSourceId = readableOfflineSourceId || 'source-default';
     const fallbackMetadata = await dependencies.repository
       .getImportMetadata(fallbackSourceId)
       .catch(() => null);
 
     if (isLocalCatalogReadable(fallbackMetadata)) {
+      markDiscoveryPerformance('source_resolved');
       return createOfflinePreparedHomePlaylist(
         fallbackSourceId,
         loadFromChannels,
@@ -154,6 +171,7 @@ export async function prepareHomePlaylist({
     playlistSource,
     authorizationContext,
   );
+  markDiscoveryPerformance('source_resolved');
   const sourceId = playlistSource.sourceId?.trim();
   const isCurrentAuthorizedSource =
     Boolean(currentSourceId) && currentSourceId === sourceId;
@@ -204,6 +222,7 @@ export async function prepareHomePlaylist({
     metadata,
     networkStatus: currentNetworkStatus,
   });
+  markDiscoveryPerformance('refresh_policy_decision', { once: false });
 
   if (isLocalCatalogReadable(metadata)) {
     loadFromChannels({
@@ -230,10 +249,15 @@ export async function prepareHomePlaylist({
   }
 
   const preparePromise = (async () => {
+    markDiscoveryPerformance('cold_start_import_required');
+    startDiscoveryPerformanceSpan('cold_start_import');
+
     try {
       await loadFromSource(playlistSource, authorizationContext);
       return preparedPlaylist;
     } finally {
+      endDiscoveryPerformanceSpan('cold_start_import');
+
       if (sourceId) {
         inFlightPrepareMap.delete(sourceId);
       }

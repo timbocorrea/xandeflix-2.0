@@ -1,5 +1,11 @@
 import { Capacitor } from '@capacitor/core';
 import { fetchPlaylistTransport } from '../services/playlistTransport.service';
+import {
+  endDiscoveryPerformanceSpan,
+  incrementDiscoveryPerformanceCounter,
+  markDiscoveryPerformance,
+  startDiscoveryPerformanceSpan,
+} from '@/features/catalog/services/discoveryPerformance.service';
 
 import {
   parseM3uPlaylistProgressive,
@@ -338,6 +344,20 @@ async function parsePlaylistFromResponse(
     progress.bytesTotal = contentLength;
   }
 
+  let firstTransportByteMarked = false;
+  let firstBatchMarked = false;
+
+  const onChannelsBatch = options?.onChannelsBatch
+    ? async (channels: IptvChannel[]) => {
+        if (!firstBatchMarked) {
+          firstBatchMarked = true;
+          markDiscoveryPerformance('playlist_first_batch');
+        }
+
+        await options.onChannelsBatch?.(channels);
+      }
+    : undefined;
+
   const applyParseProgress = (parseProgress: {
     parsedLines: number;
     channelsParsed: number;
@@ -356,10 +376,15 @@ async function parsePlaylistFromResponse(
     maxChannels: MAX_PLAYLIST_CHANNELS,
     batchSize: PARSE_BATCH_SIZE,
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
-    onChannelsBatch: options?.onChannelsBatch,
+    onChannelsBatch,
     signal: options?.signal,
     collectChannels: options?.collectChannels ?? true,
     onBytesReceived: (bytesReceived) => {
+      if (!firstTransportByteMarked && bytesReceived > 0) {
+        firstTransportByteMarked = true;
+        markDiscoveryPerformance('playlist_transport_first_byte');
+      }
+
       if (MAX_PLAYLIST_BYTES && bytesReceived > MAX_PLAYLIST_BYTES) {
         throw new Error(
           `A playlist ultrapassou o limite configurado (${formatMegabytes(MAX_PLAYLIST_BYTES)}).`,
@@ -400,6 +425,11 @@ async function parsePlaylistFromResponse(
   const content = await response.text();
   ensureLoadedContentWithinSizeLimit(content);
 
+  if (!firstTransportByteMarked && content.length > 0) {
+    firstTransportByteMarked = true;
+    markDiscoveryPerformance('playlist_transport_first_byte');
+  }
+
   progress.phase = 'parsing';
   progress.bytesReceived = content.length;
 
@@ -413,7 +443,7 @@ async function parsePlaylistFromResponse(
     maxChannels: MAX_PLAYLIST_CHANNELS,
     batchSize: PARSE_BATCH_SIZE,
     yieldEveryLines: PARSE_YIELD_EVERY_LINES,
-    onChannelsBatch: options?.onChannelsBatch,
+    onChannelsBatch,
     signal: options?.signal,
     collectChannels: options?.collectChannels ?? true,
     onProgress: applyParseProgress,
@@ -446,14 +476,40 @@ async function loadAndParsePlaylist(
   progress.phase = 'downloading';
   reportProgress(true);
 
-  const response = await fetchResponseWithTimeout(
-    sourceUrl,
-    'GET',
-    options?.signal,
-    options?.conditionalHeaders,
+  markDiscoveryPerformance(
+    'playlist_transport_request_start',
+    { once: false },
+  );
+  startDiscoveryPerformanceSpan('playlist_transport');
+  incrementDiscoveryPerformanceCounter(
+    'provider_full_request_count',
   );
 
+  let response: Response;
+
+  try {
+    response = await fetchResponseWithTimeout(
+      sourceUrl,
+      'GET',
+      options?.signal,
+      options?.conditionalHeaders,
+    );
+  } catch (error) {
+    markDiscoveryPerformance(
+      'playlist_transport_request_end',
+      { once: false },
+    );
+    endDiscoveryPerformanceSpan('playlist_transport');
+    throw error;
+  }
+
   if (response.status === 304) {
+    markDiscoveryPerformance(
+      'playlist_transport_request_end',
+      { once: false },
+    );
+    endDiscoveryPerformanceSpan('playlist_transport');
+
     return {
       notModified: true as const,
       response,
@@ -461,16 +517,40 @@ async function loadAndParsePlaylist(
     };
   }
 
-  return {
-    notModified: false as const,
-    response,
-    parsed: await parsePlaylistFromResponse(
+  markDiscoveryPerformance('playlist_parse_start', { once: false });
+  startDiscoveryPerformanceSpan('playlist_parse');
+
+  try {
+    const parsed = await parsePlaylistFromResponse(
       response,
       progress,
       options,
       reportProgress,
-    ),
-  };
+    );
+
+    markDiscoveryPerformance('playlist_parse_end', { once: false });
+    endDiscoveryPerformanceSpan('playlist_parse');
+    markDiscoveryPerformance(
+      'playlist_transport_request_end',
+      { once: false },
+    );
+    endDiscoveryPerformanceSpan('playlist_transport');
+
+    return {
+      notModified: false as const,
+      response,
+      parsed,
+    };
+  } catch (error) {
+    markDiscoveryPerformance('playlist_parse_end', { once: false });
+    endDiscoveryPerformanceSpan('playlist_parse');
+    markDiscoveryPerformance(
+      'playlist_transport_request_end',
+      { once: false },
+    );
+    endDiscoveryPerformanceSpan('playlist_transport');
+    throw error;
+  }
 }
 
 function buildDiagnostics(
