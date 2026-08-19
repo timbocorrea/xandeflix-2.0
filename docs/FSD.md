@@ -115,15 +115,18 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 2. confirmar ausência de geração local utilizável;
 3. iniciar import direto da source;
 4. processar e persistir localmente;
-5. publicar somente geração válida;
-6. construir estado necessário para Home;
-7. liberar Home utilizável.
+5. manter a geração em construção como staging não autoritativo;
+6. permanecer em `PREPARING`/`LOADING` verdadeiro enquanto não houver conteúdo local estruturalmente renderizável;
+7. quando houver conteúdo staging renderizável, permitir leitura local bounded e somente leitura para Home, Filmes, Séries e Live antes do EOF;
+8. liberar Home utilizável sem exigir que o catálogo completo esteja pronto;
+9. manter a construção do catálogo completo em background;
+10. tornar uma geração autoritativa somente por promotion válida no boundary de lifecycle.
 
-**ALTERNATIVE_FLOW:** processamento adicional pode continuar em background após existir dataset mínimo realmente utilizável, desde que não produza false empty nem exponha geração parcial como estado autoritativo.
+**ALTERNATIVE_FLOW:** no estado `COLD_NO_VALID_ACTIVE`, conteúdo staging parcial pode ser apresentado e expandido progressivamente por leituras bounded à medida que novos dados locais se tornem renderizáveis, sem aguardar obrigatoriamente EOF e sem exigir todas as categorias da source. Conteúdo parcial utilizável ou first fold não significa `FULL_CATALOG_READY`, não promove staging e não autoriza early promotion.
 
 **ERROR_FLOW:** falha de rede ou source mantém estado de erro/retry e não grava vazio transitório como catálogo autoritativo.
 
-**TERMINAL_STATES:** `HOME_READY`, `RETRYABLE`, `SOURCE_EMPTY_CONFIRMED`, `ACCESS_DENIED`.
+**TERMINAL_STATES:** `PREPARING`, `HOME_PARTIAL_CONTENT`, `HOME_READY`, `RETRYABLE`, `SOURCE_EMPTY_CONFIRMED`, `ACCESS_DENIED`.
 
 **DATA_READ:** metadata local de catálogo e source binding.
 
@@ -137,7 +140,9 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 
 **ACCEPTANCE_CRITERIA:**
 - nova instalação não termina em Home falsamente vazia por corrida de bootstrap;
+- conteúdo staging renderizável pode tornar as superfícies elegíveis utilizáveis antes do EOF;
 - geração parcial não se torna autoritativa;
+- staging visível não equivale a staging promovido;
 - falha recuperável oferece retry;
 - Control Plane permanece fora do Data Plane.
 
@@ -152,15 +157,15 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **PRECONDITIONS:** identidade de source, licença e dispositivo compatíveis com o estado local persistido.
 
 **MAIN_FLOW:**
-1. ler catálogo e read models locais;
-2. disponibilizar primeira UI útil a partir do estado local;
+1. ler a geração active válida, seu catálogo e seus read models locais;
+2. manter active como visão principal e autoritativa;
 3. avaliar freshness;
-4. disparar refresh quando necessário;
-5. promover nova geração somente após validação.
+4. construir staging separadamente quando refresh for necessário;
+5. promover nova geração somente após validação no boundary de lifecycle.
 
-**ALTERNATIVE_FLOW:** estado stale conhecido pode continuar visível enquanto refresh seguro ocorre.
+**ALTERNATIVE_FLOW:** no estado `WARM_VALID_ACTIVE`, active pode continuar visível enquanto staging é construído silenciosamente; staging não substitui active antes de promotion válida.
 
-**ERROR_FLOW:** falha de refresh preserva a geração válida existente e disponibiliza retry quando aplicável.
+**ERROR_FLOW:** falha, cancelamento ou descarte de staging preserva a geração active válida existente e disponibiliza retry quando aplicável.
 
 **TERMINAL_STATES:** `LOCAL_READY`, `LOCAL_READY_REFRESHING`, `RETRYABLE`.
 
@@ -177,6 +182,8 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **ACCEPTANCE_CRITERIA:**
 - UI útil pode surgir a partir do estado local válido;
 - falha transitória não apaga catálogo válido;
+- active permanece principal e autoritativa durante refresh;
+- staging visível não promove nem substitui active;
 - warm start não produz false empty;
 - ausência de rede não transforma o produto em offline-first.
 
@@ -239,7 +246,7 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 6. cria índices e read models aplicáveis;
 7. publica geração local válida.
 
-**ALTERNATIVE_FLOW:** processamento incremental ou bounded é permitido quando preserva consistência e segurança da geração ativa.
+**ALTERNATIVE_FLOW:** no cold bootstrap sem active válido, processamento incremental ou bounded pode disponibilizar conteúdo staging local estruturalmente renderizável para leitura parcial, somente leitura e não autoritativa antes do EOF. A construção do catálogo completo continua em background, e superfícies elegíveis podem incorporar novos grupos ou itens por atualização bounded sem materializar o catálogo inteiro em memória.
 
 **ERROR_FLOW:** geração incompleta ou falha não substitui geração válida existente.
 
@@ -259,6 +266,7 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 - Control Plane não processa catálogo;
 - catálogo não é persistido centralmente;
 - geração incompleta não é promovida;
+- first fold ou conteúdo parcial utilizável não equivale a catálogo completo pronto;
 - empty somente após ausência verdadeira confirmada.
 
 **TRACEABILITY:** REQ-003, REQ-012, VS-01, VS-07.
@@ -272,15 +280,15 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **PRECONDITIONS:** contexto autorizado e source resolvida.
 
 **MAIN_FLOW:**
-1. manter geração ativa disponível;
+1. manter geração active disponível, principal e autoritativa;
 2. buscar atualização diretamente da source;
 3. processar atualização em geração separada;
 4. validar;
 5. promover atomicamente quando válida.
 
-**ALTERNATIVE_FLOW:** quando não houver mudança relevante, manter geração atual.
+**ALTERNATIVE_FLOW:** quando não houver mudança relevante, manter geração atual. Staging pode continuar sendo construído sem substituir a visão active antes de promotion válida.
 
-**ERROR_FLOW:** refresh falho não invalida automaticamente geração anterior válida.
+**ERROR_FLOW:** refresh falho, cancelado ou descartado não invalida geração anterior válida.
 
 **TERMINAL_STATES:** `UNCHANGED`, `REFRESHED`, `REFRESH_FAILED_PRESERVED`.
 
@@ -297,6 +305,8 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **ACCEPTANCE_CRITERIA:**
 - UI nunca trata geração parcial como catálogo definitivo;
 - refresh falho preserva geração válida;
+- promotion permanece a única transição que torna a nova geração autoritativa;
+- early promotion é proibida;
 - backend não participa do refresh de catálogo.
 
 **TRACEABILITY:** REQ-003, REQ-012, VS-07.
@@ -307,7 +317,7 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 
 **TRIGGER:** entrada na Home.
 
-**PRECONDITIONS:** catálogo local utilizável ou estado de carregamento verdadeiro.
+**PRECONDITIONS:** geração active local utilizável, staging local renderizável no cold sem active, ou estado de preparação verdadeiro.
 
 **MAIN_FLOW:**
 1. consultar read models locais;
@@ -316,11 +326,11 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 4. apresentar conteúdo de discovery;
 5. manter interação disponível conforme device class.
 
-**ALTERNATIVE_FLOW:** artwork ausente utiliza fallback visual ou textual apropriado sem invalidar o item.
+**ALTERNATIVE_FLOW:** no cold sem active válido, Home pode apresentar first fold staging bounded e não autoritativo antes do EOF e incorporar conteúdo adicional por atualizações bounded; se ainda não houver seção renderizável, permanece em `HOME_PREPARING`. Artwork ausente utiliza fallback visual ou textual apropriado sem invalidar o item.
 
 **ERROR_FLOW:** loading, empty confirmado e error são estados distintos.
 
-**TERMINAL_STATES:** `HOME_CONTENT`, `HOME_EMPTY_CONFIRMED`, `HOME_ERROR`.
+**TERMINAL_STATES:** `HOME_PREPARING`, `HOME_PARTIAL_CONTENT`, `HOME_CONTENT`, `HOME_EMPTY_CONFIRMED`, `HOME_ERROR`.
 
 **DATA_READ:** catálogo, snapshots, metadata e read models locais.
 
@@ -334,6 +344,8 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 
 **ACCEPTANCE_CRITERIA:**
 - Home não exibe false empty;
+- Home pode ficar utilizável com staging bounded renderizável antes do EOF;
+- Home parcial pode expandir sem representar catálogo completo pronto;
 - artwork ausente não remove funcionalidade;
 - Hero e carrosséis derivam de estado local válido;
 - loading, empty e error permanecem distinguíveis.
@@ -346,7 +358,7 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 
 **TRIGGER:** entrada em Ao Vivo.
 
-**PRECONDITIONS:** itens Live válidos no catálogo local.
+**PRECONDITIONS:** itens Live válidos em active, staging local renderizável no cold sem active, ou estado de preparação verdadeiro.
 
 **MAIN_FLOW:**
 1. mostrar grupos;
@@ -357,11 +369,11 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 6. permitir entrada no player;
 7. atualizar último canal quando aplicável.
 
-**ALTERNATIVE_FLOW:** se o último canal não existir ou não for válido, selecionar o primeiro canal reproduzível conforme ordenação local vigente.
+**ALTERNATIVE_FLOW:** no cold sem active válido, Live pode apresentar itens staging locais por leitura bounded, somente leitura e não autoritativa antes do EOF; novos grupos ou itens podem ser incorporados por atualização bounded. Se o último canal não existir ou não for válido, selecionar o primeiro canal reproduzível conforme ordenação local vigente.
 
-**ERROR_FLOW:** se nenhum canal válido existir, exibir empty ou error verdadeiro sem quebrar a página.
+**ERROR_FLOW:** enquanto ainda não houver conteúdo Live renderizável e a ausência não estiver confirmada, exibir `LIVE_PREPARING`; após condição suficiente, exibir empty verdadeiro ou error sem quebrar a página.
 
-**TERMINAL_STATES:** `LIVE_PREVIEW`, `LIVE_PLAYER`, `LIVE_EMPTY`, `LIVE_ERROR`.
+**TERMINAL_STATES:** `LIVE_PREPARING`, `LIVE_PARTIAL_CONTENT`, `LIVE_PREVIEW`, `LIVE_PLAYER`, `LIVE_EMPTY`, `LIVE_ERROR`.
 
 **DATA_READ:** catálogo Live e Continuity State local.
 
@@ -374,6 +386,8 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **OBSERVABILITY:** seleção, transições e playback sanitizados.
 
 **ACCEPTANCE_CRITERIA:**
+- conteúdo Live parcial renderizável pode aparecer antes do EOF sem promotion;
+- `collectChannels=false` permanece preservado e nenhum array React completo crescente de catálogo é exigido;
 - retorno ao Live tenta restaurar último canal válido;
 - preview retoma último canal válido;
 - fallback funciona quando item anterior desaparece;
@@ -387,7 +401,7 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 
 **TRIGGER:** entrada em Filmes, categoria ou detalhe.
 
-**PRECONDITIONS:** catálogo local utilizável.
+**PRECONDITIONS:** geração active local utilizável, staging local renderizável no cold sem active, ou estado de preparação verdadeiro.
 
 **MAIN_FLOW:**
 1. navegar por categorias ou listas;
@@ -396,11 +410,11 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 4. iniciar playback;
 5. registrar progresso local quando aplicável.
 
-**ALTERNATIVE_FLOW:** metadata ou artwork incompletos utilizam fallback sem bloquear item reproduzível.
+**ALTERNATIVE_FLOW:** no cold sem active válido, Filmes pode apresentar staging local bounded, somente leitura e não autoritativo antes do EOF e incorporar novos itens por atualização bounded; sem item renderizável, permanece em `MOVIES_PREPARING`. Metadata ou artwork incompletos utilizam fallback sem bloquear item reproduzível.
 
 **ERROR_FLOW:** item inválido ou desaparecido gera estado seguro e recuperável.
 
-**TERMINAL_STATES:** `MOVIE_LIST`, `MOVIE_DETAIL`, `PLAYING`, `ERROR`.
+**TERMINAL_STATES:** `MOVIES_PREPARING`, `MOVIES_PARTIAL_CONTENT`, `MOVIE_LIST`, `MOVIE_DETAIL`, `PLAYING`, `ERROR`.
 
 **DATA_READ:** catálogo, metadata e Continuity State locais.
 
@@ -413,6 +427,8 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **OBSERVABILITY:** erro e playback sanitizados.
 
 **ACCEPTANCE_CRITERIA:**
+- Filmes pode exibir conteúdo staging bounded renderizável antes do EOF sem promotion;
+- ausência temporária de item renderizável não é empty;
 - filme abre detalhe;
 - playback inicia diretamente da fonte;
 - posição válida pode ser restaurada;
@@ -426,7 +442,7 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 
 **TRIGGER:** entrada em Séries ou detalhe de série.
 
-**PRECONDITIONS:** série identificável no catálogo local.
+**PRECONDITIONS:** geração active local utilizável, staging local renderizável no cold sem active, ou estado de preparação verdadeiro.
 
 **MAIN_FLOW:**
 1. navegar em Séries;
@@ -436,11 +452,11 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 5. listar episódios;
 6. permitir seleção do episódio.
 
-**ALTERNATIVE_FLOW:** metadata parcial não impede estrutura local válida de série e episódios.
+**ALTERNATIVE_FLOW:** no cold sem active válido, Séries pode apresentar staging local bounded, somente leitura e não autoritativo antes do EOF e incorporar novos itens por atualização bounded; sem item renderizável, permanece em `SERIES_PREPARING`. Metadata parcial não impede estrutura local válida de série e episódios.
 
 **ERROR_FLOW:** série ausente ou incompatível gera estado seguro.
 
-**TERMINAL_STATES:** `SERIES_LIST`, `SERIES_DETAIL`, `ERROR`.
+**TERMINAL_STATES:** `SERIES_PREPARING`, `SERIES_PARTIAL_CONTENT`, `SERIES_LIST`, `SERIES_DETAIL`, `ERROR`.
 
 **DATA_READ:** catálogo e índices locais.
 
@@ -453,6 +469,8 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **OBSERVABILITY:** identificadores sanitizados.
 
 **ACCEPTANCE_CRITERIA:**
+- Séries pode exibir conteúdo staging bounded renderizável antes do EOF sem promotion;
+- ausência temporária de item renderizável não é empty;
 - série abre detalhe;
 - temporadas e episódios são resolvidos localmente;
 - detalhe não depende de full scan remoto ou backend content search;
@@ -672,17 +690,18 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **PRECONDITIONS:** operação iniciada, em progresso ou concluída.
 
 **MAIN_FLOW:**
-1. usar loading somente enquanto resultado ainda é desconhecido;
-2. converter para content quando houver resultado utilizável;
-3. converter para empty somente após ausência verdadeira confirmada;
-4. converter para error quando a operação falhar;
-5. oferecer retry quando recuperável.
+1. usar `PREPARING`/`LOADING` somente enquanto não houver conteúdo renderizável e o resultado ainda for desconhecido;
+2. no cold sem active válido, converter para `PARTIAL_CONTENT` quando houver staging local bounded renderizável, sem esperar obrigatoriamente EOF ou promotion;
+3. converter para `CONTENT`/ready quando o lifecycle aplicável estiver concluído;
+4. converter para empty somente após ausência verdadeira confirmada;
+5. converter para error quando a operação falhar;
+6. oferecer retry quando recuperável.
 
-**ALTERNATIVE_FLOW:** estado local válido pode ser mantido enquanto operação de atualização ocorre.
+**ALTERNATIVE_FLOW:** em warm refresh, estado active válido permanece como `CONTENT` principal e autoritativo enquanto staging é construído separadamente.
 
 **ERROR_FLOW:** falha não pode permanecer indefinidamente como loading.
 
-**TERMINAL_STATES:** `LOADING`, `CONTENT`, `EMPTY`, `ERROR`.
+**TERMINAL_STATES:** `PREPARING`, `LOADING`, `PARTIAL_CONTENT`, `CONTENT`, `EMPTY`, `ERROR`.
 
 **DATA_READ:** estado atual da operação e geração local aplicável.
 
@@ -697,6 +716,7 @@ Conflito entre este FSD, o PRD ou o Architecture Contract exige:
 **ACCEPTANCE_CRITERIA:**
 - `NO_FALSE_EMPTY=SIM`;
 - `NO_INFINITE_LOADING=SIM`;
+- conteúdo parcial real não permanece bloqueado globalmente somente por falta de EOF ou promotion;
 - empty somente após ausência confirmada;
 - erro recuperável apresenta retry;
 - geração parcial nunca substitui geração válida.
@@ -886,6 +906,22 @@ Todos os fluxos deste FSD obedecem simultaneamente:
 
 `ACTIVE_GENERATION_SAFETY=SIM`
 
+`BOUNDED_NON_AUTHORITATIVE_STAGING_CONTENT=SIM`
+
+`STAGING_RENDERABLE_IN_UI_IS_STAGING_AUTHORITATIVE=NAO`
+
+`STAGING_VISIBLE_IS_PROMOTED=NAO`
+
+`PROMOTION_IS_ONLY_AUTHORITY_BOUNDARY=SIM`
+
+`EARLY_PROMOTION=PROIBIDO`
+
+`PROMOTION_BEFORE_EOF=PROIBIDO`
+
+`PARTIAL_USABLE_CONTENT_IS_FULL_CATALOG_READY=NAO`
+
+`COLLECT_CHANNELS_FALSE=PRESERVED`
+
 `INDEXEDDB_SYNC_TO_BACKEND=NAO`
 
 `CENTRAL_IPTV_CATALOG=PROIBIDO`
@@ -925,6 +961,10 @@ A observação física de busca:
 `ACCEPTED_AS_TARGET=NAO`
 
 `AUTOMATIC_SLA=NAO`
+
+O limite operacional de quinze minutos usado em gate físico não constitui SLA de produto.
+
+`PHYSICAL_GATE_15_MINUTES_IS_SLA=NAO`
 
 ---
 
