@@ -6,6 +6,10 @@ import {
 import { loadReadableLocalLiveChannels } from '@/features/live/services/localLiveCatalog.service';
 import type { CatalogRepository } from '@/features/localCatalog/repositories/catalogRepository.types';
 import { loadLocalCatalogHomeVodSections } from '@/features/localCatalog/readModels/localCatalogHomeVodAdapter.service';
+import {
+  openLocalCatalogDb,
+  putLocalCatalogImportMetadata,
+} from '@/features/localCatalog/services/localCatalogDb.service';
 import { isLocalCatalogReadable } from '@/features/localCatalog/services/localCatalogReadability.service';
 import type {
   LocalCatalogContentKind,
@@ -164,6 +168,23 @@ function createRepository() {
   };
 }
 
+async function removeSeededImportMetadata(sourceId: string) {
+  const db = await openLocalCatalogDb();
+
+  try {
+    const transaction = db.transaction('catalogMetadata', 'readwrite');
+    const done = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = transaction.onerror = () =>
+        reject(new Error('HOME_HOT_RETURN_METADATA_CLEANUP_FAILED'));
+    });
+    transaction.objectStore('catalogMetadata').delete(`import:${sourceId}`);
+    await done;
+  } finally {
+    db.close();
+  }
+}
+
 export async function runHomeHotReturnSmokeTest(): Promise<HomeHotReturnSmokeTestResult> {
   clearHomeVodCache();
   const mock = createRepository();
@@ -282,23 +303,29 @@ export async function runHomeHotReturnSmokeTest(): Promise<HomeHotReturnSmokeTes
     warnings: [],
   };
 
-  cacheAppBootstrapResultForSession(cachedBootstrapResult);
-  const hotBootstrapResult = await runAppBootstrap({
-    licenseCode: LICENSE_CODE,
-    deviceIdentifier: DEVICE_ID,
-    runtime: {
-      currentChannelsCount: 0,
-      currentStatus: 'ready',
-      currentSourceId: SOURCE_A,
-      loadFromSource: async () => {
-        sourceLoads += 1;
+  let hotBootstrapResult: AppBootstrapResult | null = null;
+  try {
+    await putLocalCatalogImportMetadata(metadata(SOURCE_A));
+    cacheAppBootstrapResultForSession(cachedBootstrapResult);
+    hotBootstrapResult = await runAppBootstrap({
+      licenseCode: LICENSE_CODE,
+      deviceIdentifier: DEVICE_ID,
+      runtime: {
+        currentChannelsCount: 0,
+        currentStatus: 'ready',
+        currentSourceId: SOURCE_A,
+        loadFromSource: async () => {
+          sourceLoads += 1;
+        },
+        loadFromChannels: () => undefined,
+        clearRuntime: () => undefined,
       },
-      loadFromChannels: () => undefined,
-      clearRuntime: () => undefined,
-    },
-  });
+    });
+  } finally {
+    await removeSeededImportMetadata(SOURCE_A);
+  }
   const bootstrapPreparationSkippedOnHotReturn =
-    sourceLoads === 0 && hotBootstrapResult.sourceId === SOURCE_A;
+    sourceLoads === 0 && hotBootstrapResult?.sourceId === SOURCE_A;
   const assertions = {
     coldHome,
     hotHome,

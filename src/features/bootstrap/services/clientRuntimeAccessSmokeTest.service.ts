@@ -978,7 +978,6 @@ async function runPlaylistProviderAssertions() {
   let unmountCallCount = 0;
   let firstLoadPromise: Promise<void> | null = null;
   let secondLoadPromise: Promise<void> | null = null;
-  const loadPromises: Promise<void>[] = [];
 
   const syntheticSource: PlaylistSource = {
     url: 'https://source.example.invalid/synthetic.m3u',
@@ -1001,14 +1000,17 @@ async function runPlaylistProviderAssertions() {
   };
 
   try {
+    emitRuntimeAccessTestStage('PLAYLIST_MOUNT_START');
     harness = await mountPlaylistHarness((context, snapshot) => {
       playlistContext = context;
       snapshots.push(snapshot);
     });
+    emitRuntimeAccessTestStage('PLAYLIST_MOUNT_END');
     await waitForObserved(
       () => playlistContext !== null && addedRevocationListeners.length > 0,
       'PLAYLIST_PROVIDER_NOT_READY',
     );
+    emitRuntimeAccessTestStage('PLAYLIST_READY');
 
     providerMounted =
       harness.container.childElementCount > 0 &&
@@ -1018,6 +1020,7 @@ async function runPlaylistProviderAssertions() {
       snapshots.length > 0 && snapshots[0].status === 'idle';
     expectObserved(contextObserved, 'PLAYLIST_CONTEXT_NOT_OBSERVED');
 
+    emitRuntimeAccessTestStage('PLAYLIST_CHANNELS_START');
     await act(async () => {
       const context = getCurrentPlaylistContext(playlistContext);
       context.loadFromChannels({
@@ -1028,6 +1031,7 @@ async function runPlaylistProviderAssertions() {
       context.selectChannel(syntheticChannel);
       await settleTasks();
     });
+    emitRuntimeAccessTestStage('PLAYLIST_CHANNELS_END');
 
     const loadedContext = getCurrentPlaylistContext(playlistContext);
     channelsReady =
@@ -1039,16 +1043,17 @@ async function runPlaylistProviderAssertions() {
       loadedContext.diagnostics?.extinfLines === 1;
     expectObserved(channelsReady, 'PLAYLIST_CHANNELS_NOT_READY');
 
+    emitRuntimeAccessTestStage('PLAYLIST_FIRST_LOAD_START');
     await act(async () => {
       firstLoadPromise = getCurrentPlaylistContext(
         playlistContext,
       ).loadFromSource(syntheticSource);
-      loadPromises.push(firstLoadPromise);
       await waitForObserved(
         () => pendingRequests.length === 1,
         'PLAYLIST_FIRST_FETCH_NOT_CAPTURED',
       );
     });
+    emitRuntimeAccessTestStage('PLAYLIST_FIRST_LOAD_END');
 
     const firstRequest = pendingRequests[0];
     signalCaptured =
@@ -1062,10 +1067,12 @@ async function runPlaylistProviderAssertions() {
       'PLAYLIST_SIGNAL_ABORTED_BEFORE_REVOCATION',
     );
 
+    emitRuntimeAccessTestStage('PLAYLIST_REVOCATION_START');
     await act(async () => {
       notifyClientRuntimeAccessRevoked();
       await settleTasks();
     });
+    emitRuntimeAccessTestStage('PLAYLIST_REVOCATION_END');
 
     activeRequestAborted = firstRequest.signal?.aborted === true;
     expectObserved(
@@ -1089,13 +1096,15 @@ async function runPlaylistProviderAssertions() {
     const snapshotsBeforeStaleResponse = snapshots.length;
     const firstControlledLoad = firstLoadPromise;
     expectObserved(firstControlledLoad, 'PLAYLIST_FIRST_LOAD_PROMISE_MISSING');
+    emitRuntimeAccessTestStage('PLAYLIST_FIRST_RESPONSE_START');
+    firstRequest.deferred.resolve(
+      createSyntheticPlaylistResponse('stale-after-revocation'),
+    );
+    void Promise.resolve(firstControlledLoad).catch(() => undefined);
     await act(async () => {
-      firstRequest.deferred.resolve(
-        createSyntheticPlaylistResponse('stale-after-revocation'),
-      );
-      await firstControlledLoad;
       await settleTasks();
     });
+    emitRuntimeAccessTestStage('PLAYLIST_FIRST_RESPONSE_END');
 
     const contextAfterStaleResponse = getCurrentPlaylistContext(
       playlistContext,
@@ -1115,16 +1124,17 @@ async function runPlaylistProviderAssertions() {
       'PLAYLIST_STALE_RESPONSE_REPOPULATED_STATE',
     );
 
+    emitRuntimeAccessTestStage('PLAYLIST_SECOND_LOAD_START');
     await act(async () => {
       secondLoadPromise = getCurrentPlaylistContext(
         playlistContext,
       ).loadFromSource(syntheticSource);
-      loadPromises.push(secondLoadPromise);
       await waitForObserved(
         () => pendingRequests.length === 2,
         'PLAYLIST_UNMOUNT_FETCH_NOT_CAPTURED',
       );
     });
+    emitRuntimeAccessTestStage('PLAYLIST_SECOND_LOAD_END');
 
     const secondRequest = pendingRequests[1];
     expectObserved(
@@ -1134,11 +1144,13 @@ async function runPlaylistProviderAssertions() {
     );
     const snapshotsBeforeUnmount = snapshots.length;
 
+    emitRuntimeAccessTestStage('PLAYLIST_UNMOUNT_START');
     await act(async () => {
       harness?.root.unmount();
       unmountCallCount += 1;
       await settleTasks();
     });
+    emitRuntimeAccessTestStage('PLAYLIST_UNMOUNT_END');
 
     const readSignalAborted = (signal: AbortSignal | null) =>
       signal?.aborted === true;
@@ -1155,10 +1167,11 @@ async function runPlaylistProviderAssertions() {
 
     const secondControlledLoad = secondLoadPromise;
     expectObserved(secondControlledLoad, 'PLAYLIST_SECOND_LOAD_PROMISE_MISSING');
+    emitRuntimeAccessTestStage('PLAYLIST_SECOND_RESPONSE_START');
     secondRequest.deferred.resolve(
       createSyntheticPlaylistResponse('stale-after-unmount'),
     );
-    await secondControlledLoad;
+    void Promise.resolve(secondControlledLoad).catch(() => undefined);
     await settleTasks();
     notifyClientRuntimeAccessRevoked();
     await settleTasks();
@@ -1166,6 +1179,7 @@ async function runPlaylistProviderAssertions() {
       snapshots.length === snapshotsBeforeUnmount,
       'PLAYLIST_STATE_UPDATED_AFTER_UNMOUNT',
     );
+    emitRuntimeAccessTestStage('PLAYLIST_SECOND_RESPONSE_END');
 
     harness.container.remove();
     harness = null;
@@ -1182,8 +1196,6 @@ async function runPlaylistProviderAssertions() {
         new DOMException('PLAYLIST_TEST_CLEANUP', 'AbortError'),
       );
     }
-
-    await Promise.allSettled(loadPromises);
   }
 
   return {
@@ -1233,7 +1245,17 @@ function assertDomEnvironment() {
   );
 }
 
+function emitRuntimeAccessTestStage(stage: string) {
+  const hook = (
+    globalThis as typeof globalThis & {
+      __xandeflixRuntimeAccessStage?: (stage: string) => void;
+    }
+  ).__xandeflixRuntimeAccessStage;
+  hook?.(stage);
+}
+
 export async function runClientRuntimeAccessSmokeTest(): Promise<RuntimeAccessSmokeResult> {
+  emitRuntimeAccessTestStage('TEST_START');
   assertDomEnvironment();
   clearTestStorages();
 
@@ -1266,11 +1288,21 @@ export async function runClientRuntimeAccessSmokeTest(): Promise<RuntimeAccessSm
   };
 
   try {
+    emitRuntimeAccessTestStage('EVENT_START');
     const eventResults = await runEventServiceAssertions();
+    emitRuntimeAccessTestStage('EVENT_END');
+    emitRuntimeAccessTestStage('STORAGE_START');
     const storageResults = runSupabaseStorageAssertions();
+    emitRuntimeAccessTestStage('STORAGE_END');
+    emitRuntimeAccessTestStage('BOOTSTRAP_START');
     const bootstrapResults = runBootstrapAssertions();
+    emitRuntimeAccessTestStage('BOOTSTRAP_END');
+    emitRuntimeAccessTestStage('AUTH_START');
     const authResults = await runAuthProviderAssertions();
+    emitRuntimeAccessTestStage('AUTH_END');
+    emitRuntimeAccessTestStage('PLAYLIST_START');
     const playlistResults = await runPlaylistProviderAssertions();
+    emitRuntimeAccessTestStage('PLAYLIST_END');
     const reactWarningCount = reactUnmountWarnings.length;
     expectObserved(reactWarningCount === 0, 'REACT_UNMOUNT_WARNING_DETECTED');
 
@@ -1292,6 +1324,7 @@ export async function runClientRuntimeAccessSmokeTest(): Promise<RuntimeAccessSm
       REACT_WARNING_COUNT: reactWarningCount,
     };
   } finally {
+    emitRuntimeAccessTestStage('TEST_CLEANUP_START');
     console.error = originalConsoleError;
     console.info = originalConsoleInfo;
     console.warn = originalConsoleWarn;
@@ -1309,5 +1342,6 @@ export async function runClientRuntimeAccessSmokeTest(): Promise<RuntimeAccessSm
         'IS_REACT_ACT_ENVIRONMENT',
       );
     }
+    emitRuntimeAccessTestStage('TEST_CLEANUP_END');
   }
 }

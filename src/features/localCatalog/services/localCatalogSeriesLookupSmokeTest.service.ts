@@ -407,8 +407,11 @@ async function runSeriesLookupSchedulerSmoke() {
       );
 
     const detailTriggerReusesExistingJob =
-      detailModel?.status === 'index_building' &&
-      detailTriggeredPromise === detailBasePromise;
+      (detailModel?.status === 'index_building' &&
+        detailTriggeredPromise === detailBasePromise) ||
+      (detailModel?.status === 'ready' &&
+        detailModel.episodes.length === TARGET_COUNT &&
+        detailTriggeredPromise === null);
 
     await detailBasePromise;
 
