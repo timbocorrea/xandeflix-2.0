@@ -14,6 +14,7 @@ import {
 } from '@/features/licensing/lib/licenseActivationStorage';
 import { activateLicense } from '@/features/licensing/services/licenseActivation.service';
 import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
+import { e8DiagnosticLog } from '@/platform/e8DiagnosticLog';
 
 export function LoginPage() {
   const [deviceIdentifier, setDeviceIdentifier] = useState('');
@@ -67,6 +68,7 @@ export function LoginPage() {
         licenseDeviceId: activation.device.id,
         activatedAt: new Date().toISOString(),
       });
+      e8DiagnosticLog('ACTIVATION_READY', { authorized: true });
 
       setDeviceIdentifier(activation.device.deviceIdentifier);
       setLicenseCode(activation.license.code ?? licenseCode.trim().toUpperCase());

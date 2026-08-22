@@ -8,6 +8,7 @@ import type {
   PlaylistRuntimeAuthorizationContext,
   PlaylistRuntimeStatus,
   PlaylistSource,
+  SourceImportTask,
 } from '@/features/playlists/types/playlist';
 import {
   clearHomeVodCache,
@@ -19,6 +20,7 @@ import {
 import { getCachedSeriesHeroBackdropUrls } from '@/features/catalog/services/seriesHeroTmdb.service';
 import { storeCachedSeriesEpisodes } from '@/features/catalog/services/seriesEpisodesCache.service';
 import { loadLocalCatalogHomeVodSections } from '@/features/localCatalog/readModels/localCatalogHomeVodAdapter.service';
+import { listStagingFirstFoldHomeVodSections } from '@/features/localCatalog/readModels/localCatalogFirstFoldReadModel.service';
 import { getCatalogCategoryDefinition } from '@/features/catalog/services/catalogCategoryGroups.service';
 import { prepareHomePlaylist } from '@/features/catalog/services/prepareHomePlaylist.service';
 import { clearValidatedLicenseSessionCache } from '@/features/licensing/services/licenseSessionValidation.service';
@@ -36,6 +38,7 @@ import {
   markDiscoveryPerformance,
   preloadCriticalHeroArtwork,
 } from '@/features/catalog/services/discoveryPerformance.service';
+import { e8DiagnosticLog } from '@/platform/e8DiagnosticLog';
 
 import { notifyClientRuntimeAccessRevoked } from './clientRuntimeAccessEvents.service';
 
@@ -47,6 +50,7 @@ export type AppBootstrapStepId =
   | 'movies'
   | 'series'
   | 'images'
+  | 'precache'
   | 'done';
 
 export type AppBootstrapProgress = {
@@ -61,6 +65,10 @@ export type AppBootstrapRuntimeInput = {
   currentChannelsCount: number;
   currentStatus: PlaylistRuntimeStatus;
   currentSourceId?: string;
+  startSourceImport?: (
+    source: PlaylistSource,
+    authorizationContext?: PlaylistRuntimeAuthorizationContext | null,
+  ) => SourceImportTask;
   loadFromSource: (
     source: PlaylistSource,
     authorizationContext?: PlaylistRuntimeAuthorizationContext | null,
@@ -726,6 +734,7 @@ export async function runAppBootstrap({
   onProgress,
   criticalOnly = false,
 }: RunAppBootstrapInput): Promise<AppBootstrapResult> {
+  e8DiagnosticLog('APP_BOOTSTRAP_ENTER');
   const storedActivation = getStoredLicenseActivation();
   const normalizedLicenseCode = normalizeLicenseCode(
     licenseCode ?? storedActivation?.licenseCode,
@@ -735,13 +744,24 @@ export async function runAppBootstrap({
       storedActivation?.deviceIdentifier ??
       getOrCreateDeviceIdentifier(),
   );
+
   const warnings: string[] = [];
   let resolvedSourceId = runtime.currentSourceId;
   let resolvedLocalCatalogScopeKey: string | null = null;
+  let resolvedFirstFoldSnapshotId: string | null = null;
+  let resolvedFirstFoldReadMode: 'staging' | 'active' | null = null;
+  let resolvedFirstFoldHomeSections: HomeVodSection[] = [];
   const cachedResultBeforePreparation = getCachedAppBootstrapResult({
     allowExpired: criticalOnly,
   });
+  const isPrePreparationMetadataReadable = runtime.currentSourceId?.trim()
+    ? await localCatalogRepository
+        .getImportMetadata(runtime.currentSourceId.trim())
+        .then(isLocalCatalogReadable)
+        .catch(() => false)
+    : false;
   const knownReadableSourceId =
+    isPrePreparationMetadataReadable &&
     cachedResultBeforePreparation &&
     normalizeLicenseCode(cachedResultBeforePreparation.licenseCode) ===
       normalizedLicenseCode &&
@@ -754,6 +774,7 @@ export async function runAppBootstrap({
     normalizedLicenseCode &&
     normalizedDeviceIdentifier &&
     runtime.currentSourceId?.trim() &&
+    isPrePreparationMetadataReadable &&
     cachedResultBeforePreparation &&
     isPopulatedBootstrapResult(cachedResultBeforePreparation) &&
     isBootstrapResultForScope({
@@ -770,6 +791,7 @@ export async function runAppBootstrap({
       totalSteps: TOTAL_BOOTSTRAP_STEPS,
     });
 
+    e8DiagnosticLog('APP_BOOTSTRAP_SKIP', { reason: 'SESSION_CACHE_READY' });
     return cachedResultBeforePreparation;
   }
 
@@ -782,6 +804,7 @@ export async function runAppBootstrap({
         currentStatus: runtime.currentStatus,
         currentSourceId: runtime.currentSourceId,
         knownReadableSourceId,
+        startSourceImport: runtime.startSourceImport,
         loadFromSource: runtime.loadFromSource,
         loadFromChannels: runtime.loadFromChannels,
         clearRuntime: runtime.clearRuntime,
@@ -789,6 +812,9 @@ export async function runAppBootstrap({
 
       resolvedSourceId = preparedSource.source.sourceId;
       resolvedLocalCatalogScopeKey = preparedSource.localCatalogScopeKey;
+      resolvedFirstFoldSnapshotId = preparedSource.firstFoldSnapshotId ?? null;
+      resolvedFirstFoldReadMode = preparedSource.firstFoldReadMode ?? null;
+      resolvedFirstFoldHomeSections = preparedSource.firstFoldHomeSections ?? [];
       markDiscoveryPerformance('license_valid');
 
       if (resolvedSourceId) {
@@ -852,16 +878,44 @@ export async function runAppBootstrap({
     const seriesGroupTitles =
       getCatalogCategoryDefinition('series')?.groupTitles ?? [];
 
-    const homeSections = await loadLocalCatalogHomeVodSections({
-      sourceId: resolvedSourceId.trim(),
-      scopeKey: resolvedLocalCatalogScopeKey ?? undefined,
-      maxSections: 4,
-      itemsPerSection: 20,
-      movieGroupTitles: movieGroupTitles.slice(0, 2),
-      seriesGroupTitles: seriesGroupTitles.slice(0, 2),
-      skipTmdbMetadata: true,
-      allowLegacyFallback: false,
-    });
+    let homeSections: HomeVodSection[] = [];
+
+    if (
+      resolvedFirstFoldReadMode === 'staging' &&
+      resolvedFirstFoldSnapshotId &&
+      resolvedLocalCatalogScopeKey
+    ) {
+      homeSections = resolvedFirstFoldHomeSections;
+
+      try {
+        if (homeSections.length === 0) {
+          homeSections = await listStagingFirstFoldHomeVodSections({
+            sourceId: resolvedSourceId.trim(),
+            scopeKey: resolvedLocalCatalogScopeKey,
+            snapshotId: resolvedFirstFoldSnapshotId,
+            maxSections: 4,
+            itemsPerSection: 20,
+            movieGroupTitles: movieGroupTitles.slice(0, 2),
+            seriesGroupTitles: seriesGroupTitles.slice(0, 2),
+          });
+        }
+      } catch {
+        homeSections = [];
+      }
+    }
+
+    if (homeSections.length === 0) {
+      homeSections = await loadLocalCatalogHomeVodSections({
+        sourceId: resolvedSourceId.trim(),
+        scopeKey: resolvedLocalCatalogScopeKey ?? undefined,
+        maxSections: 4,
+        itemsPerSection: 20,
+        movieGroupTitles: movieGroupTitles.slice(0, 2),
+        seriesGroupTitles: seriesGroupTitles.slice(0, 2),
+        skipTmdbMetadata: true,
+        allowLegacyFallback: false,
+      });
+    }
     markDiscoveryPerformance('local_catalog_ready');
     const criticalDiscoveryCandidates = homeSections.flatMap(
       (section) => section.items,

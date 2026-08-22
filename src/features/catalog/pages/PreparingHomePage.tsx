@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
+import { FocusableButton } from '@/components/tv/FocusableButton';
 import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
 import {
   clearStoredLicenseActivation,
@@ -39,8 +41,12 @@ export function PreparingHomePage() {
         currentChannelsCount: runtimeRef.current.channels.length,
         currentStatus: runtimeRef.current.status,
         currentSourceId: runtimeRef.current.source?.sourceId,
-        loadFromSource: (...args) => runtimeRef.current.loadFromSource(...args),
-        loadFromChannels: (...args) => runtimeRef.current.loadFromChannels(...args),
+        startSourceImport: (...args) =>
+          runtimeRef.current.startSourceImport(...args),
+        loadFromSource: (...args) =>
+          runtimeRef.current.loadFromSource(...args),
+        loadFromChannels: (...args) =>
+          runtimeRef.current.loadFromChannels(...args),
         clearRuntime: () => runtimeRef.current.clearRuntime(),
       },
       onStateChange: (state) => {
@@ -70,6 +76,15 @@ export function PreparingHomePage() {
     return () => window.clearTimeout(timer);
   }, [navigate, step]);
 
+  useEffect(() => {
+    if (step === 'error') {
+      const timer = window.setTimeout(() => {
+        setFocus('preparing-home-retry');
+      }, 50);
+      return () => window.clearTimeout(timer);
+    }
+  }, [step]);
+
   function handleRetry() {
     setLocalError(null);
     setBootstrapWarning(null);
@@ -88,8 +103,19 @@ export function PreparingHomePage() {
       return localError ?? runtime.error ?? 'Falha ao preparar a Home.';
     }
 
-    if (bootstrapProgress?.stepId === 'playlist') {
+    if (bootstrapProgress?.stepId === 'playlist' || runtime.status === 'loading') {
       if (runtime.progress?.phase === 'downloading') {
+        if (runtime.progress.bytesTotal && runtime.progress.bytesTotal > 0) {
+          const receivedMb = (
+            runtime.progress.bytesReceived /
+            (1024 * 1024)
+          ).toFixed(1);
+          const totalMb = (
+            runtime.progress.bytesTotal /
+            (1024 * 1024)
+          ).toFixed(1);
+          return `Baixando lista autorizada (${receivedMb} MB / ${totalMb} MB)...`;
+        }
         return 'Baixando lista autorizada...';
       }
 
@@ -107,27 +133,48 @@ export function PreparingHomePage() {
     }
 
     return bootstrapProgress?.label ?? 'Iniciando preparação...';
-  }, [bootstrapProgress, runtime.error, runtime.progress, localError, step]);
+  }, [bootstrapProgress, runtime.error, runtime.progress, runtime.status, localError, step]);
 
   const progressPercent = useMemo(() => {
     if (step === 'ready') {
       return 100;
     }
 
-    if (!bootstrapProgress) {
-      return 12;
+    if (runtime.progress?.bytesTotal && runtime.progress.bytesTotal > 0) {
+      return Math.min(
+        99,
+        Math.max(
+          1,
+          Math.round(
+            (runtime.progress.bytesReceived / runtime.progress.bytesTotal) * 100,
+          ),
+        ),
+      );
     }
 
-    return Math.max(
-      12,
-      Math.min(
+    if (bootstrapProgress) {
+      return Math.min(
         100,
-        Math.round(
-          (bootstrapProgress.completedSteps / bootstrapProgress.totalSteps) * 100,
+        Math.max(
+          1,
+          Math.round(
+            (bootstrapProgress.completedSteps /
+              bootstrapProgress.totalSteps) *
+              100,
+          ),
         ),
-      ),
-    );
-  }, [bootstrapProgress, step]);
+      );
+    }
+
+    if (runtime.progress?.channelsParsed) {
+      return Math.min(
+        95,
+        Math.max(5, Math.round(runtime.progress.channelsParsed / 100)),
+      );
+    }
+
+    return 0;
+  }, [bootstrapProgress, runtime.progress, step]);
 
   return (
     <main className="xf-app flex min-h-screen items-center justify-center bg-black px-8 text-white">
@@ -170,21 +217,23 @@ export function PreparingHomePage() {
             </p>
 
             <div className="flex flex-col justify-center gap-3 sm:flex-row">
-              <button
-                type="button"
+              <FocusableButton
+                focusKey="preparing-home-retry"
                 onClick={handleRetry}
+                onEnterPress={handleRetry}
                 className="rounded-xl bg-xf-red px-5 py-3 text-sm font-black text-white transition hover:bg-red-700"
               >
                 Tentar novamente
-              </button>
+              </FocusableButton>
 
-              <button
-                type="button"
+              <FocusableButton
+                focusKey="preparing-home-change-license"
                 onClick={handleChangeLicense}
+                onEnterPress={handleChangeLicense}
                 className="rounded-xl bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
               >
                 Trocar licença
-              </button>
+              </FocusableButton>
             </div>
           </div>
         )}

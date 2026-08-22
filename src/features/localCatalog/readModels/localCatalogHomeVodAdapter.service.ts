@@ -24,6 +24,7 @@ import {
   listActiveLocalCatalogSnapshotCategories,
   listActiveLocalCatalogSnapshotItems,
 } from './localCatalogActiveSnapshotReadModel.service';
+import { loadLocalStagingHomeVodSections } from './localCatalogFirstFoldReadModel.service';
 import type { LocalCatalogSnapshotItem } from '../types/localCatalog.types';
 
 function normalizeOptionalText(value?: string | null) {
@@ -412,6 +413,19 @@ export async function loadLocalCatalogHomeVodSections(
       }
     }
 
+    const stagingSections = await loadLocalStagingHomeVodSections({
+      sourceId,
+      scopeKey,
+      maxSections,
+      itemsPerSection,
+      movieGroupTitles: dedupeLocalCatalogGroupTitles(movieGroupTitles),
+      seriesGroupTitles: dedupeLocalCatalogGroupTitles(seriesGroupTitles),
+    }).catch(() => []);
+
+    if (stagingSections.length > 0) {
+      return stagingSections;
+    }
+
     if (!allowLegacyFallback) {
       return [];
     }
@@ -678,6 +692,40 @@ export async function loadLocalCatalogHomeVodCategoryItems(
     for (const item of activeGroups.flat()) {
       if (!activeItems.has(item.id)) {
         activeItems.set(item.id, item);
+      }
+    }
+
+    if (activeItems.size === 0) {
+      const fallbackGroups = await Promise.all(
+        contentKinds.map(async (contentKind) => {
+          const raw = await listActiveLocalCatalogSnapshotItems({
+            scopeKey,
+            contentKind,
+            limit,
+          });
+          const items = (raw?.items ?? []).map((item) =>
+            mapActiveSnapshotItemToLocalCatalogItem(item, sourceId),
+          );
+          const tmdbMetadata = await loadBoundedTmdbMetadata(items, repository);
+          return contentKind === 'series'
+            ? mapLocalCatalogSeriesItemsToHomeVodItems(
+                items,
+                'Séries',
+                tmdbMetadata,
+                limit,
+              )
+            : mapLocalCatalogItemsToHomeVodItems(
+                items,
+                'Filmes',
+                tmdbMetadata,
+              );
+        }),
+      );
+
+      for (const item of fallbackGroups.flat()) {
+        if (!activeItems.has(item.id)) {
+          activeItems.set(item.id, item);
+        }
       }
     }
 

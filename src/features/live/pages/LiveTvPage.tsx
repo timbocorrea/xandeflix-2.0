@@ -35,6 +35,7 @@ import {
 import { usePlaylistRuntime } from "@/features/playlists/providers/PlaylistRuntimeProvider";
 import { localCatalogRepository } from "@/features/localCatalog/repositories/localCatalogRepository.service";
 import { loadReadableLocalLiveChannels } from "@/features/live/services/localLiveCatalog.service";
+import { deriveLocalCatalogScope } from "@/features/localCatalog/services/localCatalogScope.service";
 import {
   buildLiveContinuityStorageKey,
   saveLiveLastChannel,
@@ -150,12 +151,16 @@ export default function LiveTvPage() {
   const navigate = useNavigate();
   const { signOut } = useAuth();
   const {
+    source,
     channels,
     selectedChannel,
     status,
+    progress,
     loadFromSource,
     loadFromChannels,
     selectChannel,
+    localCatalogScopeKey,
+    localCatalogGenerationId,
   } = usePlaylistRuntime();
 
   const [selectedGroupName, setSelectedGroupName] = useState<string | null>(
@@ -534,12 +539,28 @@ export default function LiveTvPage() {
               }
             : null;
 
+        let derivedScopeKey: string | null = null;
+        if (playlistSource.sourceType === "m3u" && sourceId) {
+          try {
+            if (internalLicenseId) {
+              const derivedScope = await deriveLocalCatalogScope({
+                internalLicenseId,
+                sourceId,
+              });
+              derivedScopeKey = derivedScope.scopeKey;
+            }
+          } catch {
+            // fail-open
+          }
+        }
+
         if (playlistSource.sourceType === "m3u" && sourceId) {
           try {
             const localLiveChannels =
               await loadReadableLocalLiveChannels(
                 sourceId,
                 localCatalogRepository,
+                derivedScopeKey,
               );
 
             if (!isMounted) {
@@ -569,6 +590,10 @@ export default function LiveTvPage() {
           return;
         }
 
+        if (status === "loading") {
+          return;
+        }
+
         await loadFromSource(
           playlistSource,
           authorizationContext,
@@ -580,6 +605,7 @@ export default function LiveTvPage() {
               await loadReadableLocalLiveChannels(
                 sourceId,
                 localCatalogRepository,
+                derivedScopeKey,
               );
 
             if (!isMounted) {
@@ -625,9 +651,77 @@ export default function LiveTvPage() {
   }, [loadFromChannels, loadFromSource, restorePreviewFromCatalog, retryTick]);
 
   const liveTvChannels = useMemo(
-    () => channels.filter(isLiveTvPageChannel),
-    [channels],
+    () => (status === 'ready' ? channels.filter(isLiveTvPageChannel) : []),
+    [channels, status],
   );
+
+  const channelsParsed = progress?.channelsParsed ?? 0;
+  const lastProcessedChannelsParsedRef = useRef<number>(0);
+  const lastProcessedGenerationIdRef = useRef<string | null>(null);
+
+  // Incremental local reload of live channels when staging batches are written or snapshot is promoted
+  useEffect(() => {
+    if (!source?.sourceId?.trim() || !localCatalogScopeKey) {
+      return;
+    }
+
+    const hasNewChannelsParsed =
+      channelsParsed > 0 &&
+      channelsParsed !== lastProcessedChannelsParsedRef.current;
+    const hasNewGenerationId =
+      Boolean(localCatalogGenerationId) &&
+      localCatalogGenerationId !== lastProcessedGenerationIdRef.current;
+
+    if (!hasNewChannelsParsed && !hasNewGenerationId) {
+      return;
+    }
+
+    if (hasNewChannelsParsed) {
+      lastProcessedChannelsParsedRef.current = channelsParsed;
+    }
+    if (hasNewGenerationId) {
+      lastProcessedGenerationIdRef.current = localCatalogGenerationId;
+    }
+
+    let isMounted = true;
+
+    void (async () => {
+      try {
+        const currentSourceId = source.sourceId?.trim();
+        if (!currentSourceId) {
+          return;
+        }
+        const refreshedLiveChannels = await loadReadableLocalLiveChannels(
+          currentSourceId,
+          localCatalogRepository,
+          localCatalogScopeKey,
+        );
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (refreshedLiveChannels !== null && refreshedLiveChannels.length > 0) {
+          loadFromChannels({
+            source,
+            channels: refreshedLiveChannels,
+          });
+        }
+      } catch (err) {
+        console.warn("[XANDEFLIX_LIVE_TV_INCREMENTAL_REFRESH_FAILED]", err);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    channelsParsed,
+    localCatalogGenerationId,
+    localCatalogScopeKey,
+    source,
+    loadFromChannels,
+  ]);
 
   const groups = useMemo<ChannelGroup[]>(() => {
     const groupMap = new Map<string, number>();
@@ -988,7 +1082,7 @@ export default function LiveTvPage() {
     return "empty";
   }, [liveTvChannels.length, sourceLoadError, status]);
 
-  const isLoading = status === "loading" && liveTvChannels.length === 0;
+  const isLoading = status === "loading" || status === "idle";
   const shouldShowInitialLiveTvLoading =
     isLoading ||
     (status !== "error" && groups.length === 0 && activeGroupChannels.length === 0);

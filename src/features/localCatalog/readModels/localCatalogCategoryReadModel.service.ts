@@ -7,6 +7,7 @@ import {
   normalizeLocalCatalogGroupIdentity,
 } from '../services/localCatalogGroupIdentity.service';
 import { isLocalCatalogReadable } from '../services/localCatalogReadability.service';
+import { getLocalCatalogScope } from '../services/localCatalogDb.service';
 import type { LocalCatalogCategory } from '../types/localCatalog.types';
 import {
   mapActiveSnapshotItemToLocalCatalogItem,
@@ -16,6 +17,7 @@ import {
   listActiveLocalCatalogSnapshotCategories,
   listActiveLocalCatalogSnapshotItems,
 } from './localCatalogActiveSnapshotReadModel.service';
+import { listStagingFirstFoldHomeVodSections } from './localCatalogFirstFoldReadModel.service';
 
 export type LocalCatalogCategoryReadResult = {
   status: 'ready' | 'unavailable';
@@ -24,6 +26,95 @@ export type LocalCatalogCategoryReadResult = {
 };
 
 export const LOCAL_MOVIE_CATEGORY_PAGE_SIZE = 20;
+export const LOCAL_STAGING_CATEGORY_TOTAL_LIMIT = 800;
+export const LOCAL_STAGING_CATEGORY_MAX_GROUPS = 50;
+
+export type LocalCatalogCategoryReadMode = 'stable' | 'staging' | null;
+
+export type LocalCatalogCategoryItemSelection = {
+  readMode: LocalCatalogCategoryReadMode;
+  items: HomeVodItem[];
+};
+
+export function selectStableOrStagingCategoryItems(
+  stableItems: readonly HomeVodItem[],
+  stagingItems: readonly HomeVodItem[],
+): LocalCatalogCategoryItemSelection {
+  if (stableItems.length > 0) {
+    return { readMode: 'stable', items: [...stableItems] };
+  }
+
+  if (stagingItems.length > 0) {
+    return { readMode: 'staging', items: [...stagingItems] };
+  }
+
+  return { readMode: null, items: [] };
+}
+
+export async function loadLocalStagingCategoryReadModel({
+  sourceId: rawSourceId,
+  scopeKey: rawScopeKey,
+  groupTitles,
+  contentKind,
+  totalLimit = LOCAL_STAGING_CATEGORY_TOTAL_LIMIT,
+  maxGroups = LOCAL_STAGING_CATEGORY_MAX_GROUPS,
+}: {
+  sourceId: string;
+  scopeKey: string;
+  groupTitles: readonly string[];
+  contentKind: 'movie' | 'series';
+  totalLimit?: number;
+  maxGroups?: number;
+}): Promise<LocalCatalogCategoryItemSelection> {
+  const sourceId = rawSourceId.trim();
+  const scopeKey = rawScopeKey.trim();
+  const boundedTotalLimit = Math.max(1, Math.floor(totalLimit));
+  const selectedGroupTitles = dedupeLocalCatalogGroupTitles(groupTitles).slice(
+    0,
+    Math.max(1, Math.floor(maxGroups)),
+  );
+
+  if (!sourceId || !scopeKey || selectedGroupTitles.length === 0) {
+    return { readMode: null, items: [] };
+  }
+
+  const scope = await getLocalCatalogScope(scopeKey).catch(() => null);
+
+  if (
+    !scope ||
+    scope.accessStatus !== 'active' ||
+    scope.sourceId !== sourceId ||
+    !scope.stagingSnapshotId
+  ) {
+    return { readMode: null, items: [] };
+  }
+
+  const itemsPerSection = Math.max(
+    1,
+    Math.ceil(boundedTotalLimit / selectedGroupTitles.length),
+  );
+  const sections = await listStagingFirstFoldHomeVodSections({
+    scopeKey,
+    snapshotId: scope.stagingSnapshotId,
+    sourceId,
+    maxSections: selectedGroupTitles.length,
+    itemsPerSection,
+    movieGroupTitles: contentKind === 'movie' ? selectedGroupTitles : [],
+    seriesGroupTitles: contentKind === 'series' ? selectedGroupTitles : [],
+  });
+  const uniqueItems = new Map<string, HomeVodItem>();
+
+  for (const item of sections.flatMap((section) => section.items)) {
+    if (item.kind === contentKind && !uniqueItems.has(item.id)) {
+      uniqueItems.set(item.id, item);
+    }
+  }
+
+  const items = Array.from(uniqueItems.values()).slice(0, boundedTotalLimit);
+  return items.length > 0
+    ? { readMode: 'staging', items }
+    : { readMode: null, items: [] };
+}
 
 export type LocalMovieCategoryPageResult = {
   status: 'ready' | 'unavailable' | 'not_found';
@@ -96,7 +187,7 @@ export async function loadLocalMovieCategoryPage(
       contentKinds: ['movie'],
     }).catch(() => null);
 
-    if (activeCategories) {
+    if (activeCategories && activeCategories.categories.length > 0) {
       const activeCategory =
         activeCategories.categories.find((category) =>
           normalizedGroupTitles.has(
