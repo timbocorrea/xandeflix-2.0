@@ -25,7 +25,6 @@ import { prepareLocalCatalogRuntimeSnapshotBridge } from './localCatalogRuntimeS
 import { deriveLocalCatalogScope } from './localCatalogScope.service';
 import { getReadableLocalCatalogActiveSnapshot } from './localCatalogSnapshotLifecycle.service';
 import type {
-  LocalCatalogSearchDocument,
   LocalCatalogSnapshotCategory,
   LocalCatalogSnapshotItem,
 } from '../types/localCatalog.types';
@@ -75,7 +74,6 @@ async function inspectGeneration(snapshotId: string) {
       [
         LOCAL_CATALOG_V3_STORES.items,
         LOCAL_CATALOG_V3_STORES.categories,
-        LOCAL_CATALOG_V3_STORES.searchDocuments,
       ],
       'readonly',
     );
@@ -92,18 +90,11 @@ async function inspectGeneration(snapshotId: string) {
         .index('snapshotId')
         .getAll(IDBKeyRange.only(snapshotId)),
     ) as Promise<LocalCatalogSnapshotCategory[]>;
-    const searchDocuments = requestResult(
-      transaction
-        .objectStore(LOCAL_CATALOG_V3_STORES.searchDocuments)
-        .index('snapshotId')
-        .getAll(IDBKeyRange.only(snapshotId)),
-    ) as Promise<LocalCatalogSearchDocument[]>;
-    const records = await Promise.all([items, categories, searchDocuments]);
+    const records = await Promise.all([items, categories]);
     await completed;
     return {
       items: records[0],
       categories: records[1],
-      searchDocuments: records[2],
     };
   } finally {
     db.close();
@@ -166,7 +157,7 @@ export async function runLocalCatalogSourceFreshnessSmokeTest() {
   const generationV1 = v1Import.activeGenerationId;
   const v1Records = generationV1
     ? await inspectGeneration(generationV1)
-    : { items: [], categories: [], searchDocuments: [] };
+    : { items: [], categories: [] };
 
   const unchangedImport = await refreshLocalCatalogInBackground(
     input,
@@ -182,7 +173,7 @@ export async function runLocalCatalogSourceFreshnessSmokeTest() {
   const generationV2 = v2Import.activeGenerationId;
   const v2Records = generationV2
     ? await inspectGeneration(generationV2)
-    : { items: [], categories: [], searchDocuments: [] };
+    : { items: [], categories: [] };
   const oldSnapshot = generationV1
     ? await getLocalCatalogSnapshot(generationV1)
     : null;
@@ -241,8 +232,6 @@ export async function runLocalCatalogSourceFreshnessSmokeTest() {
       activeGenerationObservedDuringV2 === generationV1 &&
       generationV2 !== generationV1,
     exactV2Items: v2Records.items.length === SOURCE_FIXTURE_V2.length,
-    exactV2SearchDocuments:
-      v2Records.searchDocuments.length === SOURCE_FIXTURE_V2.length,
     categorySetRebuilt:
       v2Records.categories.some(
         (category) => category.normalizedTitle === 'synthetic new category',

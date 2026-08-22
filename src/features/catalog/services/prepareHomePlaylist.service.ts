@@ -8,11 +8,15 @@ import type {
   PlaylistLoadProgress,
   PlaylistRuntimeAuthorizationContext,
   PlaylistSource,
+  SourceImportTask,
 } from '@/features/playlists/types/playlist';
 import { localCatalogRepository } from '@/features/localCatalog/repositories/localCatalogRepository.service';
 import type { CatalogRepository } from '@/features/localCatalog/repositories/catalogRepository.types';
 import { isLocalCatalogReadable } from '@/features/localCatalog/services/localCatalogReadability.service';
 import { deriveLocalCatalogScope } from '@/features/localCatalog/services/localCatalogScope.service';
+import { getReadableLocalCatalogActiveSnapshot } from '@/features/localCatalog/services/localCatalogSnapshotLifecycle.service';
+import { env } from '@/config/env';
+import { e8DiagnosticLog } from '@/platform/e8DiagnosticLog';
 
 export type PrepareHomePlaylistInput = {
   licenseCode: string;
@@ -25,6 +29,10 @@ export type PrepareHomePlaylistInput = {
     source: PlaylistSource,
     authorizationContext?: PlaylistRuntimeAuthorizationContext | null,
   ) => Promise<void>;
+  startSourceImport?: (
+    source: PlaylistSource,
+    authorizationContext?: PlaylistRuntimeAuthorizationContext | null,
+  ) => SourceImportTask;
   loadFromChannels: (input: {
     source: PlaylistSource;
     channels: IptvChannel[];
@@ -37,17 +45,22 @@ export type PrepareHomePlaylistInput = {
 export type PrepareHomePlaylistDependencies = {
   getAuthorizedSource: typeof getAuthorizedIptvSource;
   repository: Pick<CatalogRepository, 'getImportMetadata'>;
+  getActiveSnapshot?: typeof getReadableLocalCatalogActiveSnapshot;
 };
 
 export type PreparedHomePlaylist = {
   source: PlaylistSource;
   authorizationContext: PlaylistRuntimeAuthorizationContext | null;
   localCatalogScopeKey: string | null;
+  firstFoldSnapshotId?: string | null;
+  firstFoldReadMode?: 'staging' | 'active' | null;
+  firstFoldHomeSections?: import('@/features/catalog/services/homeVod.service').HomeVodSection[];
 };
 
 const defaultDependencies: PrepareHomePlaylistDependencies = {
   getAuthorizedSource: getAuthorizedIptvSource,
   repository: localCatalogRepository,
+  getActiveSnapshot: getReadableLocalCatalogActiveSnapshot,
 };
 
 const inFlightPrepareMap = new Map<string, Promise<PreparedHomePlaylist>>();
@@ -100,10 +113,13 @@ export async function prepareHomePlaylist({
   currentStatus,
   currentSourceId,
   knownReadableSourceId,
+  startSourceImport,
   loadFromSource,
   loadFromChannels,
   clearRuntime,
 }: PrepareHomePlaylistInput, dependencies = defaultDependencies) {
+  e8DiagnosticLog('PREPARE_HOME_ENTER');
+  const consumerStartedAt = performance.now();
   const readableOfflineSourceId =
     currentSourceId?.trim() || knownReadableSourceId?.trim() || '';
 
@@ -155,19 +171,6 @@ export async function prepareHomePlaylist({
     Boolean(currentSourceId) && currentSourceId === sourceId;
 
   if (
-    playlistSource.sourceType === 'm3u' &&
-    sourceId &&
-    knownReadableSourceId?.trim() === sourceId
-  ) {
-    loadFromChannels({
-      source: playlistSource,
-      channels: [],
-      authorizationContext,
-    });
-    return preparedPlaylist;
-  }
-
-  if (
     isCurrentAuthorizedSource &&
     (currentChannelsCount > 0 ||
       currentStatus === 'loading' ||
@@ -193,7 +196,22 @@ export async function prepareHomePlaylist({
     }
   }
 
+  let isCatalogUsable = false;
   if (isLocalCatalogReadable(metadata)) {
+    if (preparedPlaylist.localCatalogScopeKey) {
+      const activeSnapshot = await (
+        dependencies.getActiveSnapshot ??
+        getReadableLocalCatalogActiveSnapshot
+      )(preparedPlaylist.localCatalogScopeKey).catch(() => null);
+      isCatalogUsable = Boolean(
+        activeSnapshot && (activeSnapshot.totalItems ?? 0) > 0,
+      );
+    } else {
+      isCatalogUsable = true;
+    }
+  }
+
+  if (isCatalogUsable) {
     loadFromChannels({
       source: playlistSource,
       channels: [],
@@ -208,6 +226,34 @@ export async function prepareHomePlaylist({
 
   const preparePromise = (async () => {
     try {
+      if (typeof startSourceImport === 'function') {
+        e8DiagnosticLog('SOURCE_IMPORT_DISPATCH', {
+          managedRequested: Boolean(
+            env.localCatalogSnapshotImportEnabled &&
+              authorizationContext?.internalLicenseId?.trim() &&
+              sourceId &&
+              playlistSource.sourceType === 'm3u',
+          ),
+        });
+        const task = startSourceImport(
+          playlistSource,
+          authorizationContext,
+        );
+        const firstFold = await task.firstFoldReady;
+        e8DiagnosticLog('FIRST_FOLD_READY_CONSUMED', {
+          consumerElapsedMs: Math.round(performance.now() - consumerStartedAt),
+          readMode: firstFold.readMode,
+          hasRenderableVodSections: firstFold.hasRenderableVodSections,
+        });
+        return {
+          ...preparedPlaylist,
+          localCatalogScopeKey:
+            firstFold.scopeKey || preparedPlaylist.localCatalogScopeKey,
+          firstFoldSnapshotId: firstFold.snapshotId,
+          firstFoldReadMode: firstFold.readMode,
+          firstFoldHomeSections: firstFold.homeSections ?? [],
+        };
+      }
       await loadFromSource(playlistSource, authorizationContext);
       return preparedPlaylist;
     } finally {

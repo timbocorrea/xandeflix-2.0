@@ -1,0 +1,259 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "XandeflixGateBaselineManifest",
+  "description": "Schema for deterministic gate baseline and safety manifests",
+  "type": "object",
+  "required": [
+    "gateId"
+  ],
+  "properties": {
+    "gateId": {
+      "type": "string",
+      "description": "Identifier of the active gate"
+    },
+    "canonicalRoot": {
+      "type": "string",
+      "description": "Expected canonical repository root path"
+    },
+    "expectedBranch": {
+      "type": "string",
+      "description": "Expected git branch name"
+    },
+    "expectedHead": {
+      "type": "string",
+      "description": "Expected git commit SHA-1"
+    },
+    "allowedPaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Explicit allowlist of files or directory prefixes allowed to have deltas"
+    },
+    "protectedPaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Explicit list of protected files or directory prefixes that must never be mutated"
+    },
+    "architectureHashes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Map of relative doc path to expected SHA-256 hash"
+    },
+    "criticalFileHashes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Map of relative critical source file path to expected SHA-256 hash"
+    },
+    "worktreeBaseline": {
+      "type": "array",
+      "description": "Content and status snapshot of every pre-existing dirty path",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "status",
+          "contentSha256",
+          "mutationPolicy"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "contentSha256": {
+            "type": "string",
+            "description": "SHA-256 or DELETED sentinel"
+          },
+          "mutationPolicy": {
+            "enum": [
+              "frozen",
+              "mutable"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "expectedBuildFlags": {
+      "type": "object",
+      "properties": {
+        "snapshotImportEnabled": {
+          "type": "boolean"
+        },
+        "snapshotPromotionEnabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependencyBaseline": {
+      "type": "object",
+      "properties": {
+        "packageJsonDependencies": {
+          "type": "object"
+        },
+        "packageJsonDevDependencies": {
+          "type": "object"
+        },
+        "packageLockSha256": {
+          "type": "string"
+        },
+        "buildGradleSha256": {
+          "type": "string"
+        },
+        "appBuildGradleSha256": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "targetedCommands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "command",
+          "args"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "physicalEvidenceRequirements": {
+      "type": "object",
+      "properties": {
+        "logPath": {
+          "type": "string"
+        },
+        "expectedSha256": {
+          "type": "string"
+        },
+        "requiredMarkers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredPids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "minimumTimestamp": {
+          "type": "string"
+        },
+        "maximumTimestamp": {
+          "type": "string"
+        },
+        "expectedSize": {
+          "type": "integer"
+        },
+        "requiredRuntimeFlags": {
+          "type": "object",
+          "properties": {
+            "snapshotImportEnabled": {
+              "type": "boolean"
+            },
+            "snapshotPromotionEnabled": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "orderedMarkerSequences": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "artifactRequirements": {
+      "type": "object",
+      "properties": {
+        "distEnvChunk": {
+          "type": "string"
+        },
+        "androidEnvChunk": {
+          "type": "string"
+        },
+        "apkPath": {
+          "type": "string"
+        },
+        "expectedApkSha256": {
+          "type": "string"
+        },
+        "expectedApkSizeBytes": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "reportPath": {
+      "type": "string",
+      "description": "Path where the machine-readable gate report should be written"
+    },
+    "gateType": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "CANONICAL_AMENDMENT",
+        "CANONICAL_RECORD_UPDATE",
+        "SAFETY_AMENDMENT"
+      ],
+      "description": "Gate policy class. Omitted means STANDARD."
+    },
+    "masterAuthorization": {
+      "type": "object",
+      "required": [
+        "authority",
+        "decisionRef"
+      ],
+      "properties": {
+        "authority": {
+          "type": "string",
+          "enum": [
+            "CHAT_MASTER"
+          ]
+        },
+        "decisionRef": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "description": "Explicit Chat Mestre authorization required for special amendment gates."
+    }
+  },
+  "additionalProperties": false
+}

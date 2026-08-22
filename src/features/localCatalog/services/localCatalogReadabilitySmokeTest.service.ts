@@ -17,7 +17,7 @@ export type LocalCatalogReadabilitySmokeTestResult = {
   refreshCanceledWithLastSuccess: boolean;
   bootNoRedownload: boolean;
   bootScopePropagated: boolean;
-  criticalCacheAvoidsIndexedDb: boolean;
+  criticalCacheRequiresReadableMetadata: boolean;
   liveLocalFirst: boolean;
 };
 
@@ -123,6 +123,13 @@ export async function runLocalCatalogReadabilitySmokeTest(): Promise<LocalCatalo
     {
       getAuthorizedSource: async () => authorizedSource,
       repository: repository(metadata('failed', LAST_SUCCESS)),
+      getActiveSnapshot: async () =>
+        ({
+          snapshotId: 'snap-smoke-1',
+          status: 'ready',
+          totalItems: 10,
+          stats: { itemCount: 10, categoryCount: 1 },
+        }) as any,
     },
   );
 
@@ -157,12 +164,46 @@ export async function runLocalCatalogReadabilitySmokeTest(): Promise<LocalCatalo
           return metadata('ready', LAST_SUCCESS);
         },
       },
+      getActiveSnapshot: async () =>
+        ({
+          snapshotId: 'snap-smoke-2',
+          status: 'ready',
+          totalItems: 10,
+          stats: { itemCount: 10, categoryCount: 1 },
+        }) as any,
     },
   );
-  const criticalCacheAvoidsIndexedDb =
+  let unreadableMetadataSourceLoads = 0;
+  let unreadableMetadataChannelLoads = 0;
+  const unreadableMetadataPlaylist = await prepareHomePlaylist(
+    {
+      licenseCode: 'SMOKE',
+      deviceIdentifier: 'device-id',
+      currentChannelsCount: 0,
+      currentStatus: 'idle',
+      knownReadableSourceId: SOURCE_ID,
+      loadFromSource: async () => {
+        unreadableMetadataSourceLoads += 1;
+      },
+      loadFromChannels: () => {
+        unreadableMetadataChannelLoads += 1;
+      },
+      clearRuntime: () => undefined,
+    },
+    {
+      getAuthorizedSource: async () => authorizedSource,
+      repository: {
+        getImportMetadata: async () => null,
+      },
+    },
+  );
+  const criticalCacheRequiresReadableMetadata =
     criticalCachedPlaylist.source.sourceId === SOURCE_ID &&
-    criticalCacheMetadataReads === 0 &&
-    criticalCacheChannelLoads === 1;
+    criticalCacheMetadataReads === 1 &&
+    criticalCacheChannelLoads === 1 &&
+    unreadableMetadataPlaylist.source.sourceId === SOURCE_ID &&
+    unreadableMetadataSourceLoads === 1 &&
+    unreadableMetadataChannelLoads === 0;
   const liveItem: LocalCatalogItem = {
     id: 'live-item',
     sourceId: SOURCE_ID,
@@ -195,7 +236,7 @@ export async function runLocalCatalogReadabilitySmokeTest(): Promise<LocalCatalo
     refreshCanceledWithLastSuccess,
     bootNoRedownload,
     bootScopePropagated,
-    criticalCacheAvoidsIndexedDb,
+    criticalCacheRequiresReadableMetadata,
     liveLocalFirst,
   };
 

@@ -398,6 +398,56 @@ Refresh ou import que trabalhe com gerações deve comprovar:
 
 `ACTIVE_GENERATION_SAFETY=REQUIRED`
 
+## 16.1 Bounded Non-Authoritative Staging Content Gate
+
+`POLICY_NAME=BOUNDED_NON_AUTHORITATIVE_STAGING_CONTENT`
+
+Durante cold bootstrap sem geração active válida/utilizável, conteúdo staging local estruturalmente renderizável pode ser lido de forma bounded, incremental, somente leitura, não autoritativa e limitada ao source/scope autorizado. A construção do catálogo completo continua em background.
+
+Critérios obrigatórios cross-route:
+
+`COLD_NO_ACTIVE_HOME_PARTIAL_CONTENT=REQUIRED_WHEN_RENDERABLE_BEFORE_EOF`
+
+`COLD_NO_ACTIVE_MOVIES_PARTIAL_CONTENT=REQUIRED_WHEN_RENDERABLE_BEFORE_EOF`
+
+`COLD_NO_ACTIVE_SERIES_PARTIAL_CONTENT=REQUIRED_WHEN_RENDERABLE_BEFORE_EOF`
+
+`COLD_NO_ACTIVE_LIVE_PARTIAL_CONTENT=REQUIRED_WHEN_RENDERABLE_BEFORE_EOF`
+
+`NO_RENDERABLE_CONTENT_YET=PREPARING_OR_LOADING`
+
+`FALSE_EMPTY_DURING_PARTIAL_IMPORT=PROIBIDO`
+
+`VALID_ACTIVE_DURING_REFRESH=ACTIVE_REMAINS_VISIBLE_AND_AUTHORITATIVE`
+
+`STAGING_VISIBILITY_DOES_NOT_PROMOTE=REQUIRED`
+
+`FAILED_STAGING_DOES_NOT_REPLACE_ACTIVE=REQUIRED`
+
+`PROMOTION_REMAINS_ONLY_AUTHORITY_BOUNDARY=REQUIRED`
+
+`EARLY_PROMOTION=PROIBIDO`
+
+`PROMOTION_BEFORE_EOF=PROIBIDO`
+
+`PARTIAL_USABLE_CONTENT_IS_FULL_CATALOG_READY=NAO`
+
+`PARTIAL_CONTENT_ALLOWED_WHILE_IMPORT_STATUS_IN_PROGRESS=SIM`
+
+`ALL_SOURCE_CATEGORIES_REQUIRED_FOR_PARTIAL_CONTENT=NAO`
+
+`INCREMENTAL_BOUNDED_EXPANSION_BEFORE_EOF=REQUIRED_WHEN_NEW_RENDERABLE_DATA_EXISTS`
+
+`COLLECT_CHANNELS_FALSE=PRESERVED`
+
+Para Live, o gate exige leitura local bounded compatível com a arquitetura e proíbe exigir um array React completo crescente do catálogo. O mecanismo concreto de atualização ou leitura não é definido neste gate.
+
+Em warm refresh com active válida, staging pode continuar sendo construído, mas não substitui active antes de promotion válida. Falha, cancelamento ou descarte de staging não invalida active.
+
+Nenhum critério desta seção cria SLA numérico. First fold ou conteúdo parcial utilizável não equivale a `FULL_CATALOG_READY`, e o limite operacional de quinze minutos de gate físico não é SLA de produto.
+
+`PHYSICAL_GATE_15_MINUTES_IS_SLA=NAO`
+
 ---
 
 # 17. Continuity Gate

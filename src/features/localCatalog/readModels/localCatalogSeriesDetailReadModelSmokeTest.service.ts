@@ -48,6 +48,10 @@ type SeriesDetailSmokeResult = {
   SERIES_DETAIL_INDEX_08_ACTIVE_SNAPSHOT_ISOLATION: boolean;
   SERIES_DETAIL_INDEX_09_STREAM_URL_PRESERVED: boolean;
   SERIES_DETAIL_INDEX_10_LARGE_CATALOG: boolean;
+  SERIES_DETAIL_INDEX_11_STAGING_DIRECT_FALLBACK: boolean;
+  SERIES_DETAIL_INDEX_12_STAGING_NO_V2_SCAN: boolean;
+  SERIES_DETAIL_INDEX_13_DIRECTED_STAGING_LOOKUP: boolean;
+  SERIES_DETAIL_INDEX_14_EXACT_COLLECTION_ISOLATION: boolean;
   SERIES_DETAIL_V2_INDEX_01_PREFIX_LOOKUP_NO_FULL_SCAN: boolean;
   SERIES_DETAIL_INDEXED_FULL_SNAPSHOT_SCAN: number;
   ACTIVE_V3_BUILDING_FULL_SCAN_CALLS: number;
@@ -151,11 +155,18 @@ function snapshotEpisode(
   id: string,
   title: string,
   sourceOrder: number,
+  {
+    snapshotId = 'series-detail-smoke-active-snapshot',
+    scopeKey = 'series-detail-smoke-scope',
+  }: {
+    snapshotId?: string;
+    scopeKey?: string;
+  } = {},
 ): LocalCatalogSnapshotItem {
   return {
-    snapshotId: 'series-detail-smoke-active-snapshot',
+    snapshotId,
     itemId: id,
-    scopeKey: 'series-detail-smoke-scope',
+    scopeKey,
     logicalIdentity: {
       version: 1,
       strategy: 'url_fallback',
@@ -219,6 +230,10 @@ export async function runLocalCatalogSeriesDetailReadModelSmokeTest(): Promise<S
     SERIES_DETAIL_INDEX_08_ACTIVE_SNAPSHOT_ISOLATION: false,
     SERIES_DETAIL_INDEX_09_STREAM_URL_PRESERVED: false,
     SERIES_DETAIL_INDEX_10_LARGE_CATALOG: false,
+    SERIES_DETAIL_INDEX_11_STAGING_DIRECT_FALLBACK: false,
+    SERIES_DETAIL_INDEX_12_STAGING_NO_V2_SCAN: false,
+    SERIES_DETAIL_INDEX_13_DIRECTED_STAGING_LOOKUP: false,
+    SERIES_DETAIL_INDEX_14_EXACT_COLLECTION_ISOLATION: false,
     SERIES_DETAIL_V2_INDEX_01_PREFIX_LOOKUP_NO_FULL_SCAN: false,
     SERIES_DETAIL_INDEXED_FULL_SNAPSHOT_SCAN: 0,
     ACTIVE_V3_BUILDING_FULL_SCAN_CALLS: 0,
@@ -501,6 +516,71 @@ export async function runLocalCatalogSeriesDetailReadModelSmokeTest(): Promise<S
       { activeSnapshotResolver: activeResolver, indexedLookup: async () => ({ status: 'ready', items: largeIndexedItems }) },
     );
     result.SERIES_DETAIL_INDEX_10_LARGE_CATALOG = largeDetail?.episodes.length === 20;
+    const stagingSnapshotId = 'series-detail-staging-snapshot';
+    const stagingScopeKey = 'series-detail-staging-scope';
+    const stagingSnapshotEpisodes = [
+      snapshotEpisode('staging-silo-s01e01', 'Silo S01E01', 0, {
+        snapshotId: stagingSnapshotId,
+        scopeKey: stagingScopeKey,
+      }),
+      snapshotEpisode('staging-silo-s01e02', 'Silo S01E02', 1, {
+        snapshotId: stagingSnapshotId,
+        scopeKey: stagingScopeKey,
+      }),
+    ];
+    const stagingCandidateItems = [
+      ...stagingSnapshotEpisodes,
+      snapshotEpisode('staging-silo-origins-s01e01', 'Silo Origins S01E01', 2, {
+        snapshotId: stagingSnapshotId,
+        scopeKey: stagingScopeKey,
+      }),
+    ];
+    const stagingRepositoryInputs: CatalogRepositoryListItemsInput[] = [];
+    const stagingDetail = await loadLocalCatalogSeriesDetailReadModel(
+      {
+        sourceId: SOURCE_ID,
+        scopeKey: stagingScopeKey,
+        seriesKey: 'silo',
+      },
+      createFakeRepository(
+        [episode('v2-staging-silo-s01e01', 'Silo S01E01')],
+        stagingRepositoryInputs,
+      ),
+      {
+        activeSnapshotResolver: async () => ({
+          ...indexedSnapshot(stagingSnapshotId),
+          scopeKey: stagingScopeKey,
+          status: 'building',
+          totalItems: stagingSnapshotEpisodes.length,
+        }),
+        indexedLookup: async () => ({ status: 'not_ready', items: [] }),
+        ensureIndexedLookup: async () => ({
+          snapshotId: stagingSnapshotId,
+          status: 'building',
+          processedCount: 0,
+          indexedCount: 0,
+          batchCount: 0,
+          maxBatchSize: 0,
+        }),
+        directedSnapshotLookup: async () => ({
+          items: stagingCandidateItems,
+          rowsScanned: stagingCandidateItems.length,
+        }),
+      },
+    );
+    result.SERIES_DETAIL_INDEX_11_STAGING_DIRECT_FALLBACK =
+      stagingDetail?.status === 'ready' &&
+      stagingDetail.source === 'staging_snapshot_v3_direct_fallback' &&
+      stagingDetail.episodes.length === stagingSnapshotEpisodes.length;
+    result.SERIES_DETAIL_INDEX_12_STAGING_NO_V2_SCAN =
+      stagingRepositoryInputs.length === 0;
+    result.SERIES_DETAIL_INDEX_13_DIRECTED_STAGING_LOOKUP =
+      stagingDetail?.source === 'staging_snapshot_v3_direct_fallback' &&
+      stagingDetail.episodes.length === stagingSnapshotEpisodes.length;
+    result.SERIES_DETAIL_INDEX_14_EXACT_COLLECTION_ISOLATION =
+      stagingDetail?.episodes.every(
+        (item) => !item.title.toLowerCase().includes('origins'),
+      ) === true;
     const legacyFullScanInputs: CatalogRepositoryListItemsInput[] = [];
     let legacyPrefixLookupCalls = 0;
     const legacyPrefixDetail = await loadLocalCatalogSeriesDetailReadModel(

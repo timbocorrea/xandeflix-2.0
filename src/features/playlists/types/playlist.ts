@@ -1,3 +1,5 @@
+import type { HomeVodSection } from '@/features/catalog/services/homeVod.service';
+
 export type IptvChannel = {
   id: string;
   name: string;
@@ -92,4 +94,23 @@ export type PlaylistSource = {
 
 export type PlaylistRuntimeAuthorizationContext = {
   internalLicenseId: string;
+};
+
+export type FirstFoldReadyPayload = {
+  sourceId: string;
+  scopeKey: string;
+  snapshotId: string;
+  readMode: 'staging' | 'active';
+  hasRenderableVodSections: boolean;
+  homeSections?: HomeVodSection[];
+};
+
+export type SourceImportTask = {
+  dedupKey: string;
+  sourceId: string;
+  scopeKey: string | null;
+  stagingSnapshotId: string | null;
+  firstFoldReady: Promise<FirstFoldReadyPayload>;
+  completion: Promise<LoadedPlaylist>;
+  abort: () => void;
 };

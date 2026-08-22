@@ -12,7 +12,13 @@
     "governance:test": "node scripts/guardrails/check-data-governance.test.mjs",
     "test:runtime-access": "node scripts/run-u2-runtime-access-smokes.mjs",
     "test:multi-device-bootstrap": "node scripts/run-multi-device-bootstrap-smokes.mjs",
-    "postinstall": "node scripts/patch-capacitor-java17.cjs"
+    "postinstall": "node scripts/patch-capacitor-java17.cjs",
+    "safety:baseline": "node scripts/safety/check-baseline.mjs",
+    "safety:lock": "node scripts/safety/writer-lock.mjs",
+    "safety:prebuild": "node scripts/safety/run-pre-build-gate.mjs",
+    "safety:verify-bundle": "node scripts/safety/verify-bundle-flags.mjs",
+    "safety:verify-evidence": "node scripts/safety/verify-physical-evidence.mjs",
+    "safety:test": "node scripts/safety/test-safety-barrier.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",

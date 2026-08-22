@@ -43,6 +43,7 @@ import { runDiscoveryPresentationLifecycleSmokeTest } from '@/features/catalog/s
 import { runDiscoveryRuntimePresentationStoreSmokeTest } from '@/features/catalog/services/discoveryRuntimePresentationStoreSmokeTest.service';
 import { runDiscoverySelectorSmokeTest } from '@/features/catalog/services/discoverySelectorSmokeTest.service';
 import { runU2F23NavigationCorrectnessSmokeTest } from '@/features/catalog/services/u2f23NavigationCorrectnessSmokeTest.service';
+import { runFocusLatencyCloseoutSmokeTest } from '@/features/catalog/services/focusLatencyCloseoutSmokeTest.service';
 import { runLocalCatalogArtworkSmokeTest } from '@/features/localCatalog/services/localCatalogArtworkSmokeTest.service';
 import { runLocalCatalogDiscoveryCandidateReadModelSmokeTest } from '@/features/localCatalog/services/localCatalogDiscoveryCandidateReadModelSmokeTest.service';
 import { runLocalCatalogReadabilitySmokeTest } from '@/features/localCatalog/services/localCatalogReadabilitySmokeTest.service';
@@ -56,6 +57,7 @@ import { runLocalCatalogSnapshotImportSmokeTest } from '@/features/localCatalog/
 import { runLocalCatalogSnapshotLifecycleSmokeTest } from '@/features/localCatalog/services/localCatalogSnapshotLifecycleSmokeTest.service';
 import { runLocalPlaylistImportSmokeTest } from '@/features/localCatalog/services/localPlaylistImportSmokeTest.service';
 import { runAuthorizedIptvSourceRuntimeContextSmokeTest } from '@/features/playlists/services/authorizedIptvSourceRuntimeContextSmokeTest.service';
+import { runLocalCatalogFirstFoldReadModelSmokeTest } from '@/features/localCatalog/readModels/localCatalogFirstFoldReadModelSmokeTest.service';
 
 const allSuites = [
   ['artwork', runLocalCatalogArtworkSmokeTest],
@@ -70,7 +72,9 @@ const allSuites = [
   ['search-u2f4', runLocalCatalogSearchSmokeTest],
   ['series-lookup-u2f4d1b1', runLocalCatalogSeriesLookupSmokeTest],
   ['authorization-context', runAuthorizedIptvSourceRuntimeContextSmokeTest],
+  ['first-fold', runLocalCatalogFirstFoldReadModelSmokeTest],
   ['navigation', runU2F23NavigationCorrectnessSmokeTest],
+  ['focus-latency-closeout', runFocusLatencyCloseoutSmokeTest],
   ['hot-return', runHomeHotReturnSmokeTest],
   ['discovery-1', runDiscoverySelectorSmokeTest],
   ['discovery-2a', runLocalCatalogDiscoveryCandidateReadModelSmokeTest],

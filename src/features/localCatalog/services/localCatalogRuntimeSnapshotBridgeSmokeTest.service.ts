@@ -17,10 +17,6 @@ import {
 } from './localCatalogRuntimeSnapshotBridge.service';
 import { deriveLocalCatalogScope } from './localCatalogScope.service';
 import { runLocalCatalogSnapshotImportSmokeTest } from './localCatalogSnapshotImportSmokeTest.service';
-import {
-  getLocalCatalogSeriesLookupStatus,
-  listLocalCatalogSeriesLookupItems,
-} from './localCatalogSeriesLookup.service';
 import type {
   LocalCatalogScope,
   LocalCatalogSnapshot,
@@ -55,7 +51,7 @@ export type LocalCatalogRuntimeSnapshotBridgeSmokeTestResult = {
   staleRequestCannotPromote: boolean;
   promotionDisabledLeavesReady: boolean;
   promotionEnabledActivatesSnapshot: boolean;
-  incrementalSeriesLookupReady: boolean;
+  completionDoesNotRequireSeriesLookup: boolean;
   promotionDoesNotScheduleFullScan: boolean;
   cycle4aRegressionPass: boolean;
   syntheticCleanup: boolean;
@@ -234,7 +230,7 @@ export async function runLocalCatalogRuntimeSnapshotBridgeSmokeTest(): Promise<L
     staleRequestCannotPromote: false,
     promotionDisabledLeavesReady: false,
     promotionEnabledActivatesSnapshot: false,
-    incrementalSeriesLookupReady: false,
+    completionDoesNotRequireSeriesLookup: false,
     promotionDoesNotScheduleFullScan: false,
     cycle4aRegressionPass: false,
     syntheticCleanup: false,
@@ -333,19 +329,13 @@ export async function runLocalCatalogRuntimeSnapshotBridgeSmokeTest(): Promise<L
     result.promotionDisabledLeavesReady =
       mainScopeReady?.activeSnapshotId === activeMainId &&
       readySnapshot?.status === 'ready';
-    if (readySnapshot) {
-      const lookupState = await getLocalCatalogSeriesLookupStatus(
-        readySnapshot.snapshotId,
-      );
-      const indexedRead = await listLocalCatalogSeriesLookupItems({
-        snapshotId: readySnapshot.snapshotId,
-        seriesKey: 'synthetic-runtime-item',
-      });
-      result.incrementalSeriesLookupReady =
-        lookupState?.status === 'ready' &&
-        lookupState.processedCount === 500 &&
-        indexedRead.status === 'ready';
-    }
+    // Series Lookup is intentionally not consulted here: complete() and the
+    // non-promoting snapshot lifecycle must be valid before its background build.
+    result.completionDoesNotRequireSeriesLookup =
+      mainMetrics.status === 'ready' &&
+      readySnapshot?.status === 'ready' &&
+      readySnapshot.totalItems === 500 &&
+      mainScopeReady?.activeSnapshotId === activeMainId;
 
     const promotedBridge = await prepareBridge({
       internalLicenseId: RAW_LICENSE_A,

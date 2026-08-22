@@ -29,6 +29,10 @@ const viteDefinitions = {
   'import.meta.env.VITE_LOCAL_CATALOG_WORKER_ENABLED': JSON.stringify('false'),
 };
 
+function emitRuntimeAccessStage(stage) {
+  process.stderr.write(`${JSON.stringify({ runtimeAccessStage: stage })}\n`);
+}
+
 function sanitizeFailureCode(error, fallback) {
   if (
     error instanceof Error &&
@@ -117,9 +121,11 @@ function installJSDOMGlobals(dom) {
 }
 
 async function runJSDOMSmoke(temporaryRoot) {
+  emitRuntimeAccessStage('JSDOM_START');
   const nodeOutputRoot = path.join(temporaryRoot, 'node');
   await mkdir(nodeOutputRoot, { recursive: true });
 
+  emitRuntimeAccessStage('JSDOM_BUILD_START');
   await build({
     configFile: false,
     mode: 'development',
@@ -145,7 +151,9 @@ async function runJSDOMSmoke(temporaryRoot) {
       },
     },
   });
+  emitRuntimeAccessStage('JSDOM_BUILD_END');
 
+  emitRuntimeAccessStage('JSDOM_INIT_START');
   const dom = new JSDOM(
     '<!doctype html><html><body></body></html>',
     {
@@ -154,19 +162,29 @@ async function runJSDOMSmoke(temporaryRoot) {
     },
   );
   const restoreGlobals = installJSDOMGlobals(dom);
+  globalThis.__xandeflixRuntimeAccessStage = (stage) =>
+    emitRuntimeAccessStage(`JSDOM_${stage}`);
+  emitRuntimeAccessStage('JSDOM_INIT_END');
 
   try {
+    emitRuntimeAccessStage('JSDOM_IMPORT_START');
     const smokeModule = await import(
       `${pathToFileURL(
         path.join(nodeOutputRoot, 'runtime-access-smoke.mjs'),
       ).href}?v=${Date.now()}`
     );
+    emitRuntimeAccessStage('JSDOM_IMPORT_END');
+    emitRuntimeAccessStage('JSDOM_TEST_START');
     const result = await smokeModule.runClientRuntimeAccessSmokeTest();
+    emitRuntimeAccessStage('JSDOM_TEST_END');
     validateSmokeResult(result, 'JSDOM');
     return result;
   } finally {
+    emitRuntimeAccessStage('JSDOM_CLEANUP_START');
     dom.window.close();
+    Reflect.deleteProperty(globalThis, '__xandeflixRuntimeAccessStage');
     restoreGlobals();
+    emitRuntimeAccessStage('JSDOM_CLEANUP_END');
   }
 }
 
@@ -398,6 +416,7 @@ try {
 }
 
 async function runBrowserSmoke(temporaryRoot, browserExecutable) {
+  emitRuntimeAccessStage('BROWSER_START');
   const browserRoot = path.join(temporaryRoot, 'browser');
   const profileRoot = path.join(temporaryRoot, 'browser-profile');
   await mkdir(browserRoot, { recursive: true });
@@ -436,6 +455,7 @@ async function runBrowserSmoke(temporaryRoot, browserExecutable) {
   });
 
   try {
+    emitRuntimeAccessStage('BROWSER_SERVER_START');
     await server.listen();
     const address = server.httpServer?.address();
     assertCondition(
@@ -443,11 +463,14 @@ async function runBrowserSmoke(temporaryRoot, browserExecutable) {
       'BROWSER_VITE_ADDRESS_UNAVAILABLE',
     );
     const browserUrl = `http://127.0.0.1:${address.port}/`;
+    emitRuntimeAccessStage('BROWSER_SERVER_END');
+    emitRuntimeAccessStage('BROWSER_PROCESS_START');
     const dumpedDom = await runBrowserProcess(
       browserExecutable,
       browserUrl,
       profileRoot,
     );
+    emitRuntimeAccessStage('BROWSER_PROCESS_END');
     const parsedDom = new JSDOM(dumpedDom);
 
     try {
@@ -458,18 +481,21 @@ async function runBrowserSmoke(temporaryRoot, browserExecutable) {
       const serializedResult = marker.textContent?.trim();
       assertCondition(serializedResult, 'BROWSER_RESULT_EMPTY');
       const result = JSON.parse(serializedResult);
+      emitRuntimeAccessStage('BROWSER_RESULT_PARSED');
       validateSmokeResult(result, 'BROWSER');
       return result;
     } finally {
       parsedDom.window.close();
     }
   } finally {
+    emitRuntimeAccessStage('BROWSER_SERVER_CLEANUP_START');
     await server.close();
     if (previousNodeEnvironment === undefined) {
       Reflect.deleteProperty(process.env, 'NODE_ENV');
     } else {
       process.env.NODE_ENV = previousNodeEnvironment;
     }
+    emitRuntimeAccessStage('BROWSER_SERVER_CLEANUP_END');
   }
 }
 
@@ -478,6 +504,7 @@ let outputPayload = null;
 let finalExitCode = 0;
 
 try {
+  emitRuntimeAccessStage('RUNNER_START');
   temporaryRoot = await mkdtemp(temporaryPrefix);
   const resolvedTemporaryRoot = path.resolve(temporaryRoot);
   const resolvedSystemTemporaryRoot = path.resolve(os.tmpdir());
@@ -491,8 +518,12 @@ try {
     'U2_RUNTIME_ACCESS_SMOKE_TEMP_PATH_REJECTED',
   );
 
+  emitRuntimeAccessStage('JSDOM_CALL_START');
   const jsdomResult = await runJSDOMSmoke(resolvedTemporaryRoot);
+  emitRuntimeAccessStage('JSDOM_CALL_END');
+  emitRuntimeAccessStage('BROWSER_LOOKUP_START');
   const browserExecutable = await findBrowserExecutable();
+  emitRuntimeAccessStage('BROWSER_LOOKUP_END');
   const browserResult = await runBrowserSmoke(
     resolvedTemporaryRoot,
     browserExecutable,
@@ -507,6 +538,7 @@ try {
   };
 
 } catch (error) {
+  emitRuntimeAccessStage('RUNNER_ERROR');
   const errorCode = sanitizeFailureCode(
     error,
     'U2_RUNTIME_ACCESS_SMOKE_FAILED',
@@ -514,6 +546,7 @@ try {
   outputPayload = { ok: false, errorCode };
   finalExitCode = 1;
 } finally {
+  emitRuntimeAccessStage('CLEANUP_START');
   if (temporaryRoot) {
     const resolvedTemporaryRoot = path.resolve(temporaryRoot);
     const resolvedSystemTemporaryRoot = path.resolve(os.tmpdir());
@@ -528,8 +561,10 @@ try {
       await rm(resolvedTemporaryRoot, { recursive: true, force: true });
     }
   }
+  emitRuntimeAccessStage('CLEANUP_END');
 }
 
+emitRuntimeAccessStage('OUTPUT_START');
 await new Promise((resolve, reject) => {
   process.stdout.write(
     `${JSON.stringify(outputPayload, null, 2)}\n`,
@@ -542,4 +577,5 @@ await new Promise((resolve, reject) => {
     },
   );
 });
+emitRuntimeAccessStage('OUTPUT_END');
 process.exit(finalExitCode);

@@ -11,15 +11,9 @@ import type {
   LocalCatalogSnapshotMetrics,
   LocalCatalogSnapshotCategory,
   LocalCatalogSnapshotItem,
-  LocalCatalogSeriesLookupState,
   LocalCatalogSnapshotPromotionResult,
   LocalCatalogSnapshotStatus,
 } from '../types/localCatalog.types';
-import { createLocalCatalogSearchRecords } from '../lib/localCatalogSearchIndex';
-import {
-  createLocalCatalogSeriesLookupRecord,
-  LOCAL_CATALOG_SERIES_LOOKUP_VERSION,
-} from '../services/localCatalogSeriesLookup.service';
 
 const ALLOWED_TRANSITIONS: Record<LocalCatalogSnapshotStatus, LocalCatalogSnapshotStatus[]> = {
   building: ['validating', 'failed', 'canceled'],
@@ -358,7 +352,6 @@ export async function markLocalCatalogSnapshotReady(input: LifecycleInput & { ex
   return runTransaction([
     LOCAL_CATALOG_V3_STORES.scopes, LOCAL_CATALOG_V3_STORES.snapshots,
     LOCAL_CATALOG_V3_STORES.checkpoints, LOCAL_CATALOG_V3_STORES.metrics,
-    LOCAL_CATALOG_V3_STORES.seriesLookupState,
   ], 'readwrite', async (transaction) => {
     const { snapshot } = await assertWriteFence(transaction, input, ['validating']);
     assertTransition(snapshot.status, 'ready');
@@ -371,23 +364,6 @@ export async function markLocalCatalogSnapshotReady(input: LifecycleInput & { ex
       (typeof value !== 'number' || !Number.isFinite(value) || value < 0)))
       throw code('LOCAL_CATALOG_SNAPSHOT_METRICS_INVALID');
     if (snapshot.failureCode) throw code('LOCAL_CATALOG_SNAPSHOT_TRANSITION_INVALID');
-    const stateStore = transaction.objectStore(
-      LOCAL_CATALOG_V3_STORES.seriesLookupState,
-    );
-    const existingLookupState = await requestResult(
-      stateStore.get(input.snapshotId),
-    ) as LocalCatalogSeriesLookupState | undefined;
-    const lookupState: LocalCatalogSeriesLookupState = {
-      snapshotId: input.snapshotId,
-      status: 'ready',
-      lookupVersion: LOCAL_CATALOG_SERIES_LOOKUP_VERSION,
-      processedCount: input.expectedTotalItems,
-      indexedCount: existingLookupState?.indexedCount ?? 0,
-      checkpoint: null,
-      createdAt: existingLookupState?.createdAt ?? input.timestamp,
-      updatedAt: input.timestamp,
-    };
-    await requestResult(stateStore.put(lookupState));
     const next: LocalCatalogSnapshot = { ...snapshot, status: 'ready', totalItems: input.expectedTotalItems, updatedAt: input.timestamp };
     await requestResult(transaction.objectStore(LOCAL_CATALOG_V3_STORES.snapshots).put(next));
     return next;
@@ -463,11 +439,12 @@ export async function getReadableLocalCatalogActiveSnapshot(scopeKey: string) {
     const rawScope = await requestResult(transaction.objectStore(LOCAL_CATALOG_V3_STORES.scopes).get(scopeKey));
     if (!rawScope) return null;
     const scope = rawScope as LocalCatalogScope;
-    if (scope.accessStatus !== 'active' || !scope.activeSnapshotId) return null;
-    const rawSnapshot = await requestResult(transaction.objectStore(LOCAL_CATALOG_V3_STORES.snapshots).get(scope.activeSnapshotId));
+    if (scope.accessStatus !== 'active' || (!scope.activeSnapshotId && !scope.stagingSnapshotId)) return null;
+    const snapshotId = scope.activeSnapshotId || scope.stagingSnapshotId;
+    const rawSnapshot = await requestResult(transaction.objectStore(LOCAL_CATALOG_V3_STORES.snapshots).get(snapshotId!));
     if (!rawSnapshot) return null;
     const snapshot = rawSnapshot as LocalCatalogSnapshot;
-    return snapshot.scopeKey === scopeKey && snapshot.status === 'active' ? snapshot : null;
+    return snapshot.scopeKey === scopeKey && snapshot.status !== 'failed' && snapshot.status !== 'canceled' && snapshot.status !== 'superseded' ? snapshot : null;
   });
 }
 
@@ -652,11 +629,7 @@ export async function writeLocalCatalogSnapshotBatch(input: SnapshotBatchInput) 
     LOCAL_CATALOG_V3_STORES.scopes, LOCAL_CATALOG_V3_STORES.snapshots,
     LOCAL_CATALOG_V3_STORES.checkpoints, LOCAL_CATALOG_V3_STORES.items,
     LOCAL_CATALOG_V3_STORES.categories,
-    LOCAL_CATALOG_V3_STORES.searchDocuments,
-    LOCAL_CATALOG_V3_STORES.searchTokens,
     LOCAL_CATALOG_V3_STORES.metrics,
-    LOCAL_CATALOG_V3_STORES.seriesLookup,
-    LOCAL_CATALOG_V3_STORES.seriesLookupState,
   ], 'readwrite', async (transaction) => {
     const { scope, snapshot } = await assertWriteFence(transaction, input, ['building']);
     const checkpointStore = transaction.objectStore(LOCAL_CATALOG_V3_STORES.checkpoints);
@@ -677,19 +650,7 @@ export async function writeLocalCatalogSnapshotBatch(input: SnapshotBatchInput) 
       throw code('LOCAL_CATALOG_SOURCE_VALIDATOR_MISMATCH');
     const itemStore = transaction.objectStore(LOCAL_CATALOG_V3_STORES.items);
     const categoryStore = transaction.objectStore(LOCAL_CATALOG_V3_STORES.categories);
-    const searchDocumentStore = transaction.objectStore(
-      LOCAL_CATALOG_V3_STORES.searchDocuments,
-    );
-    const searchTokenStore = transaction.objectStore(
-      LOCAL_CATALOG_V3_STORES.searchTokens,
-    );
     const metricsStore = transaction.objectStore(LOCAL_CATALOG_V3_STORES.metrics);
-    const seriesLookupStore = transaction.objectStore(
-      LOCAL_CATALOG_V3_STORES.seriesLookup,
-    );
-    const seriesLookupStateStore = transaction.objectStore(
-      LOCAL_CATALOG_V3_STORES.seriesLookupState,
-    );
     const newItems: LocalCatalogSnapshotItem[] = [];
     const seenBatch = new Set<string>();
     const uniqueBatchItems: LocalCatalogSnapshotItem[] = [];
@@ -717,44 +678,10 @@ export async function writeLocalCatalogSnapshotBatch(input: SnapshotBatchInput) 
       }
     }
     const persistenceRequests: Promise<unknown>[] = [];
-    let indexedSeriesItems = 0;
     for (const item of newItems) {
       persistenceRequests.push(requestResult(itemStore.add(item)));
-      const { document, tokenRecords } = createLocalCatalogSearchRecords(
-        item,
-        input.updatedAt,
-      );
-      persistenceRequests.push(requestResult(searchDocumentStore.put(document)));
-      for (const tokenRecord of tokenRecords) {
-        persistenceRequests.push(requestResult(searchTokenStore.put(tokenRecord)));
-      }
-      const seriesLookupRecord = createLocalCatalogSeriesLookupRecord(item);
-      if (seriesLookupRecord) {
-        indexedSeriesItems += 1;
-        persistenceRequests.push(
-          requestResult(seriesLookupStore.put(seriesLookupRecord)),
-        );
-      }
     }
     await Promise.all(persistenceRequests);
-    const existingLookupState = await requestResult(
-      seriesLookupStateStore.get(input.snapshotId),
-    ) as LocalCatalogSeriesLookupState | undefined;
-    const lookupState: LocalCatalogSeriesLookupState = {
-      snapshotId: input.snapshotId,
-      status: 'building',
-      lookupVersion: LOCAL_CATALOG_SERIES_LOOKUP_VERSION,
-      processedCount: input.confirmedItems,
-      indexedCount:
-        (existingLookupState?.lookupVersion ===
-        LOCAL_CATALOG_SERIES_LOOKUP_VERSION
-          ? existingLookupState.indexedCount
-          : 0) + indexedSeriesItems,
-      checkpoint: null,
-      createdAt: existingLookupState?.createdAt ?? input.updatedAt,
-      updatedAt: input.updatedAt,
-    };
-    await requestResult(seriesLookupStateStore.put(lookupState));
     const categoryDeltas = new Map<string, { item: LocalCatalogSnapshotItem; count: number }>();
     for (const item of newItems) {
       const categoryId = `${item.contentKind}:${item.normalizedGroup || 'uncategorized'}`;

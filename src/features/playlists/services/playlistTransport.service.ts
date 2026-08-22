@@ -95,7 +95,12 @@ export async function fetchPlaylistTransport(
 
   return fetch(sourceUrl, {
     method: input.method,
-    headers: buildConditionalHeaders(input.conditionalHeaders),
+    headers: (() => {
+      const headers = buildConditionalHeaders(input.conditionalHeaders);
+      headers.set('Accept', 'application/vnd.apple.mpegurl, application/x-mpegURL, audio/mpegurl, text/plain, */*');
+      headers.set('User-Agent', 'Xandeflix/1.0');
+      return headers;
+    })(),
     cache: 'no-store',
     credentials: 'omit',
     redirect: 'follow',

@@ -5,6 +5,7 @@ import {
   type RunAppBootstrapInput,
 } from '@/features/bootstrap/services/appBootstrap.service';
 import { env } from '@/config/env';
+import { e8DiagnosticLog } from '@/platform/e8DiagnosticLog';
 
 export type PreparingStep = 'loading' | 'ready' | 'error';
 
@@ -85,7 +86,9 @@ export function createPreparingHomeOrchestrator({
   }
 
   function startAttempt() {
+    e8DiagnosticLog('PREPARING_FLOW_ENTER');
     const currentAttemptId = ++attemptId;
+    const orchestratorStartedAt = performance.now();
 
     updateState({
       step: 'loading',
@@ -140,6 +143,12 @@ export function createPreparingHomeOrchestrator({
           step: 'ready',
         });
 
+        e8DiagnosticLog('PREPARING_HOME_RELEASE', {
+          orchestratorElapsedMs: Math.round(
+            performance.now() - orchestratorStartedAt,
+          ),
+          step: 'ready',
+        });
         navigate('/', { replace: true });
         runSmokeTestInBackground();
       })

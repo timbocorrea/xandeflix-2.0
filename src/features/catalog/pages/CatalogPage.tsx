@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
-import { Clapperboard, MonitorPlay, Tv } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
+import { Clapperboard, MonitorPlay, Tv } from 'lucide-react';
+import { getCurrentFocusKey, setFocus } from '@noriginmedia/norigin-spatial-navigation';
 
 import { useAuth } from '../../../app/providers/AuthProvider';
 import { AppShell } from '../../../components/layout/AppShell';
@@ -51,6 +51,7 @@ import {
 import { useAutoRotatingHero } from '@/hooks/useAutoRotatingHero';
 import { markDiscoveryPerformance } from '@/features/catalog/services/discoveryPerformance.service';
 
+import { filterRenderableHomeVodSections } from '../services/homeVodRenderability.service';
 import {
   getCachedHomeVodSections,
   loadHomeVodSections,
@@ -58,7 +59,9 @@ import {
   type HomeVodSection,
   type HomeVodItem,
 } from '../services/homeVod.service';
+import { loadLocalStagingHomeVodSections } from '@/features/localCatalog/readModels/localCatalogFirstFoldReadModel.service';
 import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
+
 const INITIAL_TV_VISIBLE_SECTIONS = 1;
 const INITIAL_TV_VISIBLE_ITEMS_PER_SECTION = 5;
 const TV_REMAINING_SECTIONS_DELAY_MS = 1500;
@@ -67,7 +70,7 @@ type HomeCatalogStatus = 'loading' | 'content' | 'empty' | 'error';
 const TOP_CATEGORY_ITEMS = [
   { label: 'Ao Vivo', path: '/live', Icon: Tv },
   { label: 'Filmes', path: '/category/filmes', Icon: Clapperboard },
-  { label: 'S\u00e9ries', path: '/category/series', Icon: MonitorPlay },
+  { label: 'Séries', path: '/category/series', Icon: MonitorPlay },
 ] as const;
 
 type CatalogPageItem = HomeVodItem;
@@ -219,32 +222,6 @@ async function enrichHomeVodSectionsInBackground(
   }
 }
 
-function normalizeHomeSectionTitle(value?: string | null) {
-  return (value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-}
-
-function isRenderableVodHomeSection(section: HomeVodSection) {
-  const normalizedTitle = normalizeHomeSectionTitle(section.title);
-
-  if (
-    normalizedTitle.startsWith('canais') ||
-    normalizedTitle.startsWith('canal') ||
-    normalizedTitle.includes('ao vivo')
-  ) {
-    return false;
-  }
-
-  return section.items.length > 0;
-}
-
-function filterRenderableVodHomeSections(sections?: HomeVodSection[] | null) {
-  return sections?.filter(isRenderableVodHomeSection) ?? [];
-}
-
 function buildMobileHomeHeroMetadata(item?: CatalogPageItem) {
   const genres = Array.isArray(item?.tmdbGenres)
     ? item.tmdbGenres.join(', ')
@@ -317,8 +294,8 @@ function createInitialHomeCatalogState(
     cachedBootstrap.sourceId === loadInput.sourceId
       ? cachedBootstrap.homeSections
       : null;
-  const safeCachedSections = filterRenderableVodHomeSections(cachedSections);
-  const safeBootstrapSections = filterRenderableVodHomeSections(bootstrapSections);
+  const safeCachedSections = filterRenderableHomeVodSections(cachedSections);
+  const safeBootstrapSections = filterRenderableHomeVodSections(bootstrapSections);
   const rawSections = safeCachedSections.length
     ? safeCachedSections
     : safeBootstrapSections.length
@@ -360,6 +337,7 @@ export function CatalogPage() {
   const {
     source: playlistSource,
     status: playlistStatus,
+    progress: playlistProgress,
     localCatalogScopeKey,
     localCatalogGenerationId,
     refreshFromSourceInBackground,
@@ -636,32 +614,31 @@ export function CatalogPage() {
     };
   }, [preloadUrls]);
 
-  useEffect(() => {
-    let isMounted = true;
-    let timeoutId: number | null = null;
-
-    function clearCatalogTimeout() {
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-    }
-
-    function commitCatalogSections(nextSections: CatalogPageSection[]) {
-      if (!isMounted || nextSections.length === 0) {
-        return;
-      }
-
+  const commitCatalogSections = useCallback(
+    (nextSections: CatalogPageSection[]) => {
       realCatalogSectionsRef.current = nextSections;
       setRealCatalogSections(nextSections);
       setHomeCatalogStatus('content');
       setHomeCatalogErrorMessage(null);
-    }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    let timeoutId: number | null = null;
+
+    const clearCatalogTimeout = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
 
     async function loadRealCatalog() {
       const hasUsableCatalog = Boolean(realCatalogSectionsRef.current?.length);
 
-      if (!hasUsableCatalog && !hasInitialHomeVodReadCompleted) {
+      if (!hasUsableCatalog) {
         setHomeCatalogStatus('loading');
         setHomeCatalogErrorMessage(null);
       }
@@ -735,7 +712,7 @@ export function CatalogPage() {
         }
 
         const safeHomeVodSections =
-          filterRenderableVodHomeSections(homeVodSections);
+          filterRenderableHomeVodSections(homeVodSections);
 
         const discoveryScope: DiscoveryRuntimeAccessScope | null = homeVodLoadInput?.sourceId?.trim()
           ? {
@@ -776,6 +753,9 @@ export function CatalogPage() {
               'Nao foi possivel acessar o catalogo local agora.',
             );
           }
+        } else if (realCatalogSectionsRef.current?.length) {
+          setHomeCatalogStatus('content');
+          setHomeCatalogErrorMessage(null);
         } else {
           realCatalogSectionsRef.current = [];
           setRealCatalogSections([]);
@@ -877,12 +857,140 @@ export function CatalogPage() {
       }
     };
   }, [
+    commitCatalogSections,
+    hasInitialHomeVodReadCompleted,
     homeVodLimitPerSection,
+    localCatalogScopeKey,
     playlistSource?.sourceId,
     playlistSource?.sourceType,
     playlistStatus,
-    localCatalogScopeKey,
     homeCatalogRetryKey,
+  ]);
+
+  const channelsParsed = playlistProgress?.channelsParsed ?? 0;
+  const lastProcessedChannelsParsedRef = useRef<number>(0);
+  const lastProcessedGenerationIdRef = useRef<string | null>(null);
+  const isStagingRereadInFlightRef = useRef<boolean>(false);
+  const pendingChannelsParsedRef = useRef<number | null>(null);
+
+  // Incremental bounded staging expansion during managed import
+  useEffect(() => {
+    if (!playlistSource?.sourceId?.trim() || !localCatalogScopeKey) {
+      return;
+    }
+
+    const hasNewChannelsParsed =
+      channelsParsed > 0 &&
+      channelsParsed !== lastProcessedChannelsParsedRef.current;
+    const hasNewGenerationId =
+      Boolean(localCatalogGenerationId) &&
+      localCatalogGenerationId !== lastProcessedGenerationIdRef.current;
+
+    if (!hasNewChannelsParsed && !hasNewGenerationId) {
+      return;
+    }
+
+    if (hasNewChannelsParsed) {
+      lastProcessedChannelsParsedRef.current = channelsParsed;
+    }
+    if (hasNewGenerationId) {
+      lastProcessedGenerationIdRef.current = localCatalogGenerationId;
+    }
+
+    let isMounted = true;
+
+    const performIncrementalReread = async () => {
+      if (isStagingRereadInFlightRef.current) {
+        pendingChannelsParsedRef.current = channelsParsed;
+        return;
+      }
+      isStagingRereadInFlightRef.current = true;
+
+      try {
+        const homeVodLoadInput = createHomeVodLoadInput(
+          homeVodLimitPerSection,
+          playlistSource.sourceId,
+          playlistSource.sourceType,
+          localCatalogScopeKey,
+        );
+
+        // 1. Authoritative active read priority (XC24)
+        if (homeVodLoadInput) {
+          const authoritativeVodSections = await loadHomeVodSections({
+            ...homeVodLoadInput,
+            limitPerSection: homeVodLimitPerSection,
+            preferFresh: true,
+            propagateReadError: false,
+          });
+
+          if (!isMounted) return;
+
+          const safeAuthoritative = filterRenderableHomeVodSections(
+            authoritativeVodSections,
+          );
+
+          if (safeAuthoritative.length > 0) {
+            const nextCatalogSections =
+              mapHomeVodSectionsToCatalogSections(safeAuthoritative);
+            commitCatalogSections(nextCatalogSections);
+            return;
+          }
+        }
+
+        // 2. Non-authoritative bounded staging expansion
+        const currentSourceId = playlistSource.sourceId?.trim();
+        if (!currentSourceId) {
+          return;
+        }
+        const stagingSections = await loadLocalStagingHomeVodSections({
+          sourceId: currentSourceId,
+          scopeKey: localCatalogScopeKey,
+          itemsPerSection: homeVodLimitPerSection,
+          maxSections: isTv ? 6 : 4,
+        });
+
+        if (!isMounted) return;
+
+        const safeStaging = filterRenderableHomeVodSections(stagingSections);
+
+        if (safeStaging.length > 0) {
+          const nextCatalogSections =
+            mapHomeVodSectionsToCatalogSections(safeStaging);
+
+          if (
+            nextCatalogSections.length >=
+            (realCatalogSectionsRef.current?.length ?? 0)
+          ) {
+            commitCatalogSections(nextCatalogSections);
+          }
+        }
+      } catch (err) {
+        console.warn('[XANDEFLIX_HOME_INCREMENTAL_STAGING_FAILED]', err);
+      } finally {
+        isStagingRereadInFlightRef.current = false;
+        if (pendingChannelsParsedRef.current !== null && isMounted) {
+          const nextPending = pendingChannelsParsedRef.current;
+          pendingChannelsParsedRef.current = null;
+          if (nextPending !== lastProcessedChannelsParsedRef.current) {
+            void performIncrementalReread();
+          }
+        }
+      }
+    };
+
+    void performIncrementalReread();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    channelsParsed,
+    commitCatalogSections,
+    homeVodLimitPerSection,
+    isTv,
+    localCatalogGenerationId,
+    localCatalogScopeKey,
+    playlistSource,
   ]);
 
   useEffect(() => {
@@ -917,8 +1025,6 @@ export function CatalogPage() {
     refreshFromSourceInBackground,
     resolvedCatalogSections.length,
   ]);
-
-
 
   useEffect(() => {
     if (!isTv) {
@@ -976,6 +1082,18 @@ export function CatalogPage() {
   }
 
   useRouteInitialFocus();
+
+  useEffect(() => {
+    if (displayCatalogSections.length > 0) {
+      const timer = window.setTimeout(() => {
+        const currentFocus = getCurrentFocusKey();
+        if (!currentFocus) {
+          setFocus('hero-play-button');
+        }
+      }, 100);
+      return () => window.clearTimeout(timer);
+    }
+  }, [displayCatalogSections.length]);
 
   const spatialNavigation = useCatalogGridNavigation({
     sections: displayCatalogSections,

@@ -86,6 +86,8 @@ const HOME_SERIES_GROUP_TITLES =
 
 type HomeVodCacheEntry = {
   createdAt: number;
+  sourceId: string;
+  scopeKey: string;
   sections: HomeVodSection[];
 };
 
@@ -103,6 +105,13 @@ function normalizeCacheLicenseCode(value: string) {
 
 function normalizeCacheDeviceIdentifier(value: string) {
   return value.trim();
+}
+
+function getHomeVodCacheIdentity(input: LoadHomeVodInput) {
+  return {
+    sourceId: input.sourceId?.trim() ?? '',
+    scopeKey: input.scopeKey?.trim() ?? '',
+  };
 }
 
 function normalizeCatalogText(value?: string | null) {
@@ -174,9 +183,12 @@ function readStoredHomeVodSections(input: LoadHomeVodInput) {
     }
 
     const entry = JSON.parse(rawValue) as HomeVodCacheEntry;
+    const expectedIdentity = getHomeVodCacheIdentity(input);
 
     if (
       !entry?.createdAt ||
+      entry.sourceId !== expectedIdentity.sourceId ||
+      entry.scopeKey !== expectedIdentity.scopeKey ||
       !Array.isArray(entry.sections) ||
       Date.now() - entry.createdAt >= HOME_VOD_CACHE_TTL_MS
     ) {
@@ -186,6 +198,8 @@ function readStoredHomeVodSections(input: LoadHomeVodInput) {
 
     return {
       createdAt: entry.createdAt,
+      sourceId: entry.sourceId,
+      scopeKey: entry.scopeKey,
       sections: cloneHomeVodSections(entry.sections),
     };
   } catch {
@@ -203,10 +217,12 @@ function writeStoredHomeVodSections(
   }
 
   try {
+    const identity = getHomeVodCacheIdentity(input);
     window.localStorage.setItem(
       `${HOME_VOD_CACHE_STORAGE_PREFIX}${createHomeVodCacheKey(input)}`,
       JSON.stringify({
         createdAt: Date.now(),
+        ...identity,
         sections: cloneHomeVodSections(sections),
       } satisfies HomeVodCacheEntry),
     );
@@ -319,8 +335,10 @@ export async function loadHomeVodSections(
 
     if (sections.length > 0) {
       const cacheKey = createHomeVodCacheKey(input);
+      const identity = getHomeVodCacheIdentity(input);
       homeVodSectionsCache.set(cacheKey, {
         createdAt: Date.now(),
+        ...identity,
         sections: cloneHomeVodSections(sections),
       });
       writeStoredHomeVodSections(input, sections);

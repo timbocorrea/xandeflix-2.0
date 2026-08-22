@@ -17,6 +17,7 @@ import { MediaCard } from '../../../components/media/MediaCard';
 import { FocusableButton } from '../../../components/tv/FocusableButton';
 import { FOCUS_KEYS } from '@/lib/spatial/focusKeys';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { e8DiagnosticLog } from '@/platform/e8DiagnosticLog';
 import { getStoredLicenseActivation } from '@/features/licensing/lib/licenseActivationStorage';
 import { getOrCreateDeviceIdentifier } from '@/features/playlists/lib/deviceIdentifier';
 import { usePlaylistRuntime } from '@/features/playlists/providers/PlaylistRuntimeProvider';
@@ -37,9 +38,11 @@ import {
 } from '../services/homeVod.service';
 import {
   LOCAL_MOVIE_CATEGORY_PAGE_SIZE,
+  loadLocalStagingCategoryReadModel,
   loadLocalMovieCategoryPage,
   loadLocalMovieCategoryReadModel,
   mergeLocalMovieCategoryPageItems,
+  selectStableOrStagingCategoryItems,
 } from '../../localCatalog/readModels/localCatalogCategoryReadModel.service';
 import {
   loadLocalCatalogSeriesDetailReadModel,
@@ -49,6 +52,7 @@ import {
   getSeriesCollectionKey,
   normalizeSeriesCollectionTitle,
 } from '../../localCatalog/services/localCatalogSeriesIdentity.service';
+import { getLocalCatalogScope } from '../../localCatalog/services/localCatalogDb.service';
 import {
   readPresentationRouteCache,
   writePresentationRouteCache,
@@ -92,6 +96,13 @@ import {
   type EpisodePlaybackProgressStatus,
 } from '../services/episodePlaybackProgress.service';
 import { resolveMoviePlaybackProgress } from '../services/moviePlaybackProgress.service';
+import {
+  getMovieSimilarItemFocusKey,
+  isMovieDetailCatalogRoute,
+  isSeriesDetailCatalogRoute,
+  resolveSeriesDetailHeroItem,
+  shouldRunCategoryAutoFocus,
+} from '../services/catalogDetailFocusPolicy';
 
 const GRID_COLUMNS = 5;
 const INITIAL_VISIBLE_ITEMS = 60;
@@ -102,6 +113,65 @@ const CATEGORY_ITEM_FOCUS_PREFIX = 'category-grid-item';
 const SERIES_DETAIL_HERO_FOCUS_KEY = 'series-detail-hero';
 const SIMILAR_ITEM_FOCUS_PREFIX = 'series-similar-item';
 const SERIES_SEASON_FOCUS_PREFIX = 'series-season-item';
+
+const FOCUS_DIAGNOSTICS_ENABLED =
+  import.meta.env.VITE_FOCUS_DIAGNOSTICS === 'true';
+
+type FocusDiagnosticsWindow = Window & {
+  __XANDEFLIX_CURRENT_FOCUS_KEY?: string;
+  __XANDEFLIX_MOVIE_FOCUS_LAST_EVENT?: string;
+};
+
+function logMovieFocusDiagnostic(
+  event: string,
+  payload: Record<string, unknown> = {},
+) {
+  if (!FOCUS_DIAGNOSTICS_ENABLED || typeof window === 'undefined') {
+    return;
+  }
+
+  const diagnosticsWindow = window as FocusDiagnosticsWindow;
+  const focusedElement = document.querySelector<HTMLElement>(
+    '[data-focused="true"]',
+  );
+  const currentFocusKey = diagnosticsWindow.__XANDEFLIX_CURRENT_FOCUS_KEY ?? null;
+  const previousEvent =
+    diagnosticsWindow.__XANDEFLIX_MOVIE_FOCUS_LAST_EVENT ?? null;
+
+  console.error(
+    '[XANDEFLIX_MOVIE_FOCUS]',
+    JSON.stringify({
+      event,
+      atMs: Math.round(performance.now()),
+      focusKeyBeforeRender: currentFocusKey,
+      documentActiveElement: document.activeElement?.tagName ?? 'NONE',
+      documentActiveNavId: focusedElement?.dataset.navId ?? null,
+      previousEvent,
+      ...payload,
+    }),
+  );
+
+  diagnosticsWindow.__XANDEFLIX_MOVIE_FOCUS_LAST_EVENT = event;
+}
+
+function logSeriesPerformanceDiagnostic(
+  stage: string,
+  payload: Record<string, unknown> = {},
+) {
+  if (!FOCUS_DIAGNOSTICS_ENABLED) {
+    return;
+  }
+
+  console.error(
+    '[XANDEFLIX_SERIES_PERF]',
+    JSON.stringify({
+      stage,
+      atMs: Math.round(performance.now()),
+      ...payload,
+    }),
+  );
+}
+
 const SERIES_HERO_HIGHLIGHT_LIMIT = 10;
 const SERIES_HERO_CANDIDATE_SCAN_LIMIT = 500;
 const SERIES_CATEGORY_ROW_VISIBLE_LIMIT = 15;
@@ -257,10 +327,6 @@ function getSeriesSeasonFocusKey(
   return `${SERIES_SEASON_FOCUS_PREFIX}-${seasonNumber ?? 'null'}-${index}`;
 }
 
-function getMovieSimilarItemFocusKey(movieFocusSlug: string, index: number) {
-  return `movie-similar-${movieFocusSlug}-${index}`;
-}
-
 function readInitialCategoryItems(
   category: CatalogCategoryDefinition | null,
   seriesTmdbId: string | null,
@@ -368,13 +434,18 @@ function readInitialCategoryItems(
   const cachedSections = getCachedHomeVodSections({
     licenseCode,
     deviceIdentifier,
+    sourceId: sourceId ?? undefined,
   });
 
   const sectionItems = (cachedSections ?? [])
     .flatMap((section) => section.items)
     .filter((item) => {
-      if (item.kind && item.kind !== 'series') {
-        return false;
+      if (category.slug === 'filmes' || category.slug.startsWith('filmes-')) {
+        return item.kind === 'movie';
+      }
+
+      if (category.slug === 'series' || category.slug.startsWith('series-')) {
+        return (item.kind === 'series' || !item.kind) && matchesSeries(item);
       }
 
       return matchesSeries(item);
@@ -504,31 +575,6 @@ function createMovieDetailRequestIdentity(
     sourceId?.trim() || 'without-source',
     item.id?.trim() || item.tmdbId?.trim() || item.tmdbTitle?.trim() || item.title,
   ].join('::');
-}
-
-function mergeSeriesHeroMetadata(
-  representative: HomeVodItem,
-  selectedSeriesItem: HomeVodItem | null,
-) {
-  if (!selectedSeriesItem) {
-    return representative;
-  }
-
-  return {
-    ...representative,
-    overview: selectedSeriesItem.overview ?? representative.overview,
-    posterUrl: selectedSeriesItem.posterUrl ?? representative.posterUrl,
-    backdropUrl: selectedSeriesItem.backdropUrl ?? representative.backdropUrl,
-    artworkCandidates:
-      selectedSeriesItem.artworkCandidates ??
-      representative.artworkCandidates,
-    tmdbId: selectedSeriesItem.tmdbId ?? representative.tmdbId,
-    tmdbTitle: selectedSeriesItem.tmdbTitle ?? representative.tmdbTitle,
-    tmdbGenres: selectedSeriesItem.tmdbGenres ?? representative.tmdbGenres,
-    tmdbRating: selectedSeriesItem.tmdbRating ?? representative.tmdbRating,
-    tmdbReleaseYear:
-      selectedSeriesItem.tmdbReleaseYear ?? representative.tmdbReleaseYear,
-  };
 }
 
 function hasRepresentativeMetadataValue(value: unknown) {
@@ -1422,6 +1468,7 @@ function getEpisodeWindowStart(activeIndex: number, total: number) {
 
 
 type SeriesDetailHeroFrameProps = {
+  diagnosticRoute?: 'movie' | 'series';
   disabled: boolean;
   children: ReactNode;
   onEnterPress: () => void;
@@ -1429,6 +1476,7 @@ type SeriesDetailHeroFrameProps = {
 };
 
 function SeriesDetailHeroFrame({
+  diagnosticRoute,
   disabled,
   children,
   onEnterPress,
@@ -1440,6 +1488,46 @@ function SeriesDetailHeroFrame({
     onArrowPress,
     focusable: !disabled,
   });
+
+  const wasFocusedRef = useRef(false);
+  const wasRegisteredRef = useRef(false);
+
+  useEffect(() => {
+    if (diagnosticRoute !== 'movie' || !(ref.current instanceof HTMLElement)) {
+      return;
+    }
+
+    if (!wasRegisteredRef.current) {
+      wasRegisteredRef.current = true;
+      logMovieFocusDiagnostic('MOVIE_HERO_REGISTERED');
+    }
+
+    if (focused) {
+      wasFocusedRef.current = true;
+      (window as FocusDiagnosticsWindow).__XANDEFLIX_CURRENT_FOCUS_KEY =
+        SERIES_DETAIL_HERO_FOCUS_KEY;
+      logMovieFocusDiagnostic('MOVIE_INITIAL_FOCUS_CONFIRMED');
+      logMovieFocusDiagnostic('MOVIE_DOCUMENT_ACTIVE_ELEMENT');
+      logMovieFocusDiagnostic('MOVIE_SPATIAL_FOCUS_KEY');
+    } else if (wasFocusedRef.current) {
+      logMovieFocusDiagnostic('MOVIE_FOCUS_LOST_TS', {
+        focusLostAfterEvent:
+          (window as FocusDiagnosticsWindow).__XANDEFLIX_MOVIE_FOCUS_LAST_EVENT ??
+          null,
+      });
+      logMovieFocusDiagnostic('MOVIE_FOCUS_LOST_AFTER_EVENT');
+    }
+  }, [diagnosticRoute, focused, ref]);
+
+  useEffect(() => {
+    if (diagnosticRoute !== 'movie') {
+      return;
+    }
+
+    return () => {
+      logMovieFocusDiagnostic('MOVIE_COMPONENT_UNMOUNT');
+    };
+  }, [diagnosticRoute]);
 
   useEffect(() => {
     if (focused && ref.current instanceof HTMLElement) {
@@ -1456,6 +1544,8 @@ function SeriesDetailHeroFrame({
       ref={ref}
       role="button"
       tabIndex={-1}
+      data-nav-id={SERIES_DETAIL_HERO_FOCUS_KEY}
+      data-focused={focused ? 'true' : undefined}
       className={
         'relative mb-5 overflow-hidden rounded-[0.9rem] border bg-zinc-950 px-4 py-4 shadow-2xl outline-none transition md:px-5 md:py-4 ' +
         (focused
@@ -1627,6 +1717,7 @@ export function CatalogCategoryPage({
   const {
     source: playlistSource,
     status: playlistStatus,
+    progress: playlistProgress,
     localCatalogScopeKey,
     localCatalogGenerationId,
   } = usePlaylistRuntime();
@@ -1683,20 +1774,22 @@ export function CatalogCategoryPage({
     (groupSlugOverride ?? params.groupSlug) === 'movie-group' &&
     Boolean(searchParams.get('groupTitle')?.trim());
 
-  const isSeriesDetailPage =
-    !isSeriesGroupListPage &&
-    Boolean(
-      seriesGroupTitle &&
-        ((groupSlugOverride ?? params.groupSlug) === 'series-detail' ||
-          seriesTmdbId ||
-          seriesTmdbTitle ||
-          seriesKey),
-    );
+  const resolvedGroupSlug = groupSlugOverride ?? params.groupSlug;
+  const isMovieDetailPage = isMovieDetailCatalogRoute({
+    groupSlug: resolvedGroupSlug,
+    isSeriesGroupListPage,
+    hasMovieIdentity: Boolean(
+      movieId || movieTitle || movieTmdbId || movieTmdbTitle,
+    ),
+  });
 
-  const isMovieDetailPage =
-    !isSeriesGroupListPage &&
-    (groupSlugOverride ?? params.groupSlug) === 'movie-detail' &&
-    Boolean(movieId || movieTitle || movieTmdbId || movieTmdbTitle);
+  const isSeriesDetailPage = isSeriesDetailCatalogRoute({
+    groupSlug: resolvedGroupSlug,
+    isMovieDetailPage,
+    isSeriesGroupListPage,
+    hasSeriesGroupTitle: Boolean(seriesGroupTitle),
+    hasSeriesRouteIdentity: Boolean(seriesTmdbId || seriesTmdbTitle || seriesKey),
+  });
 
   const category = useMemo<CatalogCategoryDefinition | null>(() => {
     if (isSeriesGroupListPage && seriesGroupTitle) {
@@ -1744,7 +1837,7 @@ export function CatalogCategoryPage({
     return {
       slug: groupSlugOverride ?? params.groupSlug ?? 'series-detail',
       title: seriesTitle ?? seriesGroupTitle,
-      description: 'Episodios disponiveis desta serie/novela.',
+      description: 'Episódios disponíveis desta série/novela.',
       groupTitles: [seriesGroupTitle],
       path: '/category/series-detail',
     } as CatalogCategoryDefinition;
@@ -1830,6 +1923,7 @@ export function CatalogCategoryPage({
   const [seriesCardEnrichmentAttemptedIds, setSeriesCardEnrichmentAttemptedIds] =
     useState<string[]>([]);
   const [similarItems, setSimilarItems] = useState<HomeVodItem[]>([]);
+  const [localMovieSimilarItems, setLocalMovieSimilarItems] = useState<HomeVodItem[]>([]);
   const [isLoading, setIsLoading] = useState(initialItems.length === 0);
   const [isSeriesDetailPreparing, setIsSeriesDetailPreparing] = useState(false);
   const [seriesDetailPollTick, setSeriesDetailPollTick] = useState(0);
@@ -1846,6 +1940,55 @@ export function CatalogCategoryPage({
   const categoryLoadedItemIdsRef = useRef(new Set<string>());
   const categoryPendingRequestRef = useRef<Promise<boolean> | null>(null);
   const categoryAutoFocusIdentityRef = useRef('');
+  const categoryLandingReadModeRef = useRef<'stable' | 'staging' | null>(
+    initialItems.length > 0 ? 'stable' : null,
+  );
+  const movieFocusRenderCountRef = useRef(0);
+  const movieFocusMountCountRef = useRef(0);
+  const movieFocusInitialRequestCountRef = useRef(0);
+  const movieFocusSimilarUpdateCountRef = useRef(0);
+  const seriesPerfRouteStartedAtRef = useRef<number | null>(null);
+  const seriesPerfShellLoggedRef = useRef(false);
+  const seriesPerfEpisodesLoggedRef = useRef(false);
+
+  if (isMovieDetailPage) {
+    movieFocusRenderCountRef.current += 1;
+    logMovieFocusDiagnostic('MOVIE_FOCUS_KEY_BEFORE_RENDER', {
+      renderCount: movieFocusRenderCountRef.current,
+    });
+    logMovieFocusDiagnostic('MOVIE_RENDER_COUNT', {
+      renderCount: movieFocusRenderCountRef.current,
+    });
+  }
+
+  useEffect(() => {
+    if (!isMovieDetailPage) {
+      return;
+    }
+
+    movieFocusMountCountRef.current += 1;
+    logMovieFocusDiagnostic('MOVIE_ROUTE_ENTER_TS');
+    logMovieFocusDiagnostic('MOVIE_COMPONENT_MOUNT', {
+      mountCount: movieFocusMountCountRef.current,
+    });
+
+    return () => {
+      logMovieFocusDiagnostic('MOVIE_COMPONENT_UNMOUNT', {
+        mountCount: movieFocusMountCountRef.current,
+      });
+    };
+  }, [isMovieDetailPage, location.key]);
+
+  useEffect(() => {
+    if (!isMovieDetailPage) {
+      return;
+    }
+
+    logMovieFocusDiagnostic('MOVIE_FOCUS_KEY_AFTER_RENDER', {
+      renderCount: movieFocusRenderCountRef.current,
+      localSimilarCount: localMovieSimilarItems.length,
+    });
+  });
 
   const categoryRenderKey = useMemo(
     () =>
@@ -1890,6 +2033,8 @@ export function CatalogCategoryPage({
     categoryRequestedOffsetsRef.current.clear();
     categoryLoadedItemIdsRef.current.clear();
     categoryPendingRequestRef.current = null;
+    categoryLandingReadModeRef.current =
+      initialItems.length > 0 ? 'stable' : null;
   }, [categoryRenderKey, initialItems]);
 
   function scrollSeriesHeroIntoSafeView() {
@@ -2039,8 +2184,10 @@ export function CatalogCategoryPage({
 
   async function loadLocalFirstMovieCategoryItemsByGroup({
     sourceId,
+    allowUnavailable = false,
   }: {
     sourceId?: string;
+    allowUnavailable?: boolean;
   }): Promise<HomeVodItem[]> {
     if (!sourceId?.trim()) {
       return [];
@@ -2053,14 +2200,30 @@ export function CatalogCategoryPage({
         totalLimit: CATEGORY_ITEM_LIMIT,
       });
 
-      if (localResult.status !== 'ready') {
-        throw new Error('LOCAL_MOVIE_CATEGORY_UNAVAILABLE');
+      if (localResult.status === 'ready' && localResult.items.length > 0) {
+        return localResult.items;
       }
 
-      return localResult.items;
+      const storedActivation = getStoredLicenseActivation();
+      const fallbackItems = await loadHomeVodCategoryItems({
+        licenseCode: storedActivation?.licenseCode?.trim() || '',
+        deviceIdentifier:
+          storedActivation?.deviceIdentifier || getOrCreateDeviceIdentifier(),
+        sourceId,
+        scopeKey: localCatalogScopeKey ?? undefined,
+        groupTitles: category?.groupTitles ?? [],
+        limit: CATEGORY_ITEM_LIMIT,
+        slug: category?.slug ?? 'filmes',
+        propagateReadError: false,
+      });
+
+      return fallbackItems;
     } catch (error) {
       const errorName = error instanceof Error ? error.name : 'UnknownError';
       console.warn('[XANDEFLIX_MOVIES_LOCAL_FIRST_LOAD_ERROR]', { errorName });
+      if (allowUnavailable) {
+        return [];
+      }
       throw error;
     }
   }
@@ -2158,12 +2321,34 @@ export function CatalogCategoryPage({
     let isMounted = true;
 
     async function loadCategoryItems() {
+      const isBoundedStagingLanding =
+        !isMovieDetailPage &&
+        !isSeriesDetailPage &&
+        (category?.slug === 'filmes' || category?.slug === 'series');
+      const canReadBoundedStagingLanding =
+        playlistStatus === 'loading' &&
+        isBoundedStagingLanding &&
+        Boolean(playlistSource?.sourceId?.trim()) &&
+        Boolean(localCatalogScopeKey?.trim()) &&
+        categoryLandingReadModeRef.current !== 'stable';
+      let shouldRemainPreparing =
+        canReadBoundedStagingLanding &&
+        categoryLandingReadModeRef.current !== 'staging';
+
       setIsLoading(initialItems.length === 0);
       setErrorMessage(null);
 
       if (!category) {
-        setErrorMessage('Categoria nao encontrada.');
+        setErrorMessage('Categoria não encontrada.');
         setIsLoading(false);
+        return;
+      }
+
+      if (
+        (playlistStatus === 'loading' || playlistStatus === 'idle') &&
+        !canReadBoundedStagingLanding
+      ) {
+        setIsLoading(categoryLandingReadModeRef.current !== 'stable');
         return;
       }
 
@@ -2181,14 +2366,11 @@ export function CatalogCategoryPage({
           setVisibleItemCount(resolveVisibleCount(initialItems.length));
           setIsLoading(false);
         } else if (playlistStatus === 'error') {
-          setErrorMessage('Nao foi possivel acessar o catalogo local agora.');
+        setErrorMessage('Não foi possível acessar o catálogo local agora.');
           setIsLoading(false);
-        } else if (
-          playlistStatus !== 'idle' &&
-          playlistStatus !== 'loading'
-        ) {
+        } else {
           setErrorMessage(
-            'A fonte local autorizada nao esta disponivel agora.',
+            'A fonte local autorizada não está disponível agora.',
           );
           setIsLoading(false);
         }
@@ -2203,7 +2385,7 @@ export function CatalogCategoryPage({
           setItems([]);
           setVisibleItemCount(0);
           setErrorMessage(
-            'Nao foi possivel validar a licenca para carregar esta categoria.',
+            'Não foi possível validar a licença para carregar esta categoria.',
           );
           return;
         }
@@ -2218,7 +2400,7 @@ export function CatalogCategoryPage({
             setItems([]);
             setCategoryTotalCount(0);
             setHasMoreCategoryItems(false);
-            setErrorMessage('Catalogo local indisponivel para esta categoria.');
+            setErrorMessage('Catálogo local indisponível para esta categoria.');
             return;
           }
 
@@ -2254,8 +2436,8 @@ export function CatalogCategoryPage({
           if (page.status !== 'ready') {
             setErrorMessage(
               page.status === 'not_found'
-                ? 'Categoria nao encontrada no catalogo local.'
-                : 'Catalogo local indisponivel para esta categoria.',
+                ? 'Categoria não encontrada no catálogo local.'
+                : 'Catálogo local indisponível para esta categoria.',
             );
             return;
           }
@@ -2317,23 +2499,46 @@ export function CatalogCategoryPage({
           setItems(nextCachedItems);
           setVisibleItemCount(resolveVisibleCount(nextCachedItems.length));
           setIsLoading(nextCachedItems.length === 0);
-        } else if (initialItems.length === 0) {
+          if (nextCachedItems.length > 0) {
+            categoryLandingReadModeRef.current = 'stable';
+          }
+        } else if (
+          initialItems.length === 0 &&
+          !canReadBoundedStagingLanding
+        ) {
           setItems([]);
           setVisibleItemCount(0);
         }
 
         const localSeriesDetail =
           isSeriesDetailPage && playlistSource?.sourceId && seriesKey
-              ? await loadLocalCatalogSeriesDetailReadModel({
-                  sourceId: playlistSource.sourceId,
-                  scopeKey: localCatalogScopeKey,
-                  seriesKey,
-                })
+              ? (logSeriesPerformanceDiagnostic('SERIES_READ_MODEL_START_TS'),
+                await loadLocalCatalogSeriesDetailReadModel({
+                    sourceId: playlistSource.sourceId,
+                    scopeKey: localCatalogScopeKey,
+                    seriesKey,
+                  }))
             : null;
+        if (isSeriesDetailPage) {
+          logSeriesPerformanceDiagnostic('SERIES_STATE_UPDATE_TS', {
+            itemCount:
+              localSeriesDetail?.status === 'ready'
+                ? localSeriesDetail.episodes.length
+                : 0,
+          });
+        }
+        e8DiagnosticLog('SERIES_READ_MODEL_STATUS', {
+          status:
+            localSeriesDetail?.status === 'ready'
+              ? 'ready'
+              : localSeriesDetail?.status === 'index_building'
+                ? 'index_building'
+                : 'unavailable',
+        });
         const seriesDetailPreparing =
           localSeriesDetail?.status === 'index_building';
         setIsSeriesDetailPreparing(seriesDetailPreparing);
-        const nextItems =
+        const stableItems =
           (localSeriesDetail?.status === 'ready'
             ? localSeriesDetail.episodes
             : seriesDetailPreparing
@@ -2343,10 +2548,8 @@ export function CatalogCategoryPage({
             ? await (async () => {
                 const localReadStartedAtMs = getMoviesLocalFirstMetricNowMs();
                 const localItems = await loadLocalFirstMovieCategoryItemsByGroup({
-                  sourceId:
-                    playlistSource?.sourceType === 'm3u'
-                      ? playlistSource.sourceId
-                      : undefined,
+                  sourceId: playlistSource?.sourceId,
+                  allowUnavailable: canReadBoundedStagingLanding,
                 });
                 const localReadTimeMs = getMoviesLocalFirstMetricElapsedMs(localReadStartedAtMs);
 
@@ -2385,17 +2588,83 @@ export function CatalogCategoryPage({
                 propagateReadError: true,
               }));
 
+        const stagingSelection =
+          stableItems.length === 0 && canReadBoundedStagingLanding
+            ? await loadLocalStagingCategoryReadModel({
+                sourceId: playlistSource?.sourceId ?? '',
+                scopeKey: localCatalogScopeKey ?? '',
+                groupTitles: category.groupTitles,
+                contentKind: category.slug === 'series' ? 'series' : 'movie',
+                totalLimit: CATEGORY_ITEM_LIMIT,
+              })
+            : { readMode: null, items: [] } as const;
+        const categorySelection = selectStableOrStagingCategoryItems(
+          stableItems,
+          stagingSelection.items,
+        );
+        const nextItems = categorySelection.items;
+        const previousReadMode = categoryLandingReadModeRef.current;
+        const preserveDisplayedStaging =
+          categorySelection.readMode === null &&
+          previousReadMode === 'staging' &&
+          (playlistStatus === 'loading' || playlistStatus === 'ready');
+
+        if (categorySelection.readMode) {
+          categoryLandingReadModeRef.current = categorySelection.readMode;
+          shouldRemainPreparing = false;
+        } else if (preserveDisplayedStaging) {
+          shouldRemainPreparing = false;
+        }
+
         if (!isMounted) {
           return;
         }
 
         const filteredNextItems = filterSeriesEpisodes(nextItems);
-        const nextCategoryItems =
+        let nextCategoryItems =
           category.slug === 'series' || category.slug === 'series-group'
             ? dedupeSeriesCollections(filteredNextItems)
             : category.slug === 'movie-group'
               ? filteredNextItems.filter((item) => item.kind === 'movie')
             : filteredNextItems;
+
+        if (nextCategoryItems.length === 0 && !isSeriesDetailPage) {
+          const cachedSections = getCachedHomeVodSections({
+            licenseCode,
+            deviceIdentifier,
+            sourceId: playlistSource?.sourceId,
+            scopeKey: localCatalogScopeKey ?? undefined,
+          });
+          const isItemOfSeries = (item: HomeVodItem) => {
+            if (!seriesKey && !seriesTmdbId && !seriesTmdbTitle && !seriesTitle) {
+              return true;
+            }
+            return isItemOfSelectedSeries(item, {
+              seriesKey,
+              seriesTmdbId,
+              seriesTmdbTitle,
+              seriesTitle,
+            });
+          };
+
+          const fromSections = (cachedSections ?? [])
+            .flatMap((s) => s.items)
+            .filter((item) => {
+              if (category.slug === 'filmes' || category.slug.startsWith('filmes-')) {
+                return item.kind === 'movie';
+              }
+              if (category.slug === 'series' || category.slug.startsWith('series-')) {
+                return (item.kind === 'series' || !item.kind) && isItemOfSeries(item);
+              }
+              return isItemOfSeries(item);
+            });
+          if (fromSections.length > 0) {
+            nextCategoryItems =
+              category.slug === 'series' || category.slug === 'series-group'
+                ? dedupeSeriesCollections(fromSections)
+                : fromSections;
+          }
+        }
 
         if (isSeriesDetailPage && !seriesDetailPreparing) {
           storeCachedSeriesEpisodes(
@@ -2412,10 +2681,16 @@ export function CatalogCategoryPage({
           );
         }
 
-        setItems(nextCategoryItems);
-        setVisibleItemCount(resolveVisibleCount(nextCategoryItems.length));
+        if (!preserveDisplayedStaging) {
+          setItems(nextCategoryItems);
+          setVisibleItemCount(resolveVisibleCount(nextCategoryItems.length));
+        }
 
-        if (!isSeriesDetailPage) {
+        if (
+          !isSeriesDetailPage &&
+          categorySelection.readMode !== 'staging' &&
+          !preserveDisplayedStaging
+        ) {
           writePresentationRouteCache(
             {
               licenseCode,
@@ -2437,7 +2712,7 @@ export function CatalogCategoryPage({
           setErrorMessage(
             hasFallbackItems
               ? null
-              : 'Nao foi possivel carregar esta categoria agora. Tente novamente em instantes.',
+              : 'Não foi possível carregar esta categoria agora. Tente novamente em instantes.',
           );
 
           if (!hasFallbackItems) {
@@ -2447,7 +2722,7 @@ export function CatalogCategoryPage({
         }
       } finally {
         if (isMounted) {
-          setIsLoading(false);
+          setIsLoading(shouldRemainPreparing);
         }
       }
     }
@@ -2472,6 +2747,7 @@ export function CatalogCategoryPage({
     playlistSource?.sourceType,
     localCatalogScopeKey,
     playlistStatus,
+    playlistProgress?.channelsParsed,
     seriesDetailPollTick,
   ]);
 
@@ -2641,12 +2917,6 @@ export function CatalogCategoryPage({
       return null;
     }
 
-    const representative = getBestSeriesEpisodeRepresentative(seriesDetailItems);
-
-    if (!representative) {
-      return null;
-    }
-
     const selectedSeriesItem =
       navigationState?.selectedSeriesItem &&
       isItemOfSelectedSeries(navigationState.selectedSeriesItem, {
@@ -2657,8 +2927,13 @@ export function CatalogCategoryPage({
       })
         ? navigationState.selectedSeriesItem
         : null;
+    const representative = getBestSeriesEpisodeRepresentative(seriesDetailItems);
 
-    return mergeSeriesHeroMetadata(representative, selectedSeriesItem);
+    return resolveSeriesDetailHeroItem({
+      representative,
+      selectedSeriesItem,
+      selectedSeriesItemMatches: Boolean(selectedSeriesItem),
+    });
   }, [
     isSeriesDetailPage,
     navigationState?.selectedSeriesItem,
@@ -2683,6 +2958,57 @@ export function CatalogCategoryPage({
       getSeriesCollectionKey(cachedSeriesDetailHero)
       ? locallyEnrichedSeriesDetailHero.item
       : cachedSeriesDetailHero;
+  useEffect(() => {
+    if (!isSeriesDetailPage || !effectiveSeriesDetailHero) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setFocus(SERIES_DETAIL_HERO_FOCUS_KEY);
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    effectiveSeriesDetailHero?.id,
+    isSeriesDetailPage,
+    location.key,
+  ]);
+
+  useEffect(() => {
+    if (!isSeriesDetailPage) {
+      seriesPerfRouteStartedAtRef.current = null;
+      seriesPerfShellLoggedRef.current = false;
+      seriesPerfEpisodesLoggedRef.current = false;
+      return;
+    }
+
+    if (seriesPerfRouteStartedAtRef.current === null) {
+      seriesPerfRouteStartedAtRef.current = performance.now();
+      logSeriesPerformanceDiagnostic('SERIES_ROUTE_ENTER_TS');
+    }
+
+    if (effectiveSeriesDetailHero && !seriesPerfShellLoggedRef.current) {
+      seriesPerfShellLoggedRef.current = true;
+      logSeriesPerformanceDiagnostic('SERIES_SHELL_RENDER_TS', {
+        elapsedMs:
+          performance.now() - (seriesPerfRouteStartedAtRef.current ?? performance.now()),
+      });
+    }
+
+    if (seriesDetailItems.length > 0 && !seriesPerfEpisodesLoggedRef.current) {
+      seriesPerfEpisodesLoggedRef.current = true;
+      logSeriesPerformanceDiagnostic('SERIES_EPISODES_RENDER_TS', {
+        elapsedMs:
+          performance.now() - (seriesPerfRouteStartedAtRef.current ?? performance.now()),
+        itemCount: seriesDetailItems.length,
+      });
+    }
+  }, [
+    effectiveSeriesDetailHero,
+    isSeriesDetailPage,
+    seriesDetailItems.length,
+  ]);
+
   const movieDetailCandidates = useMemo(() => {
     if (!isMovieDetailPage) {
       return [];
@@ -2714,12 +3040,17 @@ export function CatalogCategoryPage({
       addCandidate(item);
     }
 
+    for (const item of localMovieSimilarItems) {
+      addCandidate(item);
+    }
+
     return Array.from(byCandidate.values());
   }, [
     isMovieDetailPage,
     items,
     movieNavigationState?.movieSimilarSeedItems,
     movieNavigationState?.selectedMovieItem,
+    localMovieSimilarItems,
   ]);
 
   const movieDetailItem = useMemo(() => {
@@ -2843,6 +3174,23 @@ export function CatalogCategoryPage({
     isMovieDetailPage,
     movieDetailCandidates,
     movieDetailItem,
+  ]);
+
+  useEffect(() => {
+    if (!isMovieDetailPage) {
+      return;
+    }
+
+    movieFocusSimilarUpdateCountRef.current += 1;
+    logMovieFocusDiagnostic('MOVIE_SIMILARS_STATE_UPDATE', {
+      updateCount: movieFocusSimilarUpdateCountRef.current,
+      similarCount: movieSimilarItems.length,
+      localSimilarCount: localMovieSimilarItems.length,
+    });
+  }, [
+    isMovieDetailPage,
+    localMovieSimilarItems.length,
+    movieSimilarItems.length,
   ]);
 
 
@@ -3372,8 +3720,31 @@ export function CatalogCategoryPage({
       return;
     }
 
+    e8DiagnosticLog('SERIES_DETAIL_ENTER');
     void loadSimilarCollections(heroItem);
   }, [heroItem, isSeriesDetailPage]);
+
+  useEffect(() => {
+    if (!isMovieDetailPage) {
+      return;
+    }
+
+    e8DiagnosticLog('MOVIE_DETAIL_ENTER');
+    void loadLocalMovieSimilarItems(heroItem);
+  }, [heroItem, isMovieDetailPage, playlistSource?.sourceId, localCatalogScopeKey]);
+
+  useEffect(() => {
+    if (!isMovieDetailPage) {
+      return;
+    }
+
+    e8DiagnosticLog('MOVIE_SIMILAR_FINAL_COUNT', {
+      count: movieSimilarItems.length,
+    });
+    e8DiagnosticLog('MOVIE_SIMILAR_SECTION_RENDERED', {
+      rendered: movieSimilarItems.length > 0,
+    });
+  }, [isMovieDetailPage, movieSimilarItems.length]);
 
   useEffect(() => {
     if (
@@ -3428,7 +3799,14 @@ export function CatalogCategoryPage({
 
 
   useEffect(() => {
-    if (!category || visibleItems.length === 0) {
+    if (
+      !category ||
+      !shouldRunCategoryAutoFocus({
+        hasCategory: Boolean(category),
+        visibleItemCount: visibleItems.length,
+        isMovieDetailPage,
+      })
+    ) {
       return;
     }
 
@@ -3467,6 +3845,7 @@ export function CatalogCategoryPage({
     categoryRenderKey,
     currentSeriesIdentity,
     isSeriesCategoryPage,
+    isMovieDetailPage,
     isSeriesDetailPage,
     seriesCategorySections,
     visibleItems.length,
@@ -3661,6 +4040,124 @@ export function CatalogCategoryPage({
     } catch (error) {
       console.warn('[XANDEFLIX_SERIES_SIMILAR_ERROR]', error);
       setSimilarItems([]);
+    }
+  }
+
+  async function loadLocalMovieSimilarItems(currentMovieItem: HomeVodItem | null) {
+    if (!isMovieDetailPage || !currentMovieItem || !playlistSource?.sourceId) {
+      setLocalMovieSimilarItems([]);
+      return;
+    }
+
+    e8DiagnosticLog('MOVIE_SIMILAR_LOADER_ENTER');
+    logMovieFocusDiagnostic('MOVIE_SIMILARS_LOAD_START');
+
+    try {
+      const scope = localCatalogScopeKey
+        ? await getLocalCatalogScope(localCatalogScopeKey).catch(() => null)
+        : null;
+      e8DiagnosticLog('MOVIE_SCOPE_PRESENT', { scopePresent: Boolean(scope) });
+      e8DiagnosticLog('MOVIE_ACTIVE_SNAPSHOT_PRESENT', {
+        snapshotPresent: Boolean(scope?.activeSnapshotId),
+      });
+      e8DiagnosticLog('MOVIE_STAGING_SNAPSHOT_PRESENT', {
+        snapshotPresent: Boolean(scope?.stagingSnapshotId),
+      });
+
+      const localResult = await loadLocalMovieCategoryReadModel({
+        sourceId: playlistSource.sourceId,
+        scopeKey: localCatalogScopeKey ?? undefined,
+        totalLimit: 400,
+        maxCategories: 30,
+      });
+      e8DiagnosticLog('MOVIE_SIMILAR_READ_MODE', {
+        source:
+          localResult.status === 'ready'
+            ? scope?.activeSnapshotId
+              ? 'active_snapshot'
+              : 'legacy_repository'
+            : 'unavailable',
+      });
+      e8DiagnosticLog('MOVIE_SIMILAR_RAW_COUNT', {
+        count: localResult.items.length,
+      });
+
+      if (localResult.status === 'ready' && localResult.items.length > 0) {
+        const currentKey =
+          currentMovieItem.tmdbId ||
+          currentMovieItem.tmdbTitle ||
+          currentMovieItem.title;
+
+        const kindFilteredItems = localResult.items.filter(
+          (item) => !item.kind || item.kind === 'movie',
+        );
+        e8DiagnosticLog('MOVIE_SIMILAR_KIND_FILTER_COUNT', {
+          count: kindFilteredItems.length,
+        });
+        const afterCurrentExclusionItems = kindFilteredItems.filter((item) => {
+          if (!item.posterUrl) {
+            return false;
+          }
+
+          const key = item.tmdbId || item.tmdbTitle || item.title;
+          return Boolean(key) && key !== currentKey;
+        });
+        e8DiagnosticLog('MOVIE_SIMILAR_AFTER_CURRENT_EXCLUSION_COUNT', {
+          count: afterCurrentExclusionItems.length,
+        });
+        e8DiagnosticLog('MOVIE_SIMILAR_GROUP_MATCH_COUNT', {
+          count: afterCurrentExclusionItems.length,
+        });
+
+        const byMovie = new Map<string, HomeVodItem>();
+
+        for (const item of kindFilteredItems) {
+          if (!item.posterUrl) {
+            continue;
+          }
+
+          if (item.kind && item.kind !== 'movie') {
+            continue;
+          }
+
+          const key = item.tmdbId || item.tmdbTitle || item.title;
+
+          if (!key || key === currentKey || byMovie.has(key)) {
+            continue;
+          }
+
+          byMovie.set(key, item);
+        }
+
+        const similar = Array.from(byMovie.values()).slice(0, 12);
+        e8DiagnosticLog('MOVIE_SIMILAR_FINAL_COUNT', { count: similar.length });
+        logMovieFocusDiagnostic('MOVIE_SIMILARS_LOAD_COMPLETE', {
+          similarCount: similar.length,
+        });
+        setLocalMovieSimilarItems(similar);
+      } else {
+        e8DiagnosticLog('MOVIE_SIMILAR_KIND_FILTER_COUNT', { count: 0 });
+        e8DiagnosticLog('MOVIE_SIMILAR_AFTER_CURRENT_EXCLUSION_COUNT', { count: 0 });
+        e8DiagnosticLog('MOVIE_SIMILAR_GROUP_MATCH_COUNT', { count: 0 });
+        e8DiagnosticLog('MOVIE_SIMILAR_FINAL_COUNT', { count: 0 });
+        logMovieFocusDiagnostic('MOVIE_SIMILARS_LOAD_COMPLETE', {
+          similarCount: 0,
+        });
+        setLocalMovieSimilarItems([]);
+      }
+    } catch (error) {
+      console.warn('[XANDEFLIX_MOVIE_SIMILAR_LOCAL_LOAD_ERROR]', error);
+      e8DiagnosticLog('MOVIE_SIMILAR_READ_MODE', { source: 'unavailable' });
+      e8DiagnosticLog('MOVIE_SIMILAR_RAW_COUNT', { count: 0 });
+      e8DiagnosticLog('MOVIE_SIMILAR_KIND_FILTER_COUNT', { count: 0 });
+      e8DiagnosticLog('MOVIE_SIMILAR_AFTER_CURRENT_EXCLUSION_COUNT', { count: 0 });
+      e8DiagnosticLog('MOVIE_SIMILAR_GROUP_MATCH_COUNT', { count: 0 });
+      e8DiagnosticLog('MOVIE_SIMILAR_FINAL_COUNT', { count: 0 });
+      logMovieFocusDiagnostic('MOVIE_SIMILARS_LOAD_COMPLETE', {
+        similarCount: 0,
+        failed: true,
+      });
+      setLocalMovieSimilarItems([]);
     }
   }
 
@@ -4005,6 +4502,10 @@ export function CatalogCategoryPage({
 
     const focusMovieHero = () => {
       scrollSeriesHeroIntoSafeView();
+      movieFocusInitialRequestCountRef.current += 1;
+      logMovieFocusDiagnostic('MOVIE_INITIAL_SET_FOCUS', {
+        requestCount: movieFocusInitialRequestCountRef.current,
+      });
       setFocus(SERIES_DETAIL_HERO_FOCUS_KEY);
     };
 
@@ -4765,6 +5266,7 @@ export function CatalogCategoryPage({
       <main className="mx-auto w-full max-w-[1920px]">
         {isMovieDetailPage && effectiveMovieDetailItem ? (
           <SeriesDetailHeroFrame
+            diagnosticRoute="movie"
             disabled={!effectiveMovieDetailItem.streamUrl}
             onEnterPress={playMovieDetailItem}
             onArrowPress={handleMovieDetailHeroArrowPress}
@@ -4837,7 +5339,7 @@ export function CatalogCategoryPage({
               <p className="mt-4 text-[0.86rem] font-normal leading-snug text-zinc-200 md:mt-3 md:max-w-3xl md:text-[clamp(0.66rem,0.86vw,0.78rem)] md:leading-relaxed">
                 {getMovieHeroOverview(effectiveMovieDetailItem) ??
                   effectiveMovieDetailItem.overview ??
-                  'Detalhes indisponiveis para este filme.'}
+                  'Detalhes indisponíveis para este filme.'}
               </p>
 
               <div className="mt-3 grid gap-2 md:flex md:w-fit md:gap-2">
@@ -4889,7 +5391,8 @@ export function CatalogCategoryPage({
           </section>
         ) : isSeriesDetailPage && effectiveSeriesDetailHero ? (
           <SeriesDetailHeroFrame
-            disabled={seriesDetailItems.length === 0}
+            diagnosticRoute="series"
+            disabled={!effectiveSeriesDetailHero}
             onEnterPress={() => {
               if (seriesDetailItems[0]) {
                 openEpisode(seriesDetailItems[0], 0);
@@ -4923,7 +5426,7 @@ export function CatalogCategoryPage({
 
               <div className="max-w-4xl pb-1">
                 <p className="text-[0.58rem] font-black uppercase tracking-[0.28em] text-xf-red">
-                  Serie / Novela
+                  Série / Novela
                 </p>
                 <h1 className="mt-1 text-[1.25rem] font-black tracking-[-0.04em] text-white md:text-[1.65rem]">
                   {category?.title ?? effectiveSeriesDetailHero.title}
@@ -4952,7 +5455,7 @@ export function CatalogCategoryPage({
                 <p className="mt-3 max-w-3xl line-clamp-3 text-[0.78rem] font-semibold leading-relaxed text-zinc-200 md:text-sm">
                   {effectiveSeriesDetailHero.overview ??
                     category?.description ??
-                    'Episodios disponiveis para esta serie/novela.'}
+                    'Episódios disponíveis para esta série/novela.'}
                 </p>
 
                 <div className="mt-3 rounded-[0.6rem] border border-white/10 bg-black/25 px-3 py-2">
@@ -4960,7 +5463,7 @@ export function CatalogCategoryPage({
                     Elenco
                   </p>
                   <p className="mt-1 line-clamp-1 text-[0.72rem] font-semibold text-zinc-200">
-                    Informacao de elenco indisponivel nesta fonte.
+                    Informação de elenco indisponível nesta fonte.
                   </p>
                 </div>
               </div>
@@ -4991,7 +5494,7 @@ export function CatalogCategoryPage({
             ) : (
               <header className="mb-6">
                 <p className="text-[0.58rem] font-black uppercase tracking-[0.32em] text-xf-red">
-                  {category?.slug === 'series-group' ? 'Séries / Novelas' : 'Catalogo'}
+                  {category?.slug === 'series-group' ? 'Séries / Novelas' : 'Catálogo'}
                 </p>
                 <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
                   <h1 className="text-[1.7rem] font-black tracking-[-0.03em] text-white md:text-[2.35rem]">
@@ -5019,7 +5522,7 @@ export function CatalogCategoryPage({
                       )
                     : category?.slug === 'series-group'
                     ? `Ver todos · ${items.length} títulos agrupados`
-                    : category?.description ?? 'Categoria indisponivel neste momento.'}
+                    : category?.description ?? 'Categoria indisponível neste momento.'}
                 </p>
               </header>
             )}
@@ -5234,7 +5737,7 @@ export function CatalogCategoryPage({
                 ) : (
                   <div className="rounded-[0.65rem] border border-white/10 bg-white/[0.035] px-4 py-5">
                     <p className="text-sm font-semibold text-zinc-400">
-                      Sem sugestoes semelhantes nesta fonte.
+                      Sem sugestões semelhantes nesta fonte.
                     </p>
                   </div>
                 )}
@@ -5423,7 +5926,7 @@ export function CatalogCategoryPage({
               ) : null}
               {isMovieSeeAllPage && isLoadingNextPage ? (
                 <p className="col-span-2 py-3 text-center text-xs font-bold text-zinc-500 md:col-span-5">
-                  Carregando mais titulos...
+                  Carregando mais títulos...
                 </p>
               ) : null}
             </section>

@@ -164,3 +164,17 @@ A fundamentação completa está em:
 docs/architecture/XANDEFLIX_ARCHITECTURE_CONTRACT.md
 
 Este arquivo é a porta de entrada operacional para agentes de IA e desenvolvedores.
+
+10. Mechanical Safety Barrier em Gates Controlados
+
+Quando o Chat Mestre declarar um Gate como protegido pela Mechanical Safety Barrier, o Gate deverá possuir manifesto explícito e validação PRE/POST da Barrier.
+
+- O estado dirty preexistente deve ser congelado individualmente por status e conteúdo.
+- Paths frozen não podem mudar, mesmo quando também aparecem em allowlist.
+- A mutabilidade de path preexistente exige opt-in explícito no manifesto.
+- Gates com escrita devem usar one-writer lock externo; stale lock nunca é removido automaticamente.
+- Falha da Barrier ou hard-stop encerra imediatamente o Gate.
+- Build flags críticas só podem ser homologadas por verificação semântica e provenance quando exigidas; substring, grep ou declaração do executor não substituem essa verificação.
+- Evidência física só sustenta PASS após validação da provenance requerida.
+- A Barrier não autoriza implicitamente git add, commit, push, PR, Ready for Review ou merge.
+- A autoridade de escopo e homologação permanece com o Chat Mestre.

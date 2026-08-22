@@ -450,6 +450,16 @@ Nenhuma escolha visual autoriza stream proxy, relay ou restream.
 
 Loading representa estado realmente pendente.
 
+Para superfícies de catálogo, os estados documentais são:
+
+`PREPARING`: ainda não existe conteúdo local estruturalmente renderizável;
+
+`PARTIAL_CONTENT`: existe conteúdo local real e utilizável, mas o catálogo ainda está em construção;
+
+`CONTENT_READY`: o catálogo alcançou o estado de lifecycle previsto.
+
+Esses termos descrevem semântica de estado e não exigem badge, label ou novo texto visível.
+
 Pode ser usado durante:
 
 - bootstrap;
@@ -460,6 +470,10 @@ Pode ser usado durante:
 - preparação de player;
 
 somente enquanto o resultado ainda for desconhecido.
+
+No cold bootstrap sem active válido, Home, Filmes, Séries e Live devem sair do bloqueio global quando houver staging bounded renderizável, ainda que import esteja em progresso e EOF ou promotion não tenham ocorrido. O conteúdo parcial pode ganhar grupos ou itens por atualizações bounded, sem representar catálogo completo pronto.
+
+Em warm refresh com active válido, active permanece a visão principal e autoritativa; staging em construção não a substitui antes de promotion válida.
 
 `INFINITE_LOADING=PROIBIDO`
 
@@ -480,6 +494,8 @@ Não usar Empty para representar:
 - timeout;
 - source ainda não processada;
 - geração parcial;
+- cold bootstrap ainda em `PREPARING`;
+- staging renderizável ainda em `PARTIAL_CONTENT`;
 - erro de rede;
 - erro interno.
 
@@ -611,9 +627,15 @@ A validação final de portrait/landscape depende da matriz da Vertical Slice co
 
 As superfícies assíncronas devem conseguir distinguir:
 
+`PREPARING`
+
 `LOADING`
 
+`PARTIAL_CONTENT`
+
 `CONTENT`
+
+`CONTENT_READY`
 
 `EMPTY`
 
@@ -632,6 +654,8 @@ Live pode acrescentar:
 `PLAYER`
 
 Nenhum estado deve ser reutilizado para esconder semanticamente outro.
+
+Em Home, Filmes, Séries e Live, `PARTIAL_CONTENT` representa conteúdo verdadeiro local e pode expandir de forma bounded enquanto o import continua. Ele não significa empty, catálogo completo, active autoritativa ou promotion. Sem conteúdo renderizável, a superfície permanece em `PREPARING`/`LOADING`; empty exige ausência real confirmada.
 
 `LOADING_EMPTY_ERROR_DISTINCT=SIM`
 
