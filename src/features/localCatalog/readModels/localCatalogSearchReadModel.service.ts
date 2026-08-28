@@ -279,6 +279,18 @@ export async function searchLocalCatalog(
     };
   }
 
+  if (result.dataPath === 'NO_ACTIVE_AVAILABILITY') {
+    return {
+      status: result.status === 'unavailable' ? 'unavailable' : 'indexing',
+      normalizedQuery,
+      items: [],
+      nextCursor: null,
+      indexedItems: result.processedCount,
+      totalItems: result.totalItems,
+      indexingInBackground: result.indexingInBackground,
+    };
+  }
+
   const filterKey = `search:${normalizedQuery}`;
   let offset = 0;
 

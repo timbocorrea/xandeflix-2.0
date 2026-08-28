@@ -439,12 +439,15 @@ export async function getReadableLocalCatalogActiveSnapshot(scopeKey: string) {
     const rawScope = await requestResult(transaction.objectStore(LOCAL_CATALOG_V3_STORES.scopes).get(scopeKey));
     if (!rawScope) return null;
     const scope = rawScope as LocalCatalogScope;
-    if (scope.accessStatus !== 'active' || (!scope.activeSnapshotId && !scope.stagingSnapshotId)) return null;
-    const snapshotId = scope.activeSnapshotId || scope.stagingSnapshotId;
+    if (scope.accessStatus !== 'active' || !scope.activeSnapshotId) return null;
+    const snapshotId = scope.activeSnapshotId;
     const rawSnapshot = await requestResult(transaction.objectStore(LOCAL_CATALOG_V3_STORES.snapshots).get(snapshotId!));
     if (!rawSnapshot) return null;
     const snapshot = rawSnapshot as LocalCatalogSnapshot;
-    return snapshot.scopeKey === scopeKey && snapshot.status !== 'failed' && snapshot.status !== 'canceled' && snapshot.status !== 'superseded' ? snapshot : null;
+    return snapshot.scopeKey === scopeKey &&
+      (snapshot.status === 'ready' || snapshot.status === 'active')
+      ? snapshot
+      : null;
   });
 }
 

@@ -34,6 +34,8 @@ const C = 'smoke-lifecycle-c';
 const D = 'smoke-lifecycle-d';
 const ABORT_ACTIVE = 'smoke-lifecycle-abort-active';
 const ABORT_STAGING = 'smoke-lifecycle-abort-staging';
+const STAGING_ONLY_SCOPE = 'smoke:lifecycle:staging-only-scope';
+const STAGING_ONLY = 'smoke-lifecycle-staging-only';
 const REVISION = 'synthetic-revision';
 const TIMESTAMP = '2000-01-01T00:00:00.000Z';
 
@@ -56,6 +58,7 @@ export type LocalCatalogSnapshotLifecycleSmokeTestResult = {
   failurePreservesActive: boolean;
   abortedPromotionRolledBack: boolean;
   stagingNeverReadableAsActive: boolean;
+  stagingOnlySnapshotNotReadable: boolean;
   syntheticCleanup: boolean;
   errorCode?: string;
 };
@@ -73,9 +76,10 @@ async function cleanup() {
     const stores = Object.values(LOCAL_CATALOG_V3_STORES);
     const transaction = db.transaction(stores, 'readwrite');
     const done = waitForTransaction(transaction);
-    const snapshotIds = [A, B, C, D, ABORT_ACTIVE, ABORT_STAGING];
+    const snapshotIds = [A, B, C, D, ABORT_ACTIVE, ABORT_STAGING, STAGING_ONLY];
     transaction.objectStore(LOCAL_CATALOG_V3_STORES.scopes).delete(SCOPE);
     transaction.objectStore(LOCAL_CATALOG_V3_STORES.scopes).delete(ABORT_SCOPE);
+    transaction.objectStore(LOCAL_CATALOG_V3_STORES.scopes).delete(STAGING_ONLY_SCOPE);
     for (const snapshotId of snapshotIds) {
       transaction.objectStore(LOCAL_CATALOG_V3_STORES.snapshots).delete(snapshotId);
       transaction.objectStore(LOCAL_CATALOG_V3_STORES.checkpoints).delete(snapshotId);
@@ -85,7 +89,7 @@ async function cleanup() {
   } finally { db.close(); }
 }
 
-function scopeRecord(scopeKey: string, activeSnapshotId: string): LocalCatalogScope {
+function scopeRecord(scopeKey: string, activeSnapshotId: string | null): LocalCatalogScope {
   return {
     scopeKey, tenantScopeId: 'opaque-synthetic-tenant', sourceId: 'synthetic-source',
     activeSnapshotId, stagingSnapshotId: null, accessStatus: 'active', runtimeEpoch: 1,
@@ -152,6 +156,7 @@ export async function runLocalCatalogSnapshotLifecycleSmokeTest(): Promise<Local
     previousActiveSuperseded: false, checkpointRemovedAfterPromotion: false,
     cancelPreservesActive: false, failurePreservesActive: false,
     abortedPromotionRolledBack: false, stagingNeverReadableAsActive: false,
+    stagingOnlySnapshotNotReadable: false,
     syntheticCleanup: false,
   };
   try {
@@ -169,6 +174,17 @@ export async function runLocalCatalogSnapshotLifecycleSmokeTest(): Promise<Local
     result.beginStagingAtomic = scopeAfterBegin?.stagingSnapshotId === B && snapshotB?.status === 'building';
     result.activePreservedDuringStaging = scopeAfterBegin?.activeSnapshotId === A;
     result.stagingNeverReadableAsActive = readableDuringStaging?.snapshotId === A;
+
+    await putLocalCatalogScope({
+      ...scopeRecord(STAGING_ONLY_SCOPE, null),
+      stagingSnapshotId: STAGING_ONLY,
+    });
+    await putLocalCatalogSnapshot({
+      ...snapshotRecord(STAGING_ONLY, STAGING_ONLY_SCOPE, 'ready'),
+      status: 'building',
+    });
+    result.stagingOnlySnapshotNotReadable =
+      (await getReadableLocalCatalogActiveSnapshot(STAGING_ONLY_SCOPE)) === null;
 
     const checkpointBase = {
       scopeKey: SCOPE, snapshotId: B, expectedRuntimeEpoch: 1,

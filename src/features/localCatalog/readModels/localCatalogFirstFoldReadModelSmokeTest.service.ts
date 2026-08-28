@@ -961,6 +961,7 @@ export type InterruptedImportBootstrapRecoverySmokeResult = {
   TEST_D_NO_CACHE_NO_LOCAL: boolean;
   TEST_E_DUPLICATE_BOOTSTRAP: boolean;
   TEST_F_PROMOTION_FALSE: boolean;
+  TEST_G_BUILDING_SNAPSHOT_NOT_USABLE: boolean;
   errorCode?: string;
 };
 
@@ -973,6 +974,7 @@ export async function runInterruptedImportBootstrapRecoverySmokeTest(): Promise<
     TEST_D_NO_CACHE_NO_LOCAL: false,
     TEST_E_DUPLICATE_BOOTSTRAP: false,
     TEST_F_PROMOTION_FALSE: false,
+    TEST_G_BUILDING_SNAPSHOT_NOT_USABLE: false,
   };
 
   try {
@@ -1111,6 +1113,61 @@ export async function runInterruptedImportBootstrapRecoverySmokeTest(): Promise<
       },
     );
     result.TEST_A_VALID_COMPLETED = !testA_importDispatched && testA_channelsLoaded;
+
+    // TEST G: Import metadata is from a prior successful run, but the only
+    // snapshot pointer is still building. The partial snapshot is not an
+    // authoritative catalog and must not suppress a fresh import.
+    let testG_importDispatched = false;
+    await prepareHomePlaylist(
+      {
+        licenseCode: 'LIC_G',
+        deviceIdentifier: 'DEV_G',
+        currentChannelsCount: 0,
+        currentStatus: 'idle',
+        currentSourceId: undefined,
+        knownReadableSourceId: 'src_recovery_test',
+        loadFromSource: async () => undefined,
+        startSourceImport: () => {
+          testG_importDispatched = true;
+          return createMockTask({
+            scopeKey: 'scope_g',
+            snapshotId: 'snap_g',
+            readMode: 'staging',
+          });
+        },
+        loadFromChannels: () => {},
+        clearRuntime: () => {},
+      },
+      {
+        getAuthorizedSource: async () => mockAuthSource,
+        repository: {
+          getImportMetadata: async () => ({
+            sourceId: 'src_recovery_test',
+            sourceType: 'm3u',
+            status: 'ready',
+            importedCount: 150,
+            parsedCount: 150,
+            updatedCount: 0,
+            removedCount: 0,
+            unknownCount: 0,
+            withoutGroupCount: 0,
+            lastSuccessfulImportAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            schemaVersion: 1,
+            parserVersion: 1,
+            classificationVersion: 1,
+            updatedAt: new Date().toISOString(),
+          }),
+        },
+        getActiveSnapshot: async () =>
+          ({
+            snapshotId: 'snap_g_building',
+            status: 'building',
+            totalItems: 150,
+          }) as any,
+      },
+    );
+    result.TEST_G_BUILDING_SNAPSHOT_NOT_USABLE = testG_importDispatched;
 
     // TEST B: Interrupted import with staging present + cached marker (Failure C repro)
     // Metadata is 'importing' (not completed).
