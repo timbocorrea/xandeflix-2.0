@@ -692,24 +692,6 @@ async function countSearchDocuments(snapshotId: string) {
   }
 }
 
-async function countSnapshotItems(snapshotId: string) {
-  const db = await openLocalCatalogDb();
-  try {
-    const transaction = db.transaction(
-      LOCAL_CATALOG_V3_STORES.items,
-      'readonly',
-    );
-    return await requestResult(
-      transaction
-        .objectStore(LOCAL_CATALOG_V3_STORES.items)
-        .index('snapshotId')
-        .count(IDBKeyRange.only(snapshotId)),
-    );
-  } finally {
-    db.close();
-  }
-}
-
 async function readItemBatch(
   snapshotId: string,
   afterItemId: string | null,
@@ -798,7 +780,21 @@ async function writeIndexBatch(
   }
 }
 
-async function updateIndexedMetrics(snapshotId: string, indexedItems: number) {
+export type LocalCatalogActiveSearchIndexState = {
+  status: 'building' | 'ready' | 'failed';
+  processedCount: number;
+  totalItems: number;
+  checkpoint: string | null;
+  failureCode?: string | null;
+};
+
+async function updateIndexMetricsAndStatus(
+  snapshotId: string,
+  indexedItems: number,
+  checkpoint: string | null,
+  status: 'building' | 'ready' | 'failed',
+  failureCode?: string | null,
+) {
   const db = await openLocalCatalogDb();
   try {
     const transaction = db.transaction(
@@ -809,11 +805,46 @@ async function updateIndexedMetrics(snapshotId: string, indexedItems: number) {
     const store = transaction.objectStore(LOCAL_CATALOG_V3_STORES.metrics);
     const metrics = (await requestResult(
       store.get(snapshotId),
-    )) as LocalCatalogSnapshotMetrics | undefined;
+    )) as (LocalCatalogSnapshotMetrics & {
+      searchIndexStatus?: 'building' | 'ready' | 'failed';
+      searchIndexCheckpoint?: string | null;
+      searchIndexFailureCode?: string | null;
+    }) | undefined;
+
     if (metrics) {
       store.put({
         ...metrics,
         indexedSearchItems: indexedItems,
+        searchIndexStatus: status,
+        searchIndexCheckpoint: checkpoint,
+        searchIndexFailureCode: failureCode ?? null,
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      store.put({
+        snapshotId,
+        totalRawItems: indexedItems,
+        totalMovies: 0,
+        totalSeries: 0,
+        totalEpisodes: 0,
+        totalLive: 0,
+        totalRadio: 0,
+        totalUnknown: 0,
+        totalCategories: 0,
+        indexedSearchItems: indexedItems,
+        searchIndexStatus: status,
+        searchIndexCheckpoint: checkpoint,
+        searchIndexFailureCode: failureCode ?? null,
+        withPoster: 0,
+        withBackdrop: 0,
+        withMetadata: 0,
+        tmdbMatched: 0,
+        tmdbNoMatch: 0,
+        tmdbError: 0,
+        metadataPending: 0,
+        duplicatesIgnored: 0,
+        failedItems: 0,
+        removedItems: 0,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -823,17 +854,147 @@ async function updateIndexedMetrics(snapshotId: string, indexedItems: number) {
   }
 }
 
+export async function getLocalCatalogSearchIndexState(
+  snapshotId: string,
+): Promise<LocalCatalogActiveSearchIndexState> {
+  const db = await openLocalCatalogDb();
+  try {
+    const transaction = db.transaction(
+      [LOCAL_CATALOG_V3_STORES.metrics, LOCAL_CATALOG_V3_STORES.items],
+      'readonly',
+    );
+    const metricsStore = transaction.objectStore(
+      LOCAL_CATALOG_V3_STORES.metrics,
+    );
+    const itemsStore = transaction.objectStore(LOCAL_CATALOG_V3_STORES.items);
+
+    const metrics = (await requestResult(metricsStore.get(snapshotId))) as
+      | (LocalCatalogSnapshotMetrics & {
+          searchIndexStatus?: 'building' | 'ready' | 'failed';
+          searchIndexCheckpoint?: string | null;
+          searchIndexFailureCode?: string | null;
+        })
+      | undefined;
+
+    let totalItems = metrics?.totalRawItems ?? 0;
+    if (!totalItems || totalItems === 0) {
+      totalItems = await requestResult(
+        itemsStore
+          .index('snapshotId')
+          .count(IDBKeyRange.only(snapshotId)),
+      );
+    }
+
+    const processedCount = metrics?.indexedSearchItems ?? 0;
+    const checkpoint = metrics?.searchIndexCheckpoint ?? null;
+    let status = metrics?.searchIndexStatus;
+
+    if (!status) {
+      if (totalItems > 0 && processedCount === totalItems) {
+        status = 'ready';
+      } else {
+        status = 'building';
+      }
+    }
+
+    return {
+      status,
+      processedCount,
+      totalItems,
+      checkpoint,
+      failureCode: metrics?.searchIndexFailureCode ?? null,
+    };
+  } finally {
+    db.close();
+  }
+}
+
 async function buildLocalCatalogSearchIndex(input: {
   snapshotId: string;
   scopeKey: string;
 }) {
-  const catalogItems = await countSnapshotItems(input.snapshotId);
-  let indexedItems = await countSearchDocuments(input.snapshotId);
-  if (indexedItems >= catalogItems) {
+  const db = await openLocalCatalogDb();
+  let totalItems = 0;
+  let checkpoint: string | null = null;
+  let processedCount = 0;
+
+  try {
+    const transaction = db.transaction(
+      [LOCAL_CATALOG_V3_STORES.metrics, LOCAL_CATALOG_V3_STORES.items],
+      'readonly',
+    );
+    const metricsStore = transaction.objectStore(
+      LOCAL_CATALOG_V3_STORES.metrics,
+    );
+    const itemsStore = transaction.objectStore(LOCAL_CATALOG_V3_STORES.items);
+
+    const metrics = (await requestResult(
+      metricsStore.get(input.snapshotId),
+    )) as
+      | (LocalCatalogSnapshotMetrics & {
+          searchIndexStatus?: 'building' | 'ready' | 'failed';
+          searchIndexCheckpoint?: string | null;
+        })
+      | undefined;
+
+    if (
+      metrics &&
+      typeof metrics.totalRawItems === 'number' &&
+      metrics.totalRawItems > 0
+    ) {
+      totalItems = metrics.totalRawItems;
+    } else {
+      totalItems = await requestResult(
+        itemsStore
+          .index('snapshotId')
+          .count(IDBKeyRange.only(input.snapshotId)),
+      );
+    }
+
+    if (metrics) {
+      processedCount = metrics.indexedSearchItems ?? 0;
+      checkpoint = metrics.searchIndexCheckpoint ?? null;
+      if (
+        metrics.searchIndexStatus === 'ready' &&
+        processedCount >= totalItems &&
+        totalItems > 0
+      ) {
+        return;
+      }
+    }
+  } finally {
+    db.close();
+  }
+
+  if (totalItems === 0) {
+    await updateIndexMetricsAndStatus(input.snapshotId, 0, null, 'ready');
     return;
   }
 
-  let afterItemId: string | null = null;
+  if (processedCount >= totalItems) {
+    const docCount = await countSearchDocuments(input.snapshotId);
+    if (docCount >= totalItems) {
+      await updateIndexMetricsAndStatus(
+        input.snapshotId,
+        totalItems,
+        checkpoint,
+        'ready',
+      );
+      return;
+    }
+    checkpoint = null;
+    processedCount = 0;
+  }
+
+  await updateIndexMetricsAndStatus(
+    input.snapshotId,
+    processedCount,
+    checkpoint,
+    'building',
+  );
+
+  let afterItemId: string | null = checkpoint;
+
   for (;;) {
     const items = await readItemBatch(input.snapshotId, afterItemId);
     if (items.length === 0) {
@@ -841,13 +1002,28 @@ async function buildLocalCatalogSearchIndex(input: {
     }
     await writeIndexBatch(items, input.scopeKey);
     afterItemId = items[items.length - 1].itemId;
+    processedCount += items.length;
+
+    await updateIndexMetricsAndStatus(
+      input.snapshotId,
+      processedCount,
+      afterItemId,
+      'building',
+    );
+
     if (items.length < INDEX_BATCH_SIZE) {
       break;
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  indexedItems = await countSearchDocuments(input.snapshotId);
-  await updateIndexedMetrics(input.snapshotId, indexedItems);
+  await updateIndexMetricsAndStatus(
+    input.snapshotId,
+    totalItems,
+    afterItemId,
+    'ready',
+  );
 }
 
 export function ensureLocalCatalogSearchIndex(input: {
@@ -859,11 +1035,23 @@ export function ensureLocalCatalogSearchIndex(input: {
     return pending;
   }
 
-  const next = buildLocalCatalogSearchIndex(input).finally(() => {
-    if (pendingIndexes.get(input.snapshotId) === next) {
-      pendingIndexes.delete(input.snapshotId);
-    }
-  });
+  const next = buildLocalCatalogSearchIndex(input)
+    .catch(async (error: unknown) => {
+      console.error('[XANDEFLIX_SEARCH_INDEX_BUILD_ERROR]', error);
+      await updateIndexMetricsAndStatus(
+        input.snapshotId,
+        0,
+        null,
+        'failed',
+        error instanceof Error ? error.message : 'INDEX_FAILED',
+      ).catch(() => undefined);
+      throw error;
+    })
+    .finally(() => {
+      if (pendingIndexes.get(input.snapshotId) === next) {
+        pendingIndexes.delete(input.snapshotId);
+      }
+    });
   pendingIndexes.set(input.snapshotId, next);
   return next;
 }

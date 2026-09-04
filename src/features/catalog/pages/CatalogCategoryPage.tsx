@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { setFocus, useFocusable } from '@noriginmedia/norigin-spatial-navigation';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -48,6 +49,7 @@ import {
   loadLocalCatalogSeriesDetailReadModel,
   type SeriesDetailEpisode,
 } from '../../localCatalog/readModels/localCatalogSeriesDetailReadModel.service';
+import { resolveLocalCatalogBackListenerAuthority } from '../../localCatalog/lib/localCatalogSearchUiContract';
 import {
   getSeriesCollectionKey,
   normalizeSeriesCollectionTitle,
@@ -3920,34 +3922,44 @@ export function CatalogCategoryPage({
       goBackToHome();
     }
 
-    window.addEventListener('keydown', handleBackNavigation);
+    const backListenerAuthority = resolveLocalCatalogBackListenerAuthority(
+      Capacitor.isNativePlatform(),
+    );
+
+    if (backListenerAuthority.useWindowKeydown) {
+      window.addEventListener('keydown', handleBackNavigation);
+    }
 
     let isActive = true;
     let capacitorBackButtonListener: {
       remove: () => Promise<void>;
     } | null = null;
 
-    void CapacitorApp.addListener(
-      'backButton',
-      () => {
+    if (backListenerAuthority.useCapacitorBackButton) {
+      void CapacitorApp.addListener(
+        'backButton',
+        () => {
+          if (!isActive) {
+            return;
+          }
+
+          goBackToHome();
+        },
+      ).then((listener) => {
         if (!isActive) {
+          void listener.remove();
           return;
         }
 
-        goBackToHome();
-      },
-    ).then((listener) => {
-      if (!isActive) {
-        void listener.remove();
-        return;
-      }
-
-      capacitorBackButtonListener = listener;
-    });
+        capacitorBackButtonListener = listener;
+      });
+    }
 
     return () => {
       isActive = false;
-      window.removeEventListener('keydown', handleBackNavigation);
+      if (backListenerAuthority.useWindowKeydown) {
+        window.removeEventListener('keydown', handleBackNavigation);
+      }
 
       if (capacitorBackButtonListener) {
         void capacitorBackButtonListener.remove();

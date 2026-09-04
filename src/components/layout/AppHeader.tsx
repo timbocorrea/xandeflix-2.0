@@ -1,5 +1,7 @@
 import { Search, UserRound, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { spatialDebug } from '@/lib/spatial/spatialDebug';
+import { LOCAL_CATALOG_SEARCH_ROUTE } from '@/features/localCatalog/lib/localCatalogSearchUiContract';
 import { FocusableButton } from '../tv/FocusableButton';
 import { FocusableSection } from '../tv/FocusableSection';
 import { useDeviceType } from '../../hooks/useDeviceType';
@@ -21,7 +23,13 @@ export function AppHeader({
   navigation,
 }: AppHeaderProps) {
   const { isMobile, isTv } = useDeviceType();
+  const navigate = useNavigate();
   const shouldShowActions = !isMobile && !isTv;
+
+  const handleSearchNavigation = () => {
+    spatialDebug('header', 'Pesquisar');
+    navigate(LOCAL_CATALOG_SEARCH_ROUTE);
+  };
 
   if (!shouldShowActions) {
     return null;
@@ -38,9 +46,8 @@ export function AppHeader({
             focusKey={FOCUS_KEYS.HEADER_SEARCH_BUTTON}
             className="inline-flex rounded-full bg-xf-surface-soft p-3 text-white"
             aria-label="Pesquisar"
-            onEnterPress={() => {
-              spatialDebug('header', 'Pesquisar');
-            }}
+            onEnterPress={handleSearchNavigation}
+            onClick={handleSearchNavigation}
             onArrowPress={navigation?.onSearchArrowPress}
           >
             <Search size={22} />

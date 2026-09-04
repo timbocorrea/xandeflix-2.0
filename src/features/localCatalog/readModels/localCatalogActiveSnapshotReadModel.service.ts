@@ -51,14 +51,11 @@ async function readActiveSnapshot(
     transaction.objectStore(LOCAL_CATALOG_V3_STORES.scopes).get(scopeKey),
   )) as LocalCatalogScope | undefined;
 
-  if (
-    scope?.accessStatus !== 'active' ||
-    (!scope.activeSnapshotId && !scope.stagingSnapshotId)
-  ) {
+  if (scope?.accessStatus !== 'active' || !scope.activeSnapshotId) {
     return null;
   }
 
-  const snapshotId = scope.activeSnapshotId || scope.stagingSnapshotId;
+  const snapshotId = scope.activeSnapshotId;
   const snapshot = (await requestResult(
     transaction
       .objectStore(LOCAL_CATALOG_V3_STORES.snapshots)
@@ -68,9 +65,8 @@ async function readActiveSnapshot(
   if (
     !snapshot ||
     snapshot.scopeKey !== scopeKey ||
-    snapshot.status === 'failed' ||
-    snapshot.status === 'canceled' ||
-    snapshot.status === 'superseded'
+    snapshot.status !== 'ready' &&
+    snapshot.status !== 'active'
   ) {
     return null;
   }

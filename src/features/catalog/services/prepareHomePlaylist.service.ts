@@ -204,7 +204,10 @@ export async function prepareHomePlaylist({
         getReadableLocalCatalogActiveSnapshot
       )(preparedPlaylist.localCatalogScopeKey).catch(() => null);
       isCatalogUsable = Boolean(
-        activeSnapshot && (activeSnapshot.totalItems ?? 0) > 0,
+        activeSnapshot &&
+          (activeSnapshot.status === 'ready' ||
+            activeSnapshot.status === 'active') &&
+          (activeSnapshot.totalItems ?? 0) > 0,
       );
     } else {
       isCatalogUsable = true;

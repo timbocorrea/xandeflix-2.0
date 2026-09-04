@@ -1,8 +1,8 @@
 import {
   useEffect,
+  useCallback,
   useRef,
   useState,
-  type KeyboardEvent,
 } from 'react';
 import {
   setFocus,
@@ -29,13 +29,25 @@ import {
   type LocalCatalogSearchResultItem,
 } from '../readModels/localCatalogSearchReadModel.service';
 import {
+  buildLocalCatalogMovieDetailRoute,
   buildLocalCatalogSearchReturnTo,
   buildLocalCatalogSeriesDetailRoute,
   getLocalCatalogSearchResultFocusKey,
+  LOCAL_CATALOG_SEARCH_INDEX_RETRY_FOCUS_KEY,
   LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY,
-  resolveLocalCatalogSearchInputArrowTarget,
+  LOCAL_CATALOG_SEARCH_QUERY_RETRY_FOCUS_KEY,
+  createLocalCatalogSearchReturnCache,
+  isLocalCatalogSearchReturnCacheMatch,
+  replaceLocalCatalogSearchReturnCache,
+  resolveLocalCatalogSearchNativeInputLifecycle,
+  resolveLocalCatalogSearchViewState,
+  resolveLocalCatalogSearchInputArrowPress,
+  shouldInvalidateLocalCatalogSearchReturnCache,
+  type LocalCatalogSearchNativeInputLifecycleEvent,
+  type LocalCatalogSearchReturnCache,
 } from '../lib/localCatalogSearchUiContract';
-import { ensureLegacyLocalCatalogSearchIndex } from '../services/localCatalogSearchIndex.service';
+
+let localCatalogSearchReturnCache: LocalCatalogSearchReturnCache | null = null;
 
 function getKindLabel(item: LocalCatalogSearchResultItem) {
   const labels = {
@@ -68,38 +80,110 @@ export default function LocalCatalogSearchPage() {
   const { signOut } = useAuth();
   const { localCatalogScopeKey } = usePlaylistRuntime();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [query, setQuery] = useState(searchParams.get('q') ?? '');
-  const [page, setPage] = useState<LocalCatalogSearchPage>({
-    status: 'empty_query',
-    normalizedQuery: '',
-    items: [],
-    nextCursor: null,
+  const initialQuery = searchParams.get('q') ?? '';
+  const [query, setQuery] = useState(initialQuery);
+  const [page, setPage] = useState<LocalCatalogSearchPage>(() => {
+    if (
+      isLocalCatalogSearchReturnCacheMatch({
+        cache: localCatalogSearchReturnCache,
+        scopeKey: localCatalogScopeKey,
+        query: initialQuery,
+      })
+    ) {
+      return localCatalogSearchReturnCache!.page;
+    }
+
+    return {
+      status: 'empty_query',
+      normalizedQuery: '',
+      items: [],
+      nextCursor: null,
+    };
   });
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasLocalError, setHasLocalError] = useState(false);
   const [indexRefreshTick, setIndexRefreshTick] = useState(0);
   const requestIdRef = useRef(0);
-  const { ref: inputRef, focused: inputSpatiallyFocused } = useFocusable({
+  const inputElementRef = useRef<HTMLInputElement>(null);
+  const focusNativeInputExplicitly = useCallback(() => {
+    const lifecycle = resolveLocalCatalogSearchNativeInputLifecycle(
+      'explicit_enter',
+    );
+    if (lifecycle.shouldFocusNativeInput) {
+      inputElementRef.current?.focus();
+    }
+  }, []);
+  const blurNativeInputForLifecycle = useCallback(
+    (event: LocalCatalogSearchNativeInputLifecycleEvent) => {
+      const lifecycle = resolveLocalCatalogSearchNativeInputLifecycle(event);
+      if (lifecycle.shouldBlurNativeInput) {
+        inputElementRef.current?.blur();
+      }
+    },
+    [],
+  );
+  const {
+    ref: inputFocusRef,
+  } = useFocusable<object, HTMLInputElement>({
     focusKey: LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY,
+    onEnterPress: focusNativeInputExplicitly,
+    onArrowPress: (direction) => {
+      const viewState = resolveLocalCatalogSearchViewState({
+        query,
+        isSearching,
+        hasLocalError,
+        status: page.status,
+        itemCount: page.items.length,
+        indexingInBackground: page.indexingInBackground,
+      });
+      const resolution = resolveLocalCatalogSearchInputArrowPress(
+        direction,
+        page.items.length > 0,
+        {
+          showIndexRetry: viewState.showIndexFailed,
+          showQueryRetry: viewState.showError,
+        },
+      );
+
+      if (!resolution.handled || !resolution.target) {
+        return resolution.allowDefaultSpatialNavigation;
+      }
+
+      if (resolution.shouldBlurNativeInput) {
+        blurNativeInputForLifecycle('arrow_down_exit');
+      }
+      setFocus(resolution.target);
+      return resolution.allowDefaultSpatialNavigation;
+    },
   });
+  const setInputRef = useCallback(
+    (element: HTMLInputElement | null) => {
+      inputElementRef.current = element;
+      if (element) {
+        inputFocusRef.current = element;
+      }
+    },
+    [inputFocusRef],
+  );
 
   useEffect(() => {
     setFocus(LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY);
-    inputRef.current?.focus();
-  }, [inputRef]);
+    return () => blurNativeInputForLifecycle('unmount');
+  }, [blurNativeInputForLifecycle]);
 
   useEffect(() => {
-    if (inputSpatiallyFocused) {
-      inputRef.current?.focus();
+    if (
+      isLocalCatalogSearchReturnCacheMatch({
+        cache: localCatalogSearchReturnCache,
+        scopeKey: localCatalogScopeKey,
+        query,
+      })
+    ) {
+      setPage(localCatalogSearchReturnCache!.page);
+      setHasLocalError(false);
     }
-  }, [inputRef, inputSpatiallyFocused]);
-
-  useEffect(() => {
-    if (localCatalogScopeKey) {
-      void ensureLegacyLocalCatalogSearchIndex(localCatalogScopeKey);
-    }
-  }, [localCatalogScopeKey]);
+  }, [localCatalogScopeKey, query]);
 
   useEffect(() => {
     const nextParams = new URLSearchParams(searchParams);
@@ -145,6 +229,7 @@ export default function LocalCatalogSearchPage() {
           nextCursor: null,
         });
         setIsSearching(false);
+        setHasLocalError(false);
       }, 0);
       return () => window.clearTimeout(timeoutId);
     }
@@ -152,18 +237,67 @@ export default function LocalCatalogSearchPage() {
     const timeoutId = window.setTimeout(() => {
       setIsSearching(true);
       setHasLocalError(false);
+      const hasMatchingReturnCache = isLocalCatalogSearchReturnCacheMatch({
+        cache: localCatalogSearchReturnCache,
+        scopeKey: localCatalogScopeKey,
+        query: trimmedQuery,
+      });
+      if (hasMatchingReturnCache) {
+        setPage(localCatalogSearchReturnCache!.page);
+      } else {
+        setPage((current) => ({
+          ...current,
+          normalizedQuery: trimmedQuery,
+          items: [],
+          nextCursor: null,
+        }));
+      }
       void searchLocalCatalog({
         scopeKey: localCatalogScopeKey,
         query: trimmedQuery,
       })
         .then((result) => {
           if (requestIdRef.current === requestId) {
+            const nextCache = createLocalCatalogSearchReturnCache({
+              scopeKey: localCatalogScopeKey,
+              query: trimmedQuery,
+              page: result,
+            });
+            localCatalogSearchReturnCache = replaceLocalCatalogSearchReturnCache(
+              localCatalogSearchReturnCache,
+              nextCache ??
+                (isLocalCatalogSearchReturnCacheMatch({
+                  cache: localCatalogSearchReturnCache,
+                  scopeKey: localCatalogScopeKey,
+                  query: trimmedQuery,
+                })
+                  ? null
+                  : localCatalogSearchReturnCache),
+            );
             setPage(result);
           }
         })
         .catch(() => {
           if (requestIdRef.current === requestId) {
             setHasLocalError(true);
+            if (
+              shouldInvalidateLocalCatalogSearchReturnCache({
+                cache: localCatalogSearchReturnCache,
+                scopeKey: localCatalogScopeKey,
+                query: trimmedQuery,
+                hasError: true,
+              })
+            ) {
+              localCatalogSearchReturnCache = replaceLocalCatalogSearchReturnCache(
+                localCatalogSearchReturnCache,
+                null,
+              );
+            }
+            setPage((current) => ({
+              ...current,
+              items: [],
+              nextCursor: null,
+            }));
           }
         })
         .finally(() => {
@@ -197,15 +331,14 @@ export default function LocalCatalogSearchPage() {
   ]);
 
   function openResult(item: LocalCatalogSearchResultItem) {
+    blurNativeInputForLifecycle('open_result');
     const returnTo = buildLocalCatalogSearchReturnTo(
       location.pathname,
       location.search,
     );
 
     if (item.contentKind === 'movie') {
-      const params = new URLSearchParams({ title: item.title });
-      if (item.groupTitle) params.set('groupTitle', item.groupTitle);
-      navigate(`/category/movie-detail?${params.toString()}`, {
+      navigate(buildLocalCatalogMovieDetailRoute(item), {
         state: {
           fromMoviesCategory: true,
           returnTo,
@@ -277,6 +410,19 @@ export default function LocalCatalogSearchPage() {
         ...nextPage,
         items: [...current.items, ...nextPage.items],
       }));
+      const combinedPage = {
+        ...nextPage,
+        items: [...page.items, ...nextPage.items],
+      };
+      const nextCache = createLocalCatalogSearchReturnCache({
+        scopeKey: localCatalogScopeKey,
+        query,
+        page: combinedPage,
+      });
+      localCatalogSearchReturnCache = replaceLocalCatalogSearchReturnCache(
+        localCatalogSearchReturnCache,
+        nextCache,
+      );
     } catch {
       setHasLocalError(true);
     } finally {
@@ -284,22 +430,24 @@ export default function LocalCatalogSearchPage() {
     }
   }
 
-  function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    const target = resolveLocalCatalogSearchInputArrowTarget(
-      event.key,
-      page.items.length > 0,
-    );
-    if (target) {
-      event.preventDefault();
-      setFocus(target);
-    }
+  function retryCurrentQuery() {
+    setHasLocalError(false);
+    setPage((current) => ({
+      ...current,
+      items: [],
+      nextCursor: null,
+    }));
+    setIndexRefreshTick((current) => current + 1);
   }
 
-  const showNoResults =
-    !isSearching &&
-    !hasLocalError &&
-    page.status === 'ready' &&
-    page.items.length === 0;
+  const viewState = resolveLocalCatalogSearchViewState({
+    query,
+    isSearching,
+    hasLocalError,
+    status: page.status,
+    itemCount: page.items.length,
+    indexingInBackground: page.indexingInBackground,
+  });
 
   return (
     <AppShell
@@ -327,7 +475,7 @@ export default function LocalCatalogSearchPage() {
             size={22}
           />
           <input
-            ref={inputRef}
+            ref={setInputRef}
             data-nav-id={LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY}
             type="search"
             inputMode="search"
@@ -338,7 +486,6 @@ export default function LocalCatalogSearchPage() {
             aria-label="Buscar no catálogo local"
             placeholder="Digite para buscar"
             onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={handleInputKeyDown}
             className="h-14 w-full rounded-2xl border border-white/15 bg-zinc-950 pl-12 pr-4 text-base font-semibold text-white outline-none transition focus:border-xf-red focus:ring-2 focus:ring-xf-red/40 md:h-16 md:text-lg"
           />
         </div>
@@ -350,12 +497,11 @@ export default function LocalCatalogSearchPage() {
             </p>
           ) : null}
 
-          {isSearching ? (
+          {viewState.showSearching ? (
             <p className="text-sm font-semibold text-xf-muted">Buscando…</p>
           ) : null}
 
-          {(page.status === 'indexing' || page.indexingInBackground) &&
-          query.trim() ? (
+          {viewState.showIndexing ? (
             <p className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-6 text-sky-100">
               Preparando a busca local…
               {typeof page.indexedItems === 'number' &&
@@ -365,19 +511,19 @@ export default function LocalCatalogSearchPage() {
             </p>
           ) : null}
 
-          {page.status === 'index_failed' && query.trim() ? (
+          {viewState.showIndexFailed ? (
             <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-6 text-amber-100">
               <p>A preparação da busca local foi interrompida.</p>
               <FocusableButton
-                focusKey="local-catalog-search-retry-index"
-                onClick={() => {
-                  if (!localCatalogScopeKey) return;
-                  void ensureLegacyLocalCatalogSearchIndex(
-                    localCatalogScopeKey,
-                    { retryFailed: true },
-                  ).then(() => {
-                    setIndexRefreshTick((current) => current + 1);
-                  });
+                focusKey={LOCAL_CATALOG_SEARCH_INDEX_RETRY_FOCUS_KEY}
+                onClick={retryCurrentQuery}
+                onEnterPress={retryCurrentQuery}
+                onArrowPress={(direction) => {
+                  if (direction === 'up') {
+                    setFocus(LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY);
+                    return false;
+                  }
+                  return true;
                 }}
                 className="mt-4 rounded-xl bg-white px-4 py-2 font-black text-black"
               >
@@ -386,25 +532,40 @@ export default function LocalCatalogSearchPage() {
             </div>
           ) : null}
 
-          {page.status === 'unavailable' && query.trim() ? (
+          {viewState.showUnavailable ? (
             <p className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-6 text-amber-100">
               O catálogo local ainda não está disponível para esta fonte.
             </p>
           ) : null}
 
-          {showNoResults ? (
+          {viewState.showNoResults ? (
             <p className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-xf-muted">
               Nenhum resultado encontrado.
             </p>
           ) : null}
 
-          {hasLocalError ? (
-            <p className="rounded-2xl border border-red-400/20 bg-red-400/10 p-6 text-red-100">
-              Não foi possível consultar o catálogo local agora. Tente novamente.
-            </p>
+          {viewState.showError ? (
+            <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-6 text-red-100">
+              <p>Não foi possível consultar o catálogo local agora.</p>
+              <FocusableButton
+                focusKey={LOCAL_CATALOG_SEARCH_QUERY_RETRY_FOCUS_KEY}
+                onClick={retryCurrentQuery}
+                onEnterPress={retryCurrentQuery}
+                onArrowPress={(direction) => {
+                  if (direction === 'up') {
+                    setFocus(LOCAL_CATALOG_SEARCH_INPUT_FOCUS_KEY);
+                    return false;
+                  }
+                  return true;
+                }}
+                className="mt-4 rounded-xl bg-white px-4 py-2 font-black text-black"
+              >
+                Tentar novamente
+              </FocusableButton>
+            </div>
           ) : null}
 
-          {page.items.length > 0 ? (
+          {viewState.showResults ? (
             <FocusableSection
               focusKey="local-catalog-search-results"
               className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
